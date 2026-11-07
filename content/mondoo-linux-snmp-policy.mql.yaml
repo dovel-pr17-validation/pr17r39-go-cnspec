@@ -1,0 +1,334 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+policies:
+  - uid: linux-snmp-policy
+    name: Linux Server SNMP Policy
+    version: 1.2.0
+    license: BUSL-1.1
+    tags:
+      mondoo.com/category: best-practices
+      mondoo.com/platform: linux
+      mondoo.com/icon: linux
+    require:
+      - provider: os
+    authors:
+      - name: Mondoo, Inc.
+        email: hello@mondoo.com
+    summary: Secure Linux SNMP community strings and access controls
+    docs:
+      desc: |
+        The Mondoo Linux Server SNMP Policy identifies insecure SNMP configurations on Linux hosts that could expose system information and enable unauthorized network management access. This policy helps organizations detect and remediate SNMP weaknesses before attackers can exploit them to gather reconnaissance, modify configurations, or pivot through network infrastructure.
+
+        This policy provides security checks across key SNMP configuration areas:
+
+        - Authentication requirements and SNMPv3 enforcement
+        - Community string strength and exposure
+        - Access control and source restrictions
+        - File permissions on SNMP credential and configuration files
+
+        Learn more about scanning Linux in the [cnspec Linux documentation](https://mondoo.com/docs/cnspec/os/linux).
+
+        Have suggestions for new checks in this policy? Visit our [cnspec repository](https://github.com/mondoohq/cnspec).
+    groups:
+      - title: SNMP Server Configuration
+        filters: |
+          asset.family.contains("linux") &&
+          packages.contains(name == /^snmpd$|^net-snmp$/)
+        checks:
+          - uid: linux-snmp-v3-user-file-protected
+          - uid: linux-snmp-contains-no-read-write-community-strings
+          - uid: linux-snmp-no-unauthenticated-access
+queries:
+  - uid: linux-snmp-v3-user-file-protected
+    title: Ensure the file containing SNMP user hashes is secured
+    impact: 70
+    mql: |
+      file("/var/lib/snmp/snmpd.conf") {
+        user.name == 'Debian-snmp'
+        group.name == 'Debian-snmp'
+        permissions.atMost(0600)
+      }
+    docs:
+      desc: |
+        This check verifies that the file holding SNMPv3 user credentials is readable only by the account the SNMP daemon runs as.
+
+        When SNMPv3 users are created, net-snmp derives localized keys from their authentication and privacy passphrases and writes them into its persistent data file. On Debian-based distributions that file is `/var/lib/snmp/snmpd.conf`, owned by the `Debian-snmp` user and group. The check requires that ownership and no group or other access at all, which is mode `600`. Red Hat-family and SUSE systems run net-snmp under a different account and keep the same data elsewhere, so the equivalent file there needs the same treatment.
+
+        **Why this matters**
+
+        The values in that file are not passwords, but they are password-equivalent. SNMPv3 authenticates each request with a keyed hash computed from the localized key, so anyone holding the key can produce valid requests as that user without ever learning the passphrase. Reading the file is the whole attack; there is no further step.
+
+        What that buys depends on the user's view, and on a monitoring account it is usually the entire device tree: interface names and addresses, the process and software inventory, routing and ARP tables, and on network equipment often the running configuration. That is a complete map of the host handed to any local account, and the same credential frequently works on every device the monitoring system polls, because the SNMPv3 user is provisioned identically across the fleet.
+
+        The passphrases themselves are also exposed to offline work, because the localization is a hash construction and net-snmp still permits MD5 as the authentication algorithm. A guessable passphrase falls to a wordlist run off the machine at whatever rate the attacker's hardware allows, with nothing on the host recording so much as one failed attempt.
+
+        Set the ownership and mode, prefer SHA over MD5 for new users, and rotate any SNMPv3 credential that was exposed, because permissions correct the future and do not recall a key that has already been read.
+      audit: |
+        Run this command to inspect the ownership and permissions of the SNMP user file:
+
+        ```bash
+        stat -c '%U %G %A' /var/lib/snmp/snmpd.conf
+        ```
+
+        A passing result shows the file owned by `Debian-snmp:Debian-snmp` with no group or other access. A failing result shows different ownership or any group or other access.
+      remediation:
+        - id: cli
+          desc: |
+            **Using CLI**
+
+            The file `/var/lib/snmp/snmpd.conf` stores SNMPv3 user password hashes. Restricting it to the SNMP daemon account denies unprivileged users the material needed to extract and crack those hashes offline.
+
+            On Debian-based distributions the file is owned by the `Debian-snmp` user and group and lives at `/var/lib/snmp/snmpd.conf`. Run these commands to set proper permissions so the file is readable only by the owner (no group or other access):
+
+            ```bash
+            chown Debian-snmp:Debian-snmp /var/lib/snmp/snmpd.conf
+            chmod 600 /var/lib/snmp/snmpd.conf
+            ```
+
+            The `Debian-snmp` owner and the `/var/lib/snmp/snmpd.conf` path are specific to Debian-based distributions. On RHEL-family and SUSE distributions the net-snmp daemon runs as a different user and group, and it stores its persistent SNMPv3 data in a different location. On those systems, substitute the net-snmp service account for the owner and group, and point the commands at the path your distribution uses for net-snmp persistent data.
+        - id: bash
+          desc: |
+            **Using a Bash Script**
+
+            This file stores SNMPv3 user password hashes, so locking it down to the SNMP daemon account prevents unprivileged users from reading and cracking those hashes offline. To set the proper permissions on your `/var/lib/snmp/snmpd.conf` file, you can use this bash script:
+
+            ```bash
+            #!/bin/bash
+            set -e
+
+            echo "Setting permissions on /var/lib/snmp/snmpd.conf"
+            chown Debian-snmp:Debian-snmp /var/lib/snmp/snmpd.conf
+            chmod 600 /var/lib/snmp/snmpd.conf
+            ```
+
+            The `Debian-snmp` owner and the `/var/lib/snmp/snmpd.conf` path are specific to Debian-based distributions. On RHEL-family and SUSE distributions, the net-snmp daemon runs as a different user and group and stores its persistent SNMPv3 data in a different location, so adjust the owner, group, and path in the script to match your distribution.
+        - id: ansible
+          desc: |
+            **Using Ansible**
+
+            Because `/var/lib/snmp/snmpd.conf` holds SNMPv3 password hashes, restricting it to the SNMP daemon account keeps unprivileged users from extracting and cracking those hashes offline. To set the proper permissions on `/var/lib/snmp/snmpd.conf` use the following Ansible playbook:
+
+            ```yaml
+            ---
+            - name: Ensure SNMP user file is secured
+              hosts: all
+              become: true
+
+              tasks:
+                - name: Ensure /var/lib/snmp/snmpd.conf has correct permissions
+                  ansible.builtin.file:
+                    path: /var/lib/snmp/snmpd.conf
+                    owner: Debian-snmp
+                    group: Debian-snmp
+                    mode: '0600'
+            ```
+
+            The `Debian-snmp` owner and the `/var/lib/snmp/snmpd.conf` path are specific to Debian-based distributions. On RHEL-family and SUSE distributions, the net-snmp daemon runs as a different user and group and stores its persistent SNMPv3 data in a different location, so set the `owner`, `group`, and `path` values to match your distribution.
+  - uid: linux-snmp-contains-no-read-write-community-strings
+    title: Ensure SNMP config does not contain read-write community strings
+    impact: 100
+    mql: |
+      snmpd.config.rwCommunities.length == 0
+    docs:
+      desc: |
+        This check verifies that the SNMP daemon defines no read-write community strings.
+
+        A community string is the entire authentication mechanism in SNMPv1 and SNMPv2c: a shared word carried in cleartext in every request. The `rwcommunity` and `rwcommunity6` directives grant write access to whoever presents the right word. The check requires that neither appears in `/etc/snmp/snmpd.conf` or in any file under `/etc/snmp/snmpd.conf.d`.
+
+        **Why this matters**
+
+        Write access over SNMP is not a monitoring feature, it is remote administration with no user, no session, and no meaningful credential. The string travels unencrypted in every request, so anyone able to observe traffic on a path the monitoring system uses reads it straight off the wire. Guessing works about as well, because the defaults are famous and the strings that replace them are usually one word derived from the organization's name.
+
+        With the string in hand, an attacker writes to the MIB. On a server, net-snmp's extend and exec facilities turn a settable object into command execution as the account the daemon runs as, which is often root. On network equipment the same access changes interface state, rewrites routing, and on many platforms triggers a configuration upload or download over TFTP, which both exfiltrates the running configuration and installs a replacement for it.
+
+        None of this requires an exploit or leaves an authentication failure anywhere, because from the daemon's point of view every one of those requests arrived with the correct credential.
+
+        Where a monitoring system genuinely needs read access, use `rocommunity` scoped to the source network it polls from. Where write access is genuinely required, move to SNMPv3 with an authenticated user, which is the model a companion check in this policy also assumes.
+      audit: |
+        Run this command to search for read-write community string directives:
+
+        ```bash
+        grep -riE '^\s*(rwcommunity|rwcommunity6)\s' /etc/snmp/snmpd.conf /etc/snmp/snmpd.conf.d/ 2>/dev/null
+        ```
+
+        A passing result returns no output. A failing result lists one or more `rwcommunity` or `rwcommunity6` directives.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Remove the `rwcommunity` and `rwcommunity6` directives from your SNMP configuration files. Directive keywords are case-insensitive, so the sed `I` flag is used to match any capitalization:
+
+            ```bash
+            sed -i '/^[[:space:]]*\(rwcommunity\|rwcommunity6\)[[:space:]]/Id' /etc/snmp/snmpd.conf
+            if [ -d /etc/snmp/snmpd.conf.d ]; then
+              find /etc/snmp/snmpd.conf.d -type f -exec sed -i '/^[[:space:]]*\(rwcommunity\|rwcommunity6\)[[:space:]]/Id' {} +
+            fi
+            systemctl restart snmpd
+            ```
+
+            If management systems still need SNMP read access, replace the removed directives with `rocommunity` entries restricted to a source network, or migrate to authenticated SNMPv3 users.
+        - id: bash
+          desc: |
+            **Using a Bash Script**
+
+            To remove read-write community strings from your SNMP configuration, you can use this bash script:
+
+            ```bash
+            #!/bin/bash
+            set -euo pipefail
+
+            remove_rw='/^[[:space:]]*\(rwcommunity\|rwcommunity6\)[[:space:]]/Id'
+
+            echo "Removing read-write community strings from snmpd configuration"
+            sed -i "$remove_rw" /etc/snmp/snmpd.conf
+
+            if [ -d /etc/snmp/snmpd.conf.d ]; then
+              find /etc/snmp/snmpd.conf.d -type f -exec sed -i "$remove_rw" {} +
+            fi
+
+            systemctl restart snmpd
+            ```
+        - id: ansible
+          desc: |
+            **Using Ansible**
+
+            Remove read-write community strings from SNMP configuration files using the following Ansible playbook:
+
+            ```yaml
+            ---
+            - name: Remove SNMP read-write community strings
+              hosts: all
+              become: true
+
+              tasks:
+                - name: Remove rwcommunity lines from /etc/snmp/snmpd.conf
+                  ansible.builtin.lineinfile:
+                    path: /etc/snmp/snmpd.conf
+                    regexp: '(?i)^\s*(rwcommunity|rwcommunity6)\s'
+                    state: absent
+                  notify: Restart snmpd
+
+                - name: Find files in /etc/snmp/snmpd.conf.d
+                  ansible.builtin.find:
+                    paths: /etc/snmp/snmpd.conf.d
+                    file_type: file
+                  register: snmp_conf_files
+
+                - name: Remove rwcommunity lines from snmpd.conf.d files
+                  ansible.builtin.lineinfile:
+                    path: "{{ item.path }}"
+                    regexp: '(?i)^\s*(rwcommunity|rwcommunity6)\s'
+                    state: absent
+                  loop: "{{ snmp_conf_files.files }}"
+                  notify: Restart snmpd
+
+              handlers:
+                - name: Restart snmpd
+                  ansible.builtin.service:
+                    name: snmpd
+                    state: restarted
+            ```
+  - uid: linux-snmp-no-unauthenticated-access
+    title: Ensure no unauthenticated SNMP write access is configured
+    impact: 100
+    mql: |-
+      snmpd.config.users.none(access == "rw" && securityLevel == "noauth")
+    docs:
+      desc: |
+        This check verifies that no SNMPv3 user is granted write access without having to authenticate.
+
+        An `rwuser` line, or an `authuser` line whose access types include `write`, names a user and the security level required of its requests. Given `rwuser ... noauth`, or its longer spelling `noauthnopriv`, the daemon accepts write requests carrying that user name with no keyed hash to verify and no encryption, which reproduces the weakness of a community string while wearing the version of the protocol that was meant to fix it. The check requires that no directive granting write access in `/etc/snmp/snmpd.conf`, under `/etc/snmp/snmpd.conf.d`, or in a file either one includes specifies that level. A directive that omits the level requires `auth`, and lines the daemon rejects grant no access, so neither fails the check.
+
+        **Why this matters**
+
+        The security level, not the protocol version, is what does the work in SNMPv3. A configuration that reads as modern and a configuration that hands the host to the network can differ by one word at the end of a line, and the difference is invisible to any inventory recording only which protocol version is in use.
+
+        At `noauth` the user name is the only thing required, and a user name is not a secret. It appears in the monitoring system's configuration, in documentation, in change tickets, and in the headers of ordinary polling traffic on the wire. Anyone who can reach the SNMP port then writes to the MIB as that user, which on a net-snmp host with extend or exec objects defined is command execution as the daemon's account, and on network equipment is a configuration change or a configuration upload to a server the attacker chose.
+
+        These lines are usually left over from bringing the daemon up. Authentication was turned off to get polling working, the passphrase step was deferred, and the line stayed.
+
+        Recreate the user with an authentication passphrase and require `authPriv`, which authenticates and encrypts, or `authNoPriv` where the payload genuinely needs no confidentiality. Note that raising the level on a user created without a passphrase removes that user's access until the credential exists, so create it first.
+      audit: |
+        Run this command to search for unauthenticated SNMP write directives:
+
+        ```bash
+        grep -riE '^\s*(rwuser|authuser\s+\S*write\S*)\s+(-s\s+\S+\s+)?\S+\s+noauth(nopriv)?' /etc/snmp/snmpd.conf /etc/snmp/snmpd.conf.d/ 2>/dev/null
+        ```
+
+        A passing result returns no output. A failing result lists one or more `rwuser` or write-granting `authuser` directives that specify the `noauth` security level. The command does not follow `includeFile` or `includeDir` directives, so search any file they name as well.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Remove or reconfigure any `rwuser` directives, and any `authuser` directives granting `write`, that specify the `noauth` or `noauthnopriv` security level in `/etc/snmp/snmpd.conf` or files in `/etc/snmp/snmpd.conf.d/`. Either delete these lines or change them to use the `auth` or `priv` security levels, which require authentication. Before switching a user to `auth` or `priv`, make sure the SNMPv3 user was created with an authentication passphrase and, for `priv`, a privacy passphrase. Otherwise that user loses SNMP access.
+
+            ```bash
+            sed -i '/^[[:space:]]*\(rwuser\|authuser[[:space:]]\+[^[:space:]]*write[^[:space:]]*\)[[:space:]]\+\(-s[[:space:]]\+[^[:space:]]\+[[:space:]]\+\)\?[^[:space:]]\+[[:space:]]\+noauth\(nopriv\)\?\([[:space:]]\|$\)/Id' /etc/snmp/snmpd.conf
+            if [ -d /etc/snmp/snmpd.conf.d ]; then
+              find /etc/snmp/snmpd.conf.d -type f -exec sed -i '/^[[:space:]]*\(rwuser\|authuser[[:space:]]\+[^[:space:]]*write[^[:space:]]*\)[[:space:]]\+\(-s[[:space:]]\+[^[:space:]]\+[[:space:]]\+\)\?[^[:space:]]\+[[:space:]]\+noauth\(nopriv\)\?\([[:space:]]\|$\)/Id' {} +
+            fi
+            systemctl restart snmpd
+            ```
+        - id: bash
+          desc: |
+            **Using a Bash Script**
+
+            To remove unauthenticated SNMP write access, you can use this bash script:
+
+            ```bash
+            #!/bin/bash
+            set -euo pipefail
+
+            remove_noauth='/^[[:space:]]*\(rwuser\|authuser[[:space:]]\+[^[:space:]]*write[^[:space:]]*\)[[:space:]]\+\(-s[[:space:]]\+[^[:space:]]\+[[:space:]]\+\)\?[^[:space:]]\+[[:space:]]\+noauth\(nopriv\)\?\([[:space:]]\|$\)/Id'
+
+            echo "Removing unauthenticated rwuser and authuser write directives from snmpd configuration"
+            sed -i "$remove_noauth" /etc/snmp/snmpd.conf
+
+            if [ -d /etc/snmp/snmpd.conf.d ]; then
+              find /etc/snmp/snmpd.conf.d -type f -exec sed -i "$remove_noauth" {} +
+            fi
+
+            systemctl restart snmpd
+            ```
+        - id: ansible
+          desc: |
+            **Using Ansible**
+
+            Remove unauthenticated SNMP access using the following Ansible playbook:
+
+            ```yaml
+            ---
+            - name: Remove unauthenticated SNMP access
+              hosts: all
+              become: true
+
+              tasks:
+                - name: Remove noauth write user lines from /etc/snmp/snmpd.conf
+                  ansible.builtin.lineinfile:
+                    path: /etc/snmp/snmpd.conf
+                    regexp: '(?i)^\s*(rwuser|authuser\s+\S*write\S*)\s+(-s\s+\S+\s+)?\S+\s+noauth(nopriv)?(\s|$)'
+                    state: absent
+                  notify: Restart snmpd
+
+                - name: Find files in /etc/snmp/snmpd.conf.d
+                  ansible.builtin.find:
+                    paths: /etc/snmp/snmpd.conf.d
+                    file_type: file
+                  register: snmp_conf_files
+
+                - name: Remove noauth write user lines from snmpd.conf.d files
+                  ansible.builtin.lineinfile:
+                    path: "{{ item.path }}"
+                    regexp: '(?i)^\s*(rwuser|authuser\s+\S*write\S*)\s+(-s\s+\S+\s+)?\S+\s+noauth(nopriv)?(\s|$)'
+                    state: absent
+                  loop: "{{ snmp_conf_files.files }}"
+                  notify: Restart snmpd
+
+              handlers:
+                - name: Restart snmpd
+                  ansible.builtin.service:
+                    name: snmpd
+                    state: restarted
+            ```

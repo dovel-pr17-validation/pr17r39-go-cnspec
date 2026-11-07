@@ -1,0 +1,566 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+
+packs:
+  - uid: mondoo-asset-inventory-azure
+    name: Azure Asset Inventory Pack
+    version: 1.2.0
+    license: BUSL-1.1
+    require:
+      - provider: azure
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    tags:
+      mondoo.com/platform: azure,cloud
+      mondoo.com/category: best-practices
+      mondoo.com/icon: azure
+    summary: Inventory Azure subscriptions, VMs, and resources
+    docs:
+      desc: |
+        Inventories an Azure subscription: IAM role definitions, activity and diagnostic logs, Microsoft Defender for Cloud settings, storage accounts, SQL/PostgreSQL/MySQL servers, key vaults, network resources, virtual machines, disks, web apps, and Cosmos DB accounts.
+
+        Enable this query pack in [Mondoo Platform](https://mondoo.com/platform) to automatically inventory your Azure subscriptions, or scan a subscription manually with cnspec:
+
+        ```bash
+        cnspec scan azure -f mondoo-azure-inventory.mql.yaml
+        ```
+    groups:
+      - uid: mondoo-asset-inventory-azure-subscription-group
+        title: Azure Subscription
+        filters: asset.runtime == "azure"
+        queries:
+          - uid: mondoo-asset-inventory-azure-roleDefinitions
+          - uid: mondoo-asset-inventory-azure-activitylogs
+          - uid: mondoo-asset-inventory-azure-diagnosticSettings
+          - uid: mondoo-asset-inventory-azure-applicationInsight
+          - uid: mondoo-asset-inventory-azure-resourcegroups
+          - uid: mondoo-asset-inventory-azure-resources
+      - uid: mondoo-asset-inventory-azure-defender-group
+        title: Microsoft Defender for Cloud
+        filters: asset.runtime == "azure"
+        queries:
+          - uid: mondoo-asset-inventory-azure-cloudDefender
+      - uid: mondoo-asset-inventory-azure-storage-group
+        title: Azure Storage
+        filters: asset.runtime == "azure"
+        queries:
+          - uid: mondoo-asset-inventory-azure-storageAccounts
+          - uid: mondoo-asset-inventory-azure-storageAccounts-containers
+          - uid: mondoo-asset-inventory-azure-storageAccounts-blobs
+          - uid: mondoo-asset-inventory-azure-storageAccounts-tables
+      - uid: mondoo-asset-inventory-azure-sql-group
+        title: Azure SQL
+        filters: asset.runtime == "azure"
+        queries:
+          - uid: mondoo-asset-inventory-azure-sqlServers
+          - uid: mondoo-asset-inventory-azure-sqlServers-firewallrules
+          - uid: mondoo-asset-inventory-azure-sqlServers-databases
+          - uid: mondoo-asset-inventory-azure-postgresql
+          - uid: mondoo-asset-inventory-azure-postgresql-firewallrules
+          - uid: mondoo-asset-inventory-azure-mysql
+          - uid: mondoo-asset-inventory-azure-mysql-firewallrules
+      - uid: mondoo-asset-inventory-azure-keyvault-group
+        title: Azure Key Vault
+        filters: asset.runtime == "azure"
+        queries:
+          - uid: mondoo-asset-inventory-azure-keyVaults
+          - uid: mondoo-asset-inventory-azure-keyVaults-keys
+          - uid: mondoo-asset-inventory-azure-keyVaults-secrets
+          - uid: mondoo-asset-inventory-azure-keyVaults-certificates
+      - uid: mondoo-asset-inventory-azure-network-group
+        title: Azure Network
+        filters: asset.runtime == "azure"
+        queries:
+          - uid: mondoo-asset-inventory-azure-networkSecurityGroups
+          - uid: mondoo-asset-inventory-azure-publicip
+          - uid: mondoo-asset-inventory-azure-networkWatcher
+          - uid: mondoo-asset-inventory-azure-bastionHosts
+          - uid: mondoo-asset-inventory-azure-network-interfaces
+      - uid: mondoo-asset-inventory-azure-compute-group
+        title: Azure Compute
+        filters: asset.runtime == "azure"
+        queries:
+          - uid: mondoo-asset-inventory-azure-virtualmachines
+          - uid: mondoo-asset-inventory-azure-virtualmachines-managedDisk
+          - uid: mondoo-asset-inventory-azure-compute-disks
+      - uid: mondoo-asset-inventory-azure-appservice-group
+        title: App Service
+        filters: asset.runtime == "azure"
+        queries:
+          - uid: mondoo-asset-inventory-azure-webapp
+      - uid: mondoo-asset-inventory-azure-cosmosdb-group
+        title: Azure Cosmos DB
+        filters: asset.runtime == "azure"
+        queries:
+          - uid: mondoo-asset-inventory-azure-cosmosDb
+queries:
+  - uid: mondoo-asset-inventory-azure-roleDefinitions
+    title: Azure role definitions
+    filters: asset.platform == "azure"
+    docs:
+      desc: IAM role definitions available in the subscription.
+    mql: azure.subscription.iam.roles
+
+  - uid: mondoo-asset-inventory-azure-cloudDefender
+    title: Microsoft Defender for Cloud configuration
+    filters: asset.platform == "azure"
+    docs:
+      desc: Defender for Cloud coverage and security contacts.
+    mql: azure.subscription.cloudDefender { forServers forContainers securityContacts { name notificationSources }  }
+
+  - uid: mondoo-asset-inventory-azure-storageAccounts
+    title: Azure Storage accounts
+    docs:
+      desc: |
+        Lists the storage accounts in the subscription.
+    variants:
+      - uid: mondoo-asset-inventory-azure-storageAccounts-single
+      - uid: mondoo-asset-inventory-azure-storageAccounts-api
+  - uid: mondoo-asset-inventory-azure-storageAccounts-single
+    docs:
+      desc: A single storage account asset.
+    filters: asset.platform == "azure-storage-account"
+    mql: azure.subscription.storage.account
+  - uid: mondoo-asset-inventory-azure-storageAccounts-api
+    docs:
+      desc: Every storage account in the subscription.
+    filters: asset.platform == "azure"
+    mql: azure.subscription.storage.accounts
+
+  - uid: mondoo-asset-inventory-azure-storageAccounts-containers
+    title: Azure Storage account containers
+    docs:
+      desc: |
+        Lists the blob containers within each storage account.
+    variants:
+      - uid: mondoo-asset-inventory-azure-storageAccounts-containers-single
+      - uid: mondoo-asset-inventory-azure-storageAccounts-containers-api
+  - uid: mondoo-asset-inventory-azure-storageAccounts-containers-api
+    docs:
+      desc: Blob containers in every storage account.
+    filters: asset.platform == "azure"
+    mql: azure.subscription.storage.accounts { containers }
+  - uid: mondoo-asset-inventory-azure-storageAccounts-containers-single
+    docs:
+      desc: Blob containers in a single storage account.
+    filters: asset.platform == "azure-storage-account" && azure.subscription.storage.account.containers != empty
+    mql: azure.subscription.storage.account.containers
+
+  - uid: mondoo-asset-inventory-azure-storageAccounts-blobs
+    title: Azure storage accounts blobs
+    docs:
+      desc: Blob service properties on each storage account.
+    variants:
+      - uid: mondoo-asset-inventory-azure-storageAccounts-blobs-single
+      - uid: mondoo-asset-inventory-azure-storageAccounts-blobs-api
+  - uid: mondoo-asset-inventory-azure-storageAccounts-blobs-api
+    docs:
+      desc: Blob service properties for every storage account.
+    filters: asset.platform == "azure"
+    mql: azure.subscription.storage.accounts { blobProperties }
+  - uid: mondoo-asset-inventory-azure-storageAccounts-blobs-single
+    docs:
+      desc: Blob service properties for one storage account.
+    filters: asset.platform == "azure-storage-account"
+    mql: azure.subscription.storage.account.blobProperties
+
+  - uid: mondoo-asset-inventory-azure-storageAccounts-tables
+    title: Azure Storage accounts tables
+    docs:
+      desc: Table service properties on each storage account.
+    variants:
+      - uid: mondoo-asset-inventory-azure-storageAccounts-tables-single
+      - uid: mondoo-asset-inventory-azure-storageAccounts-tables-api
+  - uid: mondoo-asset-inventory-azure-storageAccounts-tables-api
+    docs:
+      desc: Table service properties for every storage account.
+    filters: asset.platform == "azure"
+    mql: azure.subscription.storage.accounts { tableProperties }
+  - uid: mondoo-asset-inventory-azure-storageAccounts-tables-single
+    docs:
+      desc: Table service properties for one storage account.
+    filters: asset.platform == "azure-storage-account"
+    mql: azure.subscription.storage.account.tableProperties
+
+  - uid: mondoo-asset-inventory-azure-sqlServers
+    title: Azure SQL Database servers
+    docs:
+      desc: |
+        Lists the Azure SQL Database servers in the subscription.
+    variants:
+      - uid: mondoo-asset-inventory-azure-sqlServers-single
+      - uid: mondoo-asset-inventory-azure-sqlServers-api
+  - uid: mondoo-asset-inventory-azure-sqlServers-api
+    docs:
+      desc: Every Azure SQL Database server in the subscription.
+    filters: asset.platform == "azure"
+    mql: azure.subscription.sql.servers
+  - uid: mondoo-asset-inventory-azure-sqlServers-single
+    docs:
+      desc: A single Azure SQL Database server asset.
+    filters: asset.platform == "azure-sql-server"
+    mql: azure.subscription.sql.server
+
+  - uid: mondoo-asset-inventory-azure-sqlServers-firewallrules
+    title: Azure SQL Database server firewall rules
+    docs:
+      desc: Firewall rules configured on each SQL Database server.
+    variants:
+      - uid: mondoo-asset-inventory-azure-sqlServers-firewallrules-single
+      - uid: mondoo-asset-inventory-azure-sqlServers-firewallrules-api
+  - uid: mondoo-asset-inventory-azure-sqlServers-firewallrules-api
+    docs:
+      desc: Firewall rules on every Azure SQL Database server.
+    filters: asset.platform == "azure"
+    mql: azure.subscription.sql.servers { firewallRules }
+  - uid: mondoo-asset-inventory-azure-sqlServers-firewallrules-single
+    docs:
+      desc: Firewall rules on one Azure SQL Database server.
+    filters: asset.platform == "azure-sql-server"
+    mql: azure.subscription.sql.server.firewallRules
+
+  - uid: mondoo-asset-inventory-azure-sqlServers-databases
+    title: Azure SQL Database server databases
+    docs:
+      desc: Databases hosted on each SQL Database server.
+    variants:
+      - uid: mondoo-asset-inventory-azure-sqlServers-databases-single
+      - uid: mondoo-asset-inventory-azure-sqlServers-databases-api
+  - uid: mondoo-asset-inventory-azure-sqlServers-databases-api
+    docs:
+      desc: Databases hosted on every Azure SQL Database server.
+    filters: asset.platform == "azure"
+    mql: azure.subscription.sql.servers { databases }
+  - uid: mondoo-asset-inventory-azure-sqlServers-databases-single
+    docs:
+      desc: Databases hosted on one Azure SQL Database server.
+    filters: asset.platform == "azure-sql-server"
+    mql: azure.subscription.sql.server.databases
+
+  - uid: mondoo-asset-inventory-azure-postgresql
+    title: Azure PostgreSQL servers
+    docs:
+      desc: PostgreSQL single servers and flexible servers.
+    variants:
+      - uid: mondoo-asset-inventory-azure-postgresql-all
+      - uid: mondoo-asset-inventory-azure-postgresql-legacy
+      - uid: mondoo-asset-inventory-azure-postgresql-flexible
+  - uid: mondoo-asset-inventory-azure-postgresql-all
+    docs:
+      desc: Every PostgreSQL server in the subscription.
+    filters: asset.platform == "azure"
+    mql: |
+      azure.subscription.postgreSql.servers
+      azure.subscription.postgreSql.flexibleServers
+  - uid: mondoo-asset-inventory-azure-postgresql-legacy
+    docs:
+      desc: A single PostgreSQL single-server asset.
+    filters: asset.platform == "azure-postgresql-server"
+    mql: azure.subscription.postgreSql.server
+  - uid: mondoo-asset-inventory-azure-postgresql-flexible
+    docs:
+      desc: A single PostgreSQL flexible-server asset.
+    filters: asset.platform == "azure-postgresql-flexible-server"
+    mql: azure.subscription.postgreSql.flexibleServer
+
+  - uid: mondoo-asset-inventory-azure-postgresql-firewallrules
+    title: Azure PostgreSQL server firewall rules
+    docs:
+      desc: Firewall rules on PostgreSQL single and flexible servers.
+    variants:
+      - uid: mondoo-asset-inventory-azure-postgresql-firewallrules-all
+      - uid: mondoo-asset-inventory-azure-postgresql-firewallrules-legacy
+      - uid: mondoo-asset-inventory-azure-postgresql-firewallrules-flexible
+  - uid: mondoo-asset-inventory-azure-postgresql-firewallrules-all
+    docs:
+      desc: Firewall rules on every PostgreSQL server.
+    filters: asset.platform == "azure"
+    mql: |
+      azure.subscription.postgreSql.servers { firewallRules }
+      azure.subscription.postgreSql.flexibleServers { firewallRules }
+  - uid: mondoo-asset-inventory-azure-postgresql-firewallrules-legacy
+    docs:
+      desc: Firewall rules on one PostgreSQL single server.
+    filters: asset.platform == "azure-postgresql-server"
+    mql: azure.subscription.postgreSql.server.firewallRules
+  - uid: mondoo-asset-inventory-azure-postgresql-firewallrules-flexible
+    docs:
+      desc: Firewall rules on one PostgreSQL flexible server.
+    filters: asset.platform == "azure-postgresql-flexible-server"
+    mql: azure.subscription.postgreSql.flexibleServer.firewallRules
+
+  - uid: mondoo-asset-inventory-azure-mysql-firewallrules
+    title: Azure MySQL server firewall rules
+    docs:
+      desc: Firewall rules on MySQL single and flexible servers.
+    variants:
+      - uid: mondoo-asset-inventory-azure-mysql-firewallrules-all
+      - uid: mondoo-asset-inventory-azure-mysql-firewallrules-legacy
+      - uid: mondoo-asset-inventory-azure-mysql-firewallrules-flexible
+  - uid: mondoo-asset-inventory-azure-mysql-firewallrules-all
+    docs:
+      desc: Firewall rules on every MySQL server.
+    filters: asset.platform == "azure"
+    mql: |
+      azure.subscription.mySql.servers { firewallRules }
+      azure.subscription.mySql.flexibleServers { firewallRules }
+  - uid: mondoo-asset-inventory-azure-mysql-firewallrules-legacy
+    docs:
+      desc: Firewall rules on one MySQL single server.
+    filters: asset.platform == "azure-mysql-server"
+    mql: azure.subscription.mySql.server.firewallRules
+  - uid: mondoo-asset-inventory-azure-mysql-firewallrules-flexible
+    docs:
+      desc: Firewall rules on one MySQL flexible server.
+    filters: asset.platform == "azure-mysql-flexible-server"
+    mql: azure.subscription.mySql.flexibleServer.firewallRules
+
+  - uid: mondoo-asset-inventory-azure-mysql
+    title: Azure MySQL servers
+    docs:
+      desc: MySQL single servers and flexible servers.
+    variants:
+      - uid: mondoo-asset-inventory-azure-mysql-all
+      - uid: mondoo-asset-inventory-azure-mysql-legacy
+      - uid: mondoo-asset-inventory-azure-mysql-flexible
+  - uid: mondoo-asset-inventory-azure-mysql-all
+    docs:
+      desc: Every MySQL server in the subscription.
+    filters: asset.platform == "azure"
+    mql: |
+      azure.subscription.mySql.servers
+      azure.subscription.mySql.flexibleServers
+  - uid: mondoo-asset-inventory-azure-mysql-legacy
+    docs:
+      desc: A single MySQL single-server asset.
+    filters: asset.platform == "azure-mysql-server"
+    mql: azure.subscription.mySql.server
+  - uid: mondoo-asset-inventory-azure-mysql-flexible
+    docs:
+      desc: A single MySQL flexible-server asset.
+    filters: asset.platform == "azure-mysql-flexible-server"
+    mql: azure.subscription.mySql.flexibleServer
+
+  - uid: mondoo-asset-inventory-azure-diagnosticSettings
+    title: Azure diagnostic settings
+    filters: asset.platform == "azure"
+    docs:
+      desc: Azure Monitor diagnostic settings for the subscription.
+    mql: azure.subscription.monitor.diagnosticSettings
+
+  - uid: mondoo-asset-inventory-azure-keyVaults
+    title: Azure Key Vault vaults
+    docs:
+      desc: |
+        Lists the Azure Key Vault vaults in the subscription.
+    variants:
+      - uid: mondoo-asset-inventory-azure-keyVaults-single
+      - uid: mondoo-asset-inventory-azure-keyVaults-api
+  - uid: mondoo-asset-inventory-azure-keyVaults-api
+    docs:
+      desc: Every key vault in the subscription.
+    filters: asset.platform == "azure"
+    mql: azure.subscription.keyVault.vaults
+  - uid: mondoo-asset-inventory-azure-keyVaults-single
+    docs:
+      desc: A single key vault asset.
+    filters: asset.platform == "azure-keyvault-vault"
+    mql: azure.subscription.keyVault.vault
+
+  - uid: mondoo-asset-inventory-azure-keyVaults-keys
+    title: Azure Key Vault vault keys
+    docs:
+      desc: |
+        Lists the keys stored in each key vault.
+    variants:
+      - uid: mondoo-asset-inventory-azure-keyVaults-keys-api
+      - uid: mondoo-asset-inventory-azure-keyVaults-keys-single
+  - uid: mondoo-asset-inventory-azure-keyVaults-keys-api
+    docs:
+      desc: Keys stored in every key vault.
+    filters: asset.platform == "azure"
+    mql: azure.subscription.keyVault.vaults { keys }
+  - uid: mondoo-asset-inventory-azure-keyVaults-keys-single
+    docs:
+      desc: Keys stored in a single key vault.
+    filters: asset.platform == "azure-keyvault-vault"
+    mql: azure.subscription.keyVault.vault.keys
+
+  - uid: mondoo-asset-inventory-azure-keyVaults-secrets
+    title: Azure Key Vault vault secrets
+    docs:
+      desc: |
+        Lists the secrets stored in each key vault.
+    variants:
+      - uid: mondoo-asset-inventory-azure-keyVaults-secrets-api
+      - uid: mondoo-asset-inventory-azure-keyVaults-secrets-single
+  - uid: mondoo-asset-inventory-azure-keyVaults-secrets-api
+    docs:
+      desc: Secrets stored in every key vault.
+    filters: asset.platform == "azure"
+    mql: azure.subscription.keyVault.vaults { secrets }
+  - uid: mondoo-asset-inventory-azure-keyVaults-secrets-single
+    docs:
+      desc: Secrets stored in a single key vault.
+    filters: asset.platform == "azure-keyvault-vault"
+    mql: azure.subscription.keyVault.vault.secrets
+
+  - uid: mondoo-asset-inventory-azure-keyVaults-certificates
+    title: Azure Key Vault vault certificates
+    docs:
+      desc: |
+        Lists the certificates stored in each key vault.
+    variants:
+      - uid: mondoo-asset-inventory-azure-keyVaults-certificates-api
+      - uid: mondoo-asset-inventory-azure-keyVaults-certificates-single
+  - uid: mondoo-asset-inventory-azure-keyVaults-certificates-api
+    docs:
+      desc: Certificates stored in every key vault.
+    filters: asset.platform == "azure"
+    mql: azure.subscription.keyVault.vaults { certificates }
+  - uid: mondoo-asset-inventory-azure-keyVaults-certificates-single
+    docs:
+      desc: Certificates stored in a single key vault.
+    filters: asset.platform == "azure-keyvault-vault"
+    mql: azure.subscription.keyVault.vault.certificates
+
+  - uid: mondoo-asset-inventory-azure-activitylogs
+    title: Azure activity logs
+    filters: asset.platform == "azure"
+    docs:
+      desc: |
+        Returns the Azure Monitor activity log for the subscription.
+    mql: azure.subscription.monitor.activityLog
+
+  - uid: mondoo-asset-inventory-azure-networkSecurityGroups
+    title: Azure network security groups
+    docs:
+      desc: |
+        Lists the network security groups in the subscription.
+    variants:
+      - uid: mondoo-asset-inventory-azure-networkSecurityGroups-api
+      - uid: mondoo-asset-inventory-azure-networkSecurityGroups-single
+  - uid: mondoo-asset-inventory-azure-networkSecurityGroups-api
+    docs:
+      desc: Every network security group in the subscription.
+    filters: asset.platform == "azure"
+    mql: azure.subscription.network.securityGroups
+  - uid: mondoo-asset-inventory-azure-networkSecurityGroups-single
+    docs:
+      desc: A single network security group asset.
+    filters: asset.platform == "azure-network-security-group"
+    mql: azure.subscription.network.securityGroup
+
+  - uid: mondoo-asset-inventory-azure-publicip
+    title: Azure public IP addresses
+    filters: asset.platform == "azure"
+    docs:
+      desc: Public IP addresses with location and assigned address.
+    mql: azure.subscription.networkService.publicIpAddresses{ name location ipAddress }
+
+  - uid: mondoo-asset-inventory-azure-virtualmachines
+    title: Azure virtual machines
+    docs:
+      desc: |
+        Lists the virtual machines in the subscription.
+    variants:
+      - uid: mondoo-asset-inventory-azure-virtualmachines-api
+      - uid: mondoo-asset-inventory-azure-virtualmachines-single
+  - uid: mondoo-asset-inventory-azure-virtualmachines-api
+    docs:
+      desc: Every virtual machine in the subscription.
+    filters: asset.platform == "azure"
+    mql: azure.subscription.compute.vms
+  - uid: mondoo-asset-inventory-azure-virtualmachines-single
+    docs:
+      desc: A single virtual machine asset.
+    filters: asset.platform == "azure-compute-vm-api"
+    mql: azure.subscription.compute.vm
+
+  - uid: mondoo-asset-inventory-azure-virtualmachines-managedDisk
+    title: Azure virtual machines with managed disks
+    docs:
+      desc: Virtual machines whose OS disk is a managed disk.
+    variants:
+      - uid: mondoo-asset-inventory-azure-virtualmachines-managedDisk-api
+      - uid: mondoo-asset-inventory-azure-virtualmachines-managedDisk-single
+  - uid: mondoo-asset-inventory-azure-virtualmachines-managedDisk-api
+    docs:
+      desc: Subscription VMs that boot from a managed OS disk.
+    filters: asset.platform == "azure"
+    mql: azure.subscription.compute.vms.where( properties["storageProfile"]["osDisk"]["managedDisk"] != empty )
+  - uid: mondoo-asset-inventory-azure-virtualmachines-managedDisk-single
+    docs:
+      desc: Whether this VM boots from a managed OS disk.
+    filters: asset.platform == "azure-compute-vm-api" && azure.subscription.compute.vm.properties["storageProfile"]["osDisk"]["managedDisk"] != empty
+    mql: azure.subscription.compute.vm.properties["storageProfile"]["osDisk"]["managedDisk"] != empty
+
+  - uid: mondoo-asset-inventory-azure-webapp
+    title: Azure web apps
+    filters: asset.platform == "azure"
+    docs:
+      desc: |
+        Lists the App Service web apps in the subscription.
+    mql: azure.subscription.web.apps
+
+  - uid: mondoo-asset-inventory-azure-cosmosDb
+    title: Azure Cosmos DB accounts
+    filters: asset.platform == "azure"
+    docs:
+      desc: |
+        Lists the Azure Cosmos DB accounts in the subscription.
+    mql: azure.subscription.cosmosDb.accounts
+
+  - uid: mondoo-asset-inventory-azure-applicationInsight
+    title: Azure Monitor Application Insights
+    filters: asset.platform == "azure"
+    docs:
+      desc: Application Insights components in the subscription.
+    mql: azure.subscription.monitor.applicationInsights
+
+  - uid: mondoo-asset-inventory-azure-networkWatcher
+    title: Azure Network Watchers
+    filters: asset.platform == "azure"
+    docs:
+      desc: |
+        Lists the Network Watcher instances in the subscription.
+    mql: azure.subscription.network.watchers
+
+  - uid: mondoo-asset-inventory-azure-bastionHosts
+    title: Azure Bastion hosts
+    filters: asset.platform == "azure"
+    docs:
+      desc: |
+        Lists the Azure Bastion hosts in the subscription.
+    mql: azure.subscription.network.bastionHosts
+
+  - uid: mondoo-asset-inventory-azure-compute-disks
+    title: Compute disks
+    filters: asset.platform == "azure"
+    docs:
+      desc: |
+        Lists the managed compute disks in the subscription.
+    mql: azure.subscription.compute.disks
+
+  - uid: mondoo-asset-inventory-azure-network-interfaces
+    title: Network interfaces
+    filters: asset.platform == "azure"
+    docs:
+      desc: Network interfaces with NIC type, MAC, and attached VM.
+    mql: azure.subscription.network.interfaces{ name location properties['nicType'] properties['nicType'] properties['macAddress'] properties['virtualMachine']['id'] }
+
+  - uid: mondoo-asset-inventory-azure-resourcegroups
+    title: Azure subscription resource groups
+    filters: asset.platform == "azure"
+    docs:
+      desc: |
+        Lists the resource groups in the subscription.
+    mql: azure.subscription.resourceGroups
+
+  - uid: mondoo-asset-inventory-azure-resources
+    title: Azure subscription resources
+    filters: asset.platform == "azure"
+    docs:
+      desc: Every resource in the subscription, across resource groups.
+    mql: azure.subscription.resources

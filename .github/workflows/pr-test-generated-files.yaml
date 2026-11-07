@@ -1,0 +1,64 @@
+name: Generated Code Test
+
+## Only trigger tests if source is changing
+##
+## go.mod and go.sum are inputs too: the protoc plugins come from the `tool`
+## directive, so bumping google.golang.org/protobuf changes what the generated
+## files look like. Without them a dependency bump lands green and the next
+## push that happens to touch a .go file inherits the failure.
+on:
+  push:
+    paths:
+      - "**.proto"
+      - "**.lr"
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
+
+permissions:
+  contents: read
+
+jobs:
+  # Check if there is any dirty change for generated files
+  generated-files:
+    runs-on:
+      group: arc-runners
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Import environment variables from file
+        run: cat ".github/env" >> $GITHUB_ENV
+
+      - name: Install Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "${{ env.golang-version }}"
+          check-latest: true
+          cache: false
+
+      # We do not permit sudo on self-hosted runners
+      - name: "Ensure GCC is installed"
+        run: |
+          if gcc --version; then
+            echo "Good to go";
+          else
+            echo "Install GCC on the runner.";
+          fi
+
+      # Note we do not use apt install -y protobuf-compiler` since it is too old
+      - name: Install Protoc
+        uses: ./.github/actions/setup-protoc
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          version: ${{ env.protoc-version }}
+
+      - name: Check generated files
+        run: |
+          protoc --version
+          make prep
+          make prep/repos
+          make cnspec/generate
+          git diff --exit-code '*.pb.go'
+          git diff --exit-code '*.ranger.go'
+          git diff --exit-code '*.vtproto.pb.go'

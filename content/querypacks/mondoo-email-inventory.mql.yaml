@@ -1,0 +1,64 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+
+packs:
+  - uid: mondoo-email-inventory
+    name: Email Inventory Pack
+    version: 1.0.1
+    license: BUSL-1.1
+    require:
+      - provider: network
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    tags:
+      mondoo.com/platform: host
+      mondoo.com/category: security
+      mondoo.com/icon: mail
+    summary: Inventory email authentication configurations
+    docs:
+      desc: |
+        Inventories a domain's email authentication DNS records: SPF, DKIM, DMARC, and the reverse-DNS PTR record.
+
+        Enable this query pack in [Mondoo Platform](https://mondoo.com/platform) to automatically inventory your domains, or scan a domain manually with cnspec:
+
+        ```bash
+        cnspec scan host <domain> -f mondoo-email-inventory.mql.yaml
+        ```
+    filters: asset.family.contains('network')
+    queries:
+      - uid: mondoo-email-inventory-mail-records
+        title: Retrieve reverse IP Lookup PTR record
+        docs:
+          desc: Reverse DNS PTR records for the domain's IP address.
+        mql: |
+          dns.reverseRecords
+      - uid: mondoo-email-inventory-spf-record
+        title: Retrieve SPF record
+        docs:
+          desc: TXT records, which carry the SPF authentication policy.
+        mql: dns.params.TXT
+      - uid: mondoo-email-inventory-dmarc-entry
+        title: Retrieve DMARC DNS entry
+        docs:
+          desc: TXT record at _dmarc, which holds the DMARC policy.
+        mql: dns("_dmarc."+domainName.fqdn).params.TXT
+      - uid: mondoo-email-inventory-dkim-configuration
+        title: Retrieve DKIM entry
+        docs:
+          desc: DKIM keys published under common _domainkey selectors.
+        props:
+          - uid: mondooEmailSecurityDkimSelectors
+            title: Define a list of valid DKIM selectors
+            mql: |
+              [
+                "google",
+                "selector1",
+                "selector2",
+                "k1",
+                "dkim",
+                "mx",
+                "mailjet"
+              ]
+        mql: |
+          props.mondooEmailSecurityDkimSelectors{ dns(_+"._domainkey."+domainName.fqdn).params['TXT'] }

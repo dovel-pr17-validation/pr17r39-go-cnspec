@@ -1,0 +1,2998 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+policies:
+  - uid: mondoo-mongodbatlas-security
+    name: Mondoo MongoDB Atlas Security
+    version: 1.0.0
+    license: BUSL-1.1
+    tags:
+      mondoo.com/category: security
+      mondoo.com/platform: mongodbatlas,database
+      mondoo.com/icon: mongodb-atlas
+    require:
+      - provider: mongodbatlas
+    authors:
+      - name: Mondoo, Inc.
+        email: hello@mondoo.com
+    summary: Secure MongoDB Atlas access control, network exposure, encryption, backup, and audit logging across organizations and projects
+    docs:
+      desc: |
+        The Mondoo MongoDB Atlas Security policy identifies misconfigurations in MongoDB Atlas organizations and projects that could expose databases to the public internet, weaken authentication, leave data unencrypted with customer-managed keys, or leave activity unaudited. This policy helps organizations detect and remediate weaknesses before they can be exploited, reducing the likelihood of unauthorized data access, credential misuse, and undetected changes.
+
+        This policy provides security checks across key MongoDB Atlas areas:
+
+        - Organization identity and access, including multi-factor authentication and Organization Owner sprawl
+        - Programmatic credentials and identity federation
+        - Cluster protection, including TLS, encryption at rest, backup, and supported versions
+        - Database user and custom role least privilege
+        - Network exposure, private connectivity, and customer-managed encryption keys
+        - Database auditing and log export
+
+        **A note on scanning scope**
+
+        The provider discovers two kinds of assets: **MongoDB Atlas Organization** assets carry organization-wide posture such as multi-factor authentication, API access lists, programmatic credentials, and identity federation, and **MongoDB Atlas Project** assets carry per-project posture such as clusters, database users, the IP access list, encryption at rest, auditing, and log export. Each check applies to the asset kind that owns the setting, so organization-scoped and project-scoped findings appear against the corresponding asset.
+
+        **A note on API authentication**
+
+        The audit and command-line examples in this policy authenticate to the MongoDB Atlas Administration API with an org or project API key pair using HTTP digest authentication, written as `curl --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest`. Organization-scoped endpoints take an `{orgId}` path parameter and project-scoped endpoints take a `{groupId}` path parameter, where a project is also called a group. The `atlas` CLI reads the same credentials and is used where it exposes the setting directly. Create and scope API keys from **Organization Settings > Access Manager > API Keys** in the Atlas dashboard.
+
+        Learn more about scanning MongoDB Atlas in the [cnspec documentation](https://mondoo.com/docs/cnspec).
+
+        Have suggestions for new checks in this policy? Visit our [cnspec repository](https://github.com/mondoohq/cnspec).
+    groups:
+      - title: Organization Identity and Access
+        filters: asset.platform == "mongodbatlas-org"
+        checks:
+          - uid: mondoo-mongodbatlas-security-org-mfa-required
+          - uid: mondoo-mongodbatlas-security-org-api-access-list-required
+          - uid: mondoo-mongodbatlas-security-org-restrict-employee-access
+          - uid: mondoo-mongodbatlas-security-org-security-contact-set
+          - uid: mondoo-mongodbatlas-security-org-no-stale-users
+          - uid: mondoo-mongodbatlas-security-org-no-pending-invitations
+          - uid: mondoo-mongodbatlas-security-org-limit-owners
+      - title: Organization Credentials and Federation
+        filters: asset.platform == "mongodbatlas-org"
+        checks:
+          - uid: mondoo-mongodbatlas-security-org-service-account-secret-validity-capped
+          - uid: mondoo-mongodbatlas-security-org-no-expired-service-account-secrets
+          - uid: mondoo-mongodbatlas-security-org-no-org-owner-api-keys
+          - uid: mondoo-mongodbatlas-security-org-identity-federation-configured
+          - uid: mondoo-mongodbatlas-security-org-federated-domains-configured
+          - uid: mondoo-mongodbatlas-security-org-saml-strong-signature-algorithm
+      - title: Cluster Security
+        filters: asset.platform == "mongodbatlas-project"
+        checks:
+          - uid: mondoo-mongodbatlas-security-project-cluster-min-tls
+          - uid: mondoo-mongodbatlas-security-project-cluster-encryption-at-rest
+          - uid: mondoo-mongodbatlas-security-project-cluster-backup-enabled
+          - uid: mondoo-mongodbatlas-security-project-cluster-pit-enabled
+          - uid: mondoo-mongodbatlas-security-project-cluster-termination-protection
+          - uid: mondoo-mongodbatlas-security-project-cluster-redact-client-log-data
+          - uid: mondoo-mongodbatlas-security-project-cluster-supported-version
+          - uid: mondoo-mongodbatlas-security-project-cluster-maintained-release-track
+      - title: Database Access
+        filters: asset.platform == "mongodbatlas-project"
+        checks:
+          - uid: mondoo-mongodbatlas-security-project-dbuser-external-auth
+          - uid: mondoo-mongodbatlas-security-project-dbuser-no-atlas-admin
+          - uid: mondoo-mongodbatlas-security-project-dbuser-cluster-scoped
+          - uid: mondoo-mongodbatlas-security-project-dbuser-no-past-deletion
+          - uid: mondoo-mongodbatlas-security-project-custom-role-no-dangerous-actions
+          - uid: mondoo-mongodbatlas-security-project-custom-role-no-privileged-inheritance
+      - title: Network and Encryption
+        filters: asset.platform == "mongodbatlas-project"
+        checks:
+          - uid: mondoo-mongodbatlas-security-project-ip-access-list-no-anywhere
+          - uid: mondoo-mongodbatlas-security-project-ip-access-list-no-broad-cidr
+          - uid: mondoo-mongodbatlas-security-project-ip-access-list-no-past-expiry
+          - uid: mondoo-mongodbatlas-security-project-private-endpoints-configured
+          - uid: mondoo-mongodbatlas-security-project-network-peerings-healthy
+          - uid: mondoo-mongodbatlas-security-project-encryption-at-rest-cmk-enabled
+          - uid: mondoo-mongodbatlas-security-project-encryption-at-rest-cmk-valid
+          - uid: mondoo-mongodbatlas-security-project-encryption-search-nodes
+      - title: Auditing and Log Export
+        filters: asset.platform == "mongodbatlas-project"
+        checks:
+          - uid: mondoo-mongodbatlas-security-project-auditing-enabled
+          - uid: mondoo-mongodbatlas-security-project-audit-authorization-success
+          - uid: mondoo-mongodbatlas-security-project-audit-filter-configured
+          - uid: mondoo-mongodbatlas-security-project-log-export-active
+          - uid: mondoo-mongodbatlas-security-project-log-export-bucket-configured
+    scoring_system: highest impact
+queries:
+  - uid: mondoo-mongodbatlas-security-org-mfa-required
+    title: Ensure multi-factor authentication is required for all organization members
+    impact: 90
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-14
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-j
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-3
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-4-2
+      compliance/soc2-2017: soc2-control-cc6-6-3
+      compliance/vda-isa-5: vda-isa-5-4-1-2
+    mql: |
+      mongodbatlas.multiFactorAuthRequired == true
+    docs:
+      desc: |
+        This check verifies that every member of the Atlas organization must present a second authentication factor before they can sign in.
+
+        MongoDB Atlas exposes this as "Require Multi-Factor Authentication" in Organization Settings, reachable from the organization menu at cloud.mongodb.com. The Atlas Administration API reports the same control as `multiFactorAuthRequired` on the organization settings resource, and this check requires it to be enabled. The requirement is set once for the organization and applies to every member regardless of which projects they belong to.
+
+        **Why this matters**
+
+        Without the requirement, a password is the only thing standing between an attacker and the organization. Atlas credentials show up in phishing kits, in breach dumps from unrelated sites where the same password was reused, and in browser credential stores on compromised laptops. An attacker with a working password signs in at cloud.mongodb.com and lands in the console as a full member.
+
+        From there the path to data is short and needs no exploit. The attacker opens Network Access, adds their own address to the project IP access list, opens Database Access, creates a database user with broad roles, and connects to the cluster with an ordinary MongoDB driver. Every step is a supported administrative action, so nothing looks anomalous except the source address. If the stolen account holds the Organization Owner role, the attacker can also disable other controls, remove members, and delete deployments outright.
+
+        Enroll members in an authenticator before turning the requirement on, because members who have not registered a factor will be prompted at their next sign-in and an unprepared team can lock itself out. Organizations that authenticate through a federated identity provider may enforce the second factor there instead, in which case confirm the provider actually requires it rather than assuming it does.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Open Organization Settings from the organization menu.
+        3. Review the "Require Multi-Factor Authentication" setting.
+
+        A passing result shows the requirement enabled; a failing result shows it disabled.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/orgs/{orgId}/settings" \
+          | jq '.multiFactorAuthRequired'
+        ```
+
+        A passing response shows `true`; a failing response shows `false`.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+            2. Open Organization Settings from the organization menu.
+            3. Enable "Require Multi-Factor Authentication" and save.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API:
+
+            ```bash
+            curl -s -X PATCH --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/orgs/{orgId}/settings" \
+              --data '{ "multiFactorAuthRequired": true }'
+            ```
+  - uid: mondoo-mongodbatlas-security-org-api-access-list-required
+    title: Ensure an API access list is required for keys and service accounts
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-16
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-5-15
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-3
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-6-1
+      compliance/vda-isa-5: vda-isa-5-4-1-2
+    mql: |
+      mongodbatlas.apiAccessListRequired == true
+    docs:
+      desc: |
+        This check verifies that every organization API key and service account must define a list of approved source addresses before it can be used.
+
+        MongoDB Atlas exposes this as "Require IP Access List for the Atlas Administration API" in Organization Settings, and the Atlas Administration API reports it as `apiAccessListRequired` on the organization settings resource. When the requirement is on, a programmatic credential only works from the addresses recorded on that credential, and requests from anywhere else are rejected before authentication is even considered.
+
+        **Why this matters**
+
+        API keys and service account secrets carry the same administrative reach as a human member but none of the protections around one. They are pasted into CI configuration, baked into container images, echoed into build logs, and committed to repositories. A secret that reaches any of those places can be read by anyone with access to the log, the image layer, or the repository history.
+
+        Without a source restriction, that leaked secret is usable from a coffee shop or a rented server anywhere on the internet. An attacker replays it against the Atlas Administration API, adds an address to the project IP access list, creates a database user, and reads the cluster, all without touching the console or triggering an interactive sign-in. With the requirement in place the same secret is inert from an unapproved address, which converts a full compromise into a failed request.
+
+        Turning the requirement on breaks any existing key or service account that has no entries, so record the required egress addresses on each credential before enabling it. Keep those entries as narrow as the network allows, since an entry that covers a whole provider region grants nearly as much reach as no entry at all.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Open Organization Settings from the organization menu.
+        3. Review the "Require IP Access List for the Atlas Administration API" setting.
+
+        A passing result shows the requirement enabled; a failing result shows it disabled.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/orgs/{orgId}/settings" \
+          | jq '.apiAccessListRequired'
+        ```
+
+        A passing response shows `true`; a failing response shows `false`.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+            2. Open Organization Settings from the organization menu.
+            3. Enable "Require IP Access List for the Atlas Administration API" and save.
+            4. Add the required source addresses to each existing key and service account so access continues.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API:
+
+            ```bash
+            curl -s -X PATCH --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/orgs/{orgId}/settings" \
+              --data '{ "apiAccessListRequired": true }'
+            ```
+  - uid: mondoo-mongodbatlas-security-org-restrict-employee-access
+    title: Ensure MongoDB support employee access to infrastructure is restricted
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-05
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-2
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-5
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: |
+      mongodbatlas.restrictEmployeeAccess == true
+    docs:
+      desc: |
+        This check verifies that MongoDB support staff cannot reach the organization's infrastructure unless someone grants access for a specific support case.
+
+        The control lives in Organization Settings at cloud.mongodb.com and the Atlas Administration API reports it as `restrictEmployeeAccess` on the organization settings resource. With the restriction enabled, provider personnel have no standing path into your clusters and configuration; access must be opened deliberately for a support interaction and expires afterward.
+
+        **Why this matters**
+
+        Standing provider access widens the set of accounts that can reach your data to include people your organization does not employ, does not onboard, and cannot offboard. That set is invisible from your side. You cannot enumerate it, you do not learn when a member of it leaves, and you have no way to require a particular authentication posture from it.
+
+        The attacker does not have to be a support engineer. An attacker who phishes a support employee, or who compromises the workstation or the internal tooling that support staff use, inherits whatever standing reach that account has. If the reach includes your clusters, the intrusion crosses from the provider's environment into your data without ever going through your own authentication or your own network controls. With the restriction on, the same compromised account finds nothing to use until an authorized person in your organization opens a time-boxed grant, and that grant leaves a record naming who opened it and when.
+
+        The trade-off is response time on support cases. An engineer investigating an urgent problem cannot begin until someone with the right role grants access, so name in advance who is expected to approve those grants and how they are reached out of hours.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Open Organization Settings from the organization menu.
+        3. Review the setting that restricts MongoDB support employee access to your infrastructure.
+
+        A passing result shows access restricted; a failing result shows support access allowed by default.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/orgs/{orgId}/settings" \
+          | jq '.restrictEmployeeAccess'
+        ```
+
+        A passing response shows `true`; a failing response shows `false`.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+            2. Open Organization Settings from the organization menu.
+            3. Enable the option that restricts MongoDB support employee access and save.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API:
+
+            ```bash
+            curl -s -X PATCH --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/orgs/{orgId}/settings" \
+              --data '{ "restrictEmployeeAccess": true }'
+            ```
+  - uid: mondoo-mongodbatlas-security-org-security-contact-set
+    title: Ensure a security contact is configured for the organization
+    impact: 40
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-sef-08
+      compliance/dora: dora-art-17
+      compliance/hipaa: hipaa-security-ss164-308-a-2-assigned-security-responsibility
+      compliance/iso-27001-2022: iso-27001-2022-a-5-2
+      compliance/nis-2: false
+      compliance/nist-csf-1: nist-csf-1-id-gv-2
+      compliance/nist-csf-2: nist-csf-2-gv-rr-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-5
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-3
+      compliance/owasp-top-10-2025: false
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc2-3-2
+      compliance/vda-isa-5: vda-isa-5-1-2-2
+    mql: |
+      mongodbatlas.securityContact != empty
+    docs:
+      desc: |
+        This check verifies that the organization records an address where security notifications are delivered.
+
+        The Security Contact field sits in Organization Settings at cloud.mongodb.com, and the Atlas Administration API reports it as `securityContact` on the organization settings resource. This check requires the field to hold a value rather than being left empty. The address is where MongoDB sends security advisories and account notices for the organization.
+
+        **Why this matters**
+
+        Notification is often the first and sometimes the only signal that something has gone wrong. MongoDB uses this channel to report a credential it has found exposed in public code, a vulnerability affecting the version your clusters run, or suspicious activity on the account. Every one of those messages is time-sensitive, and its value decays quickly.
+
+        When the field is empty, that message is not delivered to anyone whose job it is to act on it. An attacker who is already using a leaked key keeps using it, because the warning that would have prompted a rotation never arrived. A vulnerability advisory that would have triggered an upgrade sits unread while the cluster stays exploitable. The gap is not a matter of hours; unreported exposures routinely persist for months because nobody was told.
+
+        Point the field at a monitored team mailbox or ticket queue rather than one person's address, so notices survive vacations, role changes, and departures. Confirm the destination is actually watched, since an address that routes into an unread distribution list produces the same outcome as leaving the field blank, while looking correct in an audit.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Open Organization Settings from the organization menu.
+        3. Review the Security Contact field.
+
+        A passing result shows a security contact address; a failing result shows the field empty.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/orgs/{orgId}/settings" \
+          | jq '.securityContact'
+        ```
+
+        A passing response shows an address; a failing response shows `null` or an empty string.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+            2. Open Organization Settings from the organization menu.
+            3. Enter a monitored security address in the Security Contact field and save.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API:
+
+            ```bash
+            curl -s -X PATCH --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/orgs/{orgId}/settings" \
+              --data '{ "securityContact": "security@example.com" }'
+            ```
+  - uid: mondoo-mongodbatlas-security-org-no-stale-users
+    title: Ensure active organization members have authenticated recently
+    impact: 50
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-08
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-308-a-4-ii-c-information-access-management-access-establishment-and-modification
+      compliance/iso-27001-2022: iso-27001-2022-a-5-18
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-2-6
+      compliance/soc2-2017: soc2-control-cc6-2-3
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      mongodbatlas.orgUsers.where(orgMembershipStatus == "ACTIVE").all(lastAuth != null && lastAuth > time.now - 90*time.day)
+    docs:
+      desc: |
+        This check verifies that every active member of the Atlas organization has authenticated within the last 90 days.
+
+        Atlas records the last authentication time for each member and shows it in the Last Active column under Access Manager for the organization at cloud.mongodb.com. The Atlas Administration API returns the same value as `lastAuth` on the organization users resource alongside the membership status. This check looks only at members whose status is active, and requires each of them to have signed in within 90 days.
+
+        **Why this matters**
+
+        A member who has not signed in for three months usually changed roles, moved to a different team, or left the company without the Atlas membership being revoked. The account still works, still holds whatever organization and project roles it was granted, and still counts as an authorized identity.
+
+        Those are the accounts an attacker prefers. Nobody notices a sign-in they did not make on an account they no longer use, and no password change or session invalidation is triggered by a departure that was never processed. An attacker who recovers the password from a breach dump, or who takes over the personal mailbox behind the account and runs a password reset, gets a working member session that raises no alarm. From that session they reach every project the member could reach, and can add themselves to the network access list and create database credentials from there.
+
+        Removing a member is usually the right response, but confirm first that the account is not a rarely used break-glass identity that is deliberately dormant. Where the organization uses a federated identity provider, offboarding in the provider closes this gap at the source and this check becomes a way of confirming that the offboarding actually worked.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Open Access Manager for the organization and select Users.
+        3. Review the Last Active column for each active member.
+
+        A passing result shows every active member authenticated within the last 90 days; a failing result shows an active member whose last authentication is older or missing.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/orgs/{orgId}/users" \
+          | jq '.results[] | select(.orgMembershipStatus == "ACTIVE") | {username, lastAuth}'
+        ```
+
+        A passing response shows every active member with a `lastAuth` within the last 90 days; a failing response shows an active member with an older or absent `lastAuth`.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+            2. Open Access Manager for the organization and select Users.
+            3. Remove or downgrade active members who have not authenticated within the last 90 days.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API, remove each stale member by user ID:
+
+            ```bash
+            curl -s -X DELETE --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/orgs/{orgId}/users/{userId}"
+            ```
+  - uid: mondoo-mongodbatlas-security-org-no-pending-invitations
+    title: Ensure there are no unaccepted organization invitations
+    impact: 30
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-308-a-4-ii-b-information-access-management-access-authorization
+      compliance/iso-27001-2022: iso-27001-2022-a-5-16
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-1
+      compliance/owasp-top-10-2025: false
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-2-1
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      mongodbatlas.orgUsers.none(orgMembershipStatus == "PENDING")
+    docs:
+      desc: |
+        This check verifies that no organization membership is sitting in an unaccepted, pending state.
+
+        Invitations appear under Access Manager for the organization at cloud.mongodb.com, where an invited person shows with a Pending status until they accept. The Atlas Administration API reports the same state as a pending membership status on the organization users resource. This check requires the pending set to be empty.
+
+        **Why this matters**
+
+        A pending invitation is a grant of access that has been issued but not yet claimed, and it stays claimable. It carries whatever organization roles were selected when it was sent, so whoever redeems it enters the organization with those roles already attached.
+
+        That makes a mistyped or outdated address dangerous. An invitation sent to a former colleague's address that the company has since released, or to a personal address that has been abandoned and later re-registered by someone else, hands organization membership to whoever controls that mailbox now. The recipient does not need to attack anything; they accept an invitation that was addressed to them and are admitted as a legitimate member. Invitations sent to a domain that is not yours have the same problem, because you have no control over who holds that address next.
+
+        Pending entries also distort access reviews. A reviewer reading the member list sees names that may never have joined and cannot tell which entries represent real, current access.
+
+        Cancel invitations that were never accepted and reissue them deliberately when the access is still wanted. A short-lived pending state is normal right after someone is invited, so treat this check as a way of catching invitations that have been outstanding long enough to be forgotten.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Open Access Manager for the organization and select Users.
+        3. Look for members shown with a Pending status.
+
+        A passing result shows no pending members; a failing result shows one or more pending invitations.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/orgs/{orgId}/users" \
+          | jq '[.results[] | select(.orgMembershipStatus == "PENDING")] | length'
+        ```
+
+        A passing response shows `0`; a failing response shows a count greater than zero.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+            2. Open Access Manager for the organization and select Users.
+            3. Cancel each pending invitation that is no longer intended.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API, delete each outstanding invitation by ID:
+
+            ```bash
+            curl -s -X DELETE --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/orgs/{orgId}/invites/{invitationId}"
+            ```
+  - uid: mondoo-mongodbatlas-security-org-limit-owners
+    title: Ensure the number of Organization Owners is limited
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-10
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-308-a-4-i-information-access-management
+      compliance/iso-27001-2022: iso-27001-2022-a-8-2
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-5
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-2
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: |
+      mongodbatlas.orgUsers.where(orgRoles.contains("ORG_OWNER")).length <= 3
+    docs:
+      desc: |
+        This check verifies that no more than three members hold the Organization Owner role.
+
+        Organization Owner is the highest-privilege role in Atlas. It carries control over billing, membership, security settings, and every project in the organization, including the ability to delete deployments. Role assignments are visible under Access Manager for the organization at cloud.mongodb.com, and the Atlas Administration API returns each member's organization roles on the organization users resource.
+
+        **Why this matters**
+
+        Every account holding this role is an independent route to total control of the organization, and the routes are not equally well defended. One owner may use a hardware security key while another reuses a password and reads mail on an unmanaged laptop. An attacker does not have to defeat the strongest of them; they pick the weakest owner and get the same reach.
+
+        What that reach permits is worth stating plainly. An owner can turn off the organization multi-factor requirement, lift the source address requirement on programmatic credentials, mint an API key for themselves that survives a password reset, add their own address to a project network access list, and create a database user with broad roles. The account they compromised then becomes optional, because the persistence they planted no longer depends on it.
+
+        Keeping the count small also keeps the audit meaningful. When three people hold the role, an unexplained owner action can be traced to a person; when fifteen do, it cannot.
+
+        Most administrative work does not need this role. Assign project-level roles for day-to-day cluster and user administration and reserve Organization Owner for the small set of people who genuinely manage the organization itself. Keep at least two so a single unavailable person cannot strand the organization.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Open Access Manager for the organization and select Users.
+        3. Filter or review members that hold the Organization Owner role.
+
+        A passing result shows three or fewer Organization Owners; a failing result shows more than three.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/orgs/{orgId}/users" \
+          | jq '[.results[] | select([.roles[]?.roleName] | index("ORG_OWNER"))] | length'
+        ```
+
+        A passing response shows a count of three or fewer; a failing response shows a count greater than three.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+            2. Open Access Manager for the organization and select Users.
+            3. Change the role of surplus Organization Owners to a narrower role that fits their duties.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API, update a member's organization roles so they no longer hold ORG_OWNER:
+
+            ```bash
+            curl -s -X PATCH --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/orgs/{orgId}/users/{userId}" \
+              --data '{ "roles": { "orgRoles": [ "ORG_MEMBER" ] } }'
+            ```
+  - uid: mondoo-mongodbatlas-security-org-service-account-secret-validity-capped
+    title: Ensure a maximum validity period is set for service account secrets
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-15
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-5-17
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/nist-sp-800-171: false
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-6-3
+      compliance/soc2-2017: soc2-control-cc6-1-9
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      mongodbatlas.maxServiceAccountSecretValidityInHours > 0 && mongodbatlas.maxServiceAccountSecretValidityInHours <= 168
+    docs:
+      desc: |
+        This check verifies that the organization caps how long a service account secret stays valid, at no more than 168 hours.
+
+        Service accounts are the OAuth machine identities that authenticate automated access to the Atlas Administration API, and each one is used through a secret. Organization Settings at cloud.mongodb.com carries a maximum validity for those secrets, reported by the Atlas Administration API as `maxServiceAccountSecretValidityInHours`. This check requires the value to be set above zero and no higher than 168 hours, which is 7 days. A value of zero or an unset field means no ceiling is enforced at all.
+
+        **Why this matters**
+
+        Without a ceiling, a secret issued once keeps working forever. Automation credentials are exactly the kind of secret that leaks quietly: they are written into pipeline configuration, printed by a debug build, copied into a shared password note, and left on a laptop that later changes hands. None of those events produces an alert, and none of them is discovered on the day it happens.
+
+        The ceiling decides how long that quiet leak stays useful. An attacker who recovers a secret from a two-year-old build log against an organization with no maximum validity has a live administrative credential to the Atlas Administration API today, and can use it to enumerate projects, add network access entries, and create database users. Against an organization with a 168 hour ceiling, the same recovered secret expired long before they found it, and the intrusion ends at the first API call.
+
+        Automation has to request a fresh secret before the ceiling is reached, so put the renewal in the pipeline rather than in someone's calendar. A short ceiling with manual renewal produces outages, and outages produce pressure to raise the ceiling back.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Open **Organization Settings** for the organization.
+        3. Locate the maximum service account secret validity setting and read its value in hours.
+
+        A passing result shows a value between 1 and 168 hours; a failing result shows the setting unset, set to 0, or set above 168 hours.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/orgs/{orgId}/settings" \
+          | jq '.maxServiceAccountSecretValidityInHours'
+        ```
+
+        A passing response shows a number between 1 and 168; a failing response shows 0, null, or a value greater than 168.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+            2. Open **Organization Settings** for the organization.
+            3. Set the maximum service account secret validity to 168 hours or fewer and save.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API:
+
+            ```bash
+            curl -s -X PATCH --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/orgs/{orgId}/settings" \
+              --data '{ "maxServiceAccountSecretValidityInHours": 168 }'
+            ```
+  - uid: mondoo-mongodbatlas-security-org-no-expired-service-account-secrets
+    title: Ensure no expired service account secrets remain
+    impact: 40
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-15
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-5-17
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/nist-sp-800-171: false
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-6-3
+      compliance/soc2-2017: soc2-control-cc6-1-9
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      mongodbatlas.serviceAccounts.all(secrets.all(_['expiresAt'] == null || parse.date(_['expiresAt']) > time.now))
+    docs:
+      desc: |
+        This check verifies that no service account still carries a secret whose expiration date has already passed.
+
+        Service accounts are the OAuth machine identities used for automated access to the Atlas Administration API, and each secret carries an expiration timestamp. They are listed under Access Manager for the organization at cloud.mongodb.com by selecting Applications, and the Atlas Administration API returns each secret with its expiration on the service accounts resource. This check requires every listed secret to be either open-ended or dated in the future.
+
+        **Why this matters**
+
+        An expired secret that is still attached to its service account is evidence that a rotation was started and never finished. Somebody issued a replacement, pointed the workload at it, and left the old record in place. That pattern matters because the same incomplete rotation is what leaves the old secret sitting in the configuration store, the pipeline variable, or the notes file it was originally copied into.
+
+        The stale records also make the credential inventory lie. During an incident, a responder trying to answer which machine identities can reach the Atlas Administration API has to work out which of the listed secrets are live and which are dead, and that ambiguity costs time at exactly the moment it is most expensive. During an access review, an expired secret pads the list and hides the one live secret nobody can account for.
+
+        Delete each secret whose expiration has passed, and create the replacement before removing anything if the service account is still in use. Where an automated rotation is meant to clean up after itself, treat a failing result as a signal that the cleanup step is broken rather than as a one-time tidy-up.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Open the **Access Manager** for the organization and select **Applications** to view service accounts.
+        3. Review each service account's secrets and their expiration dates.
+
+        A passing result shows no secret with an expiration date in the past; a failing result shows one or more secrets whose expiration date has already passed.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/orgs/{orgId}/serviceAccounts" \
+          | jq '[.results[] | {clientId, secrets: [.secrets[].expiresAt]}]'
+        ```
+
+        A passing response shows every listed expiration date in the future; a failing response shows one or more dates that are already in the past.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+            2. Open the **Access Manager** for the organization and select **Applications**.
+            3. Open the affected service account, then delete each secret whose expiration date has passed. Create a fresh secret first if the service account is still in use.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API:
+
+            ```bash
+            curl -s -X DELETE --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/orgs/{orgId}/serviceAccounts/{clientId}/secrets/{secretId}"
+            ```
+  - uid: mondoo-mongodbatlas-security-org-no-org-owner-api-keys
+    title: Ensure programmatic API keys are not granted the Organization Owner role
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-05
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-2
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-5
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-5
+      compliance/soc2-2017: soc2-control-cc6-3-1
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: |
+      mongodbatlas.apiKeys.all(roleAssignments.none(orgLevel == true && roleName == "ORG_OWNER"))
+    docs:
+      desc: |
+        This check verifies that no programmatic API key is assigned the Organization Owner role.
+
+        A programmatic API key is a public and private key pair that authenticates automated access to the Atlas Administration API and can be granted organization or project roles. Keys and their roles are listed under Access Manager for the organization at cloud.mongodb.com by selecting API Keys, and the Atlas Administration API returns the assigned roles on the organization API keys resource. This check requires that no key holds the organization-level Organization Owner role.
+
+        **Why this matters**
+
+        Organization Owner is unrestricted. A key holding it can change any organization setting, add or remove members, reach every project, and delete deployments. Attaching that role to a key rather than a person removes the two protections that normally guard it: there is no second factor to present and no interactive sign-in to notice.
+
+        Keys live where secrets leak. They sit in pipeline variables, deployment manifests, container images, and configuration repositories, and a single overly verbose build log can expose one to anyone who can read the build. An attacker who finds such a key does not need to phish anybody. They call the Atlas Administration API directly, lift the organization requirement for a source access list so their own address works, create a second key for persistence, add themselves to a project network access list, and create a database user with broad roles. The original leak may be months old and the key still works.
+
+        Grant automation the narrowest role that lets it function, which for most tooling is a read-only organization role or a project-scoped role. Where a task genuinely needs owner-level authority, run it as a person who authenticates interactively with a second factor rather than as a standing key.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Open the **Access Manager** for the organization and select **API Keys**.
+        3. Review the organization role assigned to each key.
+
+        A passing result shows no key assigned the Organization Owner role; a failing result shows one or more keys with Organization Owner.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/orgs/{orgId}/apiKeys" \
+          | jq '[.results[] | {id, roles: [.roles[].roleName]}]'
+        ```
+
+        A passing response shows no key whose roles include ORG_OWNER; a failing response shows at least one key with ORG_OWNER.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+            2. Open the **Access Manager** for the organization and select **API Keys**.
+            3. Edit the affected key and replace the Organization Owner role with the least-privileged role the automation requires, then save.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API:
+
+            ```bash
+            curl -s -X PATCH --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/orgs/{orgId}/apiKeys/{apiUserId}" \
+              --data '{ "roles": ["ORG_READ_ONLY"] }'
+            ```
+  - uid: mondoo-mongodbatlas-security-org-identity-federation-configured
+    title: Ensure identity federation is configured for the organization
+    impact: 50
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: false
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-5-16
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-6
+      compliance/nist-csf-2: nist-csf-2-pr-aa-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-2
+      compliance/nist-sp-800-171: false
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-1-8
+      compliance/vda-isa-5: vda-isa-5-4-1-1
+    mql: |
+      mongodbatlas.federationSettings != empty
+    docs:
+      desc: |
+        This check verifies that the Atlas organization delegates authentication to an external identity provider.
+
+        Identity federation connects the organization to a SAML or OIDC provider so members authenticate against a central directory instead of a standalone Atlas login. It is set up under Federated Authentication Settings, reached from Organization Settings at cloud.mongodb.com, and the Atlas Administration API exposes the resulting configuration through the organization federation settings resource. This check requires a federation configuration to exist for the organization.
+
+        **Why this matters**
+
+        Without federation, each member holds a separate Atlas credential that your organization does not control. You cannot set its password policy, you cannot require a particular authentication method, you cannot force a reset after a breach, and most importantly you cannot revoke it. Disabling somebody in the corporate directory has no effect on an Atlas login that was never connected to that directory.
+
+        That gap is the one attackers use after a departure. A former employee's Atlas password still works weeks after their laptop was collected and their mail account was closed, because nothing in the offboarding process touched Atlas. The same gap makes credential reuse worse: a password that was also used on a site that got breached remains valid on Atlas indefinitely, since no central policy ever expired it. With federation in place, a single disable in the identity provider ends the session and blocks the next sign-in.
+
+        Federation is only effective once the organization's email domains are federated as well, so pair this with the companion check in this policy that looks for federated domains. Keep one break-glass Atlas login outside the federation and protect it strongly, so an identity provider outage does not lock the organization out of its own console.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Open **Organization Settings** and go to the **Federated Authentication Settings** area.
+        3. Check whether a federation configuration and identity provider are present.
+
+        A passing result shows an active federation configuration; a failing result shows no federation configured.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/orgs/{orgId}/federationSettings" \
+          | jq '{identityProviderStatus, hasRoleMappings}'
+        ```
+
+        A passing response returns a federation settings object for the organization; a failing response returns no federation settings.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+            2. Open **Organization Settings** and go to **Federated Authentication Settings**.
+            3. Start the setup, choose SAML or OIDC, enter the identity provider metadata, and link the organization to the resulting federation configuration.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API:
+
+            Identity federation setup requires exchanging metadata with your identity provider and is completed through the Federation Management interface in the dashboard. After federation exists, you can review and manage the connected organization configuration:
+
+            ```bash
+            curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/federationSettings/{federationSettingsId}/connectedOrgConfigs/{orgId}"
+            ```
+  - uid: mondoo-mongodbatlas-security-org-federated-domains-configured
+    title: Ensure the organization has federated at least one domain
+    impact: 40
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: false
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-5-16
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-6
+      compliance/nist-csf-2: nist-csf-2-pr-aa-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-2
+      compliance/nist-sp-800-171: false
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-1-8
+      compliance/vda-isa-5: vda-isa-5-4-1-1
+    mql: |
+      mongodbatlas.federationSettings != empty && mongodbatlas.federationSettings.federatedDomains != empty
+    docs:
+      desc: |
+        This check verifies that identity federation exists for the organization and that at least one email domain has been federated to it.
+
+        Federating a domain tells Atlas which email addresses are governed by the identity provider. It is done under Federated Authentication Settings, reached from Organization Settings at cloud.mongodb.com, and requires a verification step that proves you control the domain. The Atlas Administration API returns the current list on the organization federation settings resource. This check requires that list to be non-empty.
+
+        **Why this matters**
+
+        Connecting an identity provider decides how members can sign in; federating a domain decides that they must. Until a domain is federated, Atlas has no reason to route an address at that domain through the provider, so members keep whatever standalone Atlas password they already had and can continue signing in with it. The federation looks configured on the settings page while none of its controls are actually reached.
+
+        That leaves the exact bypass federation was bought to close. A member who leaves is disabled in the directory, their federated login stops working, and their old Atlas password still signs them in. An attacker who phishes that password gets a working session that the identity provider never sees and never evaluates, so conditional access rules, device checks, and any second factor enforced at the provider are all skipped.
+
+        Federate every email domain your members actually use, not just the primary one, since acquisitions and regional domains are the ones that get missed. Compare the federated domain list against the addresses in the organization member list and follow up on any domain that appears in the second list but not the first. Contractors on external addresses cannot be federated, so grant them narrow roles and review them separately.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Open **Organization Settings** and go to **Federated Authentication Settings**.
+        3. Review the list of federated domains associated with the organization.
+
+        A passing result shows at least one federated domain; a failing result shows federation with no federated domains, or no federation at all.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/orgs/{orgId}/federationSettings" \
+          | jq '.federatedDomains'
+        ```
+
+        A passing response shows a non-empty list of federated domains; a failing response shows an empty list or no federation settings.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+            2. Open **Organization Settings** and go to **Federated Authentication Settings**.
+            3. Add each corporate email domain, complete the domain verification step, and confirm it appears in the federated domain list.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API:
+
+            Domain federation requires a verification step that is completed in the Federation Management interface in the dashboard. After a domain is federated, confirm it is associated with the organization:
+
+            ```bash
+            curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/orgs/{orgId}/federationSettings" \
+              | jq '.federatedDomains'
+            ```
+  - uid: mondoo-mongodbatlas-security-org-saml-strong-signature-algorithm
+    title: Ensure SAML identity providers use a strong response signature algorithm
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-13
+      compliance/nist-sp-800-171: false
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-1-8
+      compliance/vda-isa-5: vda-isa-5-5-1-1
+    mql: |
+      mongodbatlas.federationSettings == empty || mongodbatlas.federationSettings.identityProviders.where(protocol == "SAML").all(responseSignatureAlgorithm == "SHA-256")
+    docs:
+      desc: |
+        This check verifies that every SAML identity provider configured for the organization signs its responses with SHA-256.
+
+        Atlas accepts the identity asserted in a SAML response because a signature proves the response came from the identity provider. The algorithm behind that signature is set per provider under Federated Authentication Settings, reached from Organization Settings at cloud.mongodb.com, and the Atlas Administration API reports it as `responseSignatureAlgorithm` on the identity providers resource. This check requires SHA-256 on every SAML provider and fails on weaker choices such as SHA-1.
+
+        **Why this matters**
+
+        The signature is the whole basis of trust in federated login. Atlas performs no independent verification of who the user is; it reads the assertion, checks the signature, and admits whoever the assertion names. Weaken the signature and you weaken the only thing keeping an attacker from naming themselves.
+
+        SHA-1 is no longer safe for that job. Practical collision attacks against it mean an attacker who can influence any part of the signed content can construct a second document with the same digest, so a valid signature no longer proves the document was not altered. An attacker who forges an assertion naming an Organization Owner does not need a password, does not encounter a second factor, and does not appear in the identity provider's logs at all, because the identity provider was never involved in the sign-in they performed.
+
+        Both sides have to agree, so set the algorithm on the identity provider as well as in Atlas; changing only the Atlas side produces rejected logins rather than stronger ones. Organizations with no SAML provider configured pass this check without action, and OIDC providers are governed by their own signing configuration rather than this setting.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Open **Organization Settings** and go to **Federated Authentication Settings**, then open each SAML identity provider.
+        3. Read the configured response signature algorithm.
+
+        A passing result shows SHA-256 for every SAML identity provider; a failing result shows any SAML identity provider set to a weaker algorithm such as SHA-1.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/federationSettings/{federationSettingsId}/identityProviders" \
+          | jq '[.results[] | select(.protocol == "SAML") | {displayName, responseSignatureAlgorithm}]'
+        ```
+
+        A passing response shows responseSignatureAlgorithm equal to SHA-256 for every SAML provider; a failing response shows any SAML provider with a weaker algorithm.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+            2. Open **Organization Settings** and go to **Federated Authentication Settings**, then open the affected SAML identity provider.
+            3. Set the response signature algorithm to SHA-256, save, and confirm the identity provider is also configured to sign with SHA-256.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API:
+
+            ```bash
+            curl -s -X PATCH --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/federationSettings/{federationSettingsId}/identityProviders/{identityProviderId}" \
+              --data '{ "responseSignatureAlgorithm": "SHA-256" }'
+            ```
+  - uid: mondoo-mongodbatlas-security-project-cluster-min-tls
+    title: Ensure clusters require TLS 1.2 or higher
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-2-ii-transmission-security-encryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: |
+      mongodbatlas.clusters.all(minimumEnabledTlsProtocol == "TLS1_2" || minimumEnabledTlsProtocol == "TLS1_3")
+    docs:
+      desc: |
+        This check verifies that every database deployment in the project refuses connections negotiated below TLS 1.2.
+
+        The protocol floor is set per cluster under Set Minimum TLS Protocol Version, reached by opening the cluster from Database Deployments, choosing Edit Configuration, then Additional Settings and Advanced Configuration Options. The Atlas Administration API reports it as `minimumEnabledTlsProtocol` on the cluster process arguments resource. This check accepts TLS 1.2 or TLS 1.3 and fails on TLS 1.0 or TLS 1.1.
+
+        **Why this matters**
+
+        A protocol floor is a floor, not a preference. Setting it to TLS 1.0 does not mean old clients occasionally use TLS 1.0; it means the server will accept TLS 1.0 from anything that asks, including an attacker who controls the client half of the handshake.
+
+        That is the practical attack. An attacker positioned between an application and the cluster, on a shared network segment or a compromised load balancer, tampers with the handshake so the strongest mutually acceptable version appears to be the weakest one the server allows. The session then runs over TLS 1.0 or TLS 1.1, whose cipher constructions are broken by well-published attacks including BEAST and POODLE, and the attacker recovers plaintext from a connection both ends believe is encrypted. What travels over that connection is query arguments and returned documents, which routinely include authentication material, personal data, and business records.
+
+        Confirm that drivers and applications support TLS 1.2 before raising the floor, because a client that cannot negotiate it will fail to connect rather than fall back. Legacy clients that cannot be upgraded should be replaced or fronted by something that can, rather than being accommodated by lowering the floor.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Select the project, open the cluster from Database Deployments, choose Edit Configuration, then open Additional Settings and expand Advanced Configuration Options.
+        3. Review the value of Set Minimum TLS Protocol Version.
+
+        A passing result shows TLS 1.2 or TLS 1.3; a failing result shows TLS 1.0 or TLS 1.1.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/groups/{groupId}/clusters/{clusterName}/processArgs" \
+          | jq '.minimumEnabledTlsProtocol'
+        ```
+
+        A passing response shows "TLS1_2" or "TLS1_3"; a failing response shows "TLS1_0" or "TLS1_1".
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Sign in to MongoDB Atlas at cloud.mongodb.com and select the project.
+            2. Open the cluster from Database Deployments and choose Edit Configuration.
+            3. Open Additional Settings and expand Advanced Configuration Options.
+            4. Set Minimum TLS Protocol Version to TLS 1.2 or TLS 1.3 and apply the change.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API:
+
+            ```bash
+            curl -s -X PATCH --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/{groupId}/clusters/{clusterName}/processArgs" \
+              --data '{ "minimumEnabledTlsProtocol": "TLS1_2" }'
+            ```
+  - uid: mondoo-mongodbatlas-security-project-cluster-encryption-at-rest
+    title: Ensure clusters use customer-managed encryption at rest
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-08
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-2-iv-access-control-encryption-and-decryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-1
+      compliance/nist-csf-2: nist-csf-2-pr-ds-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-28
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-3-5-1
+      compliance/soc2-2017: soc2-control-cc6-1-10
+      compliance/vda-isa-5: vda-isa-5-5-1-1
+    mql: |
+      mongodbatlas.clusters.all(encryptionAtRestProvider != "NONE")
+    docs:
+      desc: |
+        This check verifies that every database deployment in the project encrypts its stored data under a key your organization controls.
+
+        Atlas always encrypts storage with keys it manages, but a cluster can additionally be bound to a customer-managed key held in AWS KMS, Azure Key Vault, or Google Cloud KMS. The cluster-side setting is Encryption at Rest using your Key Management, found by opening the cluster from Database Deployments, choosing Edit Configuration, then Additional Settings. The Atlas Administration API reports it as `encryptionAtRestProvider` on the clusters resource, and a value of `NONE` means the cluster relies on provider-held keys alone. This check requires a real provider instead.
+
+        **Why this matters**
+
+        Whoever holds the key decides who can read the data. With provider-held keys only, that decision is not yours to make. You cannot rotate the key on your own schedule, you cannot disable it, and you have no way to render the stored copies unreadable if you conclude they are exposed.
+
+        That matters most on the day something goes wrong. If a backup snapshot ends up somewhere it should not be, or a support process reaches storage it should not have reached, a customer-managed key lets you revoke access and cut the data off at the storage layer within minutes. Without it, your only recourse is to ask the provider and wait. The same key gives you a hard answer for decommissioning: destroy the key and the ciphertext left behind anywhere is inert.
+
+        Configure the project encryption settings before enabling the cluster-side option, since the cluster has nothing to bind to otherwise. Govern the external key as carefully as the data it protects, because losing access to it makes the cluster unreadable to you as well, and revoking it in error is an outage.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Select the project, open the cluster from Database Deployments, choose Edit Configuration, then open Additional Settings.
+        3. Review whether Encryption at Rest using your Key Management is enabled and shows a configured key provider.
+
+        A passing result shows a customer key provider such as AWS KMS, Azure Key Vault, or Google Cloud KMS; a failing result shows encryption at rest set to none.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/groups/{groupId}/clusters" \
+          | jq '.results[] | {name, encryptionAtRestProvider}'
+        ```
+
+        A passing response shows a provider such as "AWS", "AZURE", or "GCP"; a failing response shows "NONE".
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Sign in to MongoDB Atlas at cloud.mongodb.com and select the project.
+            2. Open Security, then Advanced, and configure Encryption at Rest with your cloud key management provider and key.
+            3. Open the cluster from Database Deployments, choose Edit Configuration, open Additional Settings, and enable Encryption at Rest using your Key Management.
+            4. Apply the change and confirm the cluster shows the configured key provider.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API:
+
+            ```bash
+            curl -s -X PATCH --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/{groupId}/clusters/{clusterName}" \
+              --data '{ "encryptionAtRestProvider": "AWS" }'
+            ```
+  - uid: mondoo-mongodbatlas-security-project-cluster-backup-enabled
+    title: Ensure cloud backup is enabled for clusters
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-bcr-08
+      compliance/dora: dora-art-12
+      compliance/hipaa: hipaa-security-ss164-308-a-7-ii-a-contingency-plan-data-backup-plan
+      compliance/iso-27001-2022: iso-27001-2022-a-8-13
+      compliance/nis-2: nis-2-21-2-c
+      compliance/nist-csf-1: nist-csf-1-pr-ip-4
+      compliance/nist-csf-2: nist-csf-2-pr-ds-11
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cp-9
+      compliance/nist-sp-800-171: false
+      compliance/owasp-top-10-2025: false
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: false
+    mql: |
+      mongodbatlas.clusters.all(backupEnabled == true)
+      mongodbatlas.flexClusters.all(backupEnabled == true)
+    docs:
+      desc: |
+        This check verifies that cloud backup is turned on for every database deployment in the project, covering both standard clusters and Flex clusters.
+
+        Cloud backup is enabled per deployment through Turn on Backup, found by opening the cluster from Database Deployments, choosing Edit Configuration, then Additional Settings. The Atlas Administration API reports it as `backupEnabled` on the clusters resource. Flex clusters are a separate deployment type reported through their own collection, so this check evaluates both collections to avoid passing a project whose only unprotected deployment happens to be a Flex cluster.
+
+        **Why this matters**
+
+        With backup off, Atlas takes no managed snapshots, which means there is no restore point at all. Recovery is not slow in that state; it is impossible. A dropped collection, an application defect that rewrites the wrong documents, or a migration that runs against production instead of staging leaves nothing to go back to.
+
+        It is also what makes destructive intrusions permanent. An attacker who reaches a cluster with a database user holding broad roles can drop collections outright or encrypt the contents and demand payment. Against a deployment with backups, that is an outage measured in hours and a decision not to pay. Against a deployment without them, the data is gone, and the only remaining copy is whatever the attacker kept.
+
+        Enable backup on every deployment that holds data the business depends on, and restore from a snapshot periodically so you learn whether recovery works before you need it. Deployments that hold nothing but reproducible scratch data are a reasonable exception, but confirm that claim rather than assuming it, since scratch environments accumulate real data over time.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Select the project and open the cluster from Database Deployments, then choose Edit Configuration and open Additional Settings.
+        3. Review whether Turn on Backup is enabled for the cluster.
+
+        A passing result shows backup enabled; a failing result shows backup turned off.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/groups/{groupId}/clusters" \
+          | jq '.results[] | {name, backupEnabled}'
+        ```
+
+        A passing response shows `backupEnabled` set to true; a failing response shows false.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Sign in to MongoDB Atlas at cloud.mongodb.com and select the project.
+            2. Open the cluster from Database Deployments and choose Edit Configuration.
+            3. Open Additional Settings and enable Turn on Backup.
+            4. Apply the change.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API:
+
+            ```bash
+            curl -s -X PATCH --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/{groupId}/clusters/{clusterName}" \
+              --data '{ "backupEnabled": true }'
+            ```
+  - uid: mondoo-mongodbatlas-security-project-cluster-pit-enabled
+    title: Ensure continuous point-in-time recovery is enabled for clusters
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-bcr-08
+      compliance/dora: dora-art-12
+      compliance/hipaa: hipaa-security-ss164-308-a-7-ii-b-contingency-plan-disaster-recovery-plan
+      compliance/iso-27001-2022: iso-27001-2022-a-8-13
+      compliance/nis-2: nis-2-21-2-c
+      compliance/nist-csf-1: nist-csf-1-pr-ip-4
+      compliance/nist-csf-2: nist-csf-2-pr-ds-11
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cp-10
+      compliance/nist-sp-800-171: false
+      compliance/owasp-top-10-2025: false
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: false
+    mql: |
+      mongodbatlas.clusters.all(pitEnabled == true)
+    docs:
+      desc: |
+        This check verifies that continuous point-in-time recovery is turned on for every database deployment in the project.
+
+        Continuous Cloud Backup, also labeled point-in-time recovery, is enabled per cluster by opening it from Database Deployments, choosing Edit Configuration, then Additional Settings. It requires cloud backup to be on first. The Atlas Administration API reports it as `pitEnabled` on the clusters resource. With it enabled, Atlas continuously captures the oplog so the deployment can be restored to any moment inside the retention window rather than only to the times snapshots were taken.
+
+        **Why this matters**
+
+        Snapshot-only backup sets the size of the hole you accept. Restoring to the last snapshot discards every write made since it was taken, which for a busy cluster can mean hours of orders, payments, or messages that no longer exist after recovery.
+
+        The gap also forces a bad choice during an incident. When an attacker with database access modifies or deletes records at a known moment, or an application defect starts corrupting documents at a known deploy time, point-in-time recovery lets you restore to the second before that moment and lose almost nothing. With snapshots alone, the nearest clean restore point may sit well before the event, so recovering from the damage means throwing away a large amount of legitimate work along with it, and teams under pressure often decide to keep the corruption instead.
+
+        Set a retention window that matches how long it realistically takes your team to notice a problem, since a window shorter than your detection time provides no usable restore point. Confirm restores succeed periodically rather than assuming the capability works, and note that this control needs cloud backup enabled alongside it.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Select the project, open the cluster from Database Deployments, choose Edit Configuration, and open Additional Settings.
+        3. Review whether Continuous Cloud Backup, also called point-in-time recovery, is enabled.
+
+        A passing result shows point-in-time recovery enabled; a failing result shows it turned off.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/groups/{groupId}/clusters" \
+          | jq '.results[] | {name, pitEnabled}'
+        ```
+
+        A passing response shows `pitEnabled` set to true; a failing response shows false.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Sign in to MongoDB Atlas at cloud.mongodb.com and select the project.
+            2. Open the cluster from Database Deployments and choose Edit Configuration.
+            3. Open Additional Settings, confirm Turn on Backup is enabled, and enable Continuous Cloud Backup.
+            4. Apply the change.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API:
+
+            ```bash
+            curl -s -X PATCH --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/{groupId}/clusters/{clusterName}" \
+              --data '{ "backupEnabled": true, "pitEnabled": true }'
+            ```
+  - uid: mondoo-mongodbatlas-security-project-cluster-termination-protection
+    title: Ensure termination protection is enabled for clusters
+    impact: 50
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-04
+      compliance/dora: false
+      compliance/hipaa: false
+      compliance/iso-27001-2022: false
+      compliance/nis-2: false
+      compliance/nist-csf-1: false
+      compliance/nist-csf-2: false
+      compliance/nist-sp-800-53-rev5: false
+      compliance/nist-sp-800-171: false
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a08
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: false
+    mql: |
+      mongodbatlas.clusters.all(terminationProtectionEnabled == true)
+      mongodbatlas.flexClusters.all(terminationProtectionEnabled == true)
+    docs:
+      desc: |
+        This check verifies that termination protection is turned on for every database deployment in the project, covering both standard clusters and Flex clusters.
+
+        Termination Protection is set per deployment by opening the cluster from Database Deployments, choosing Edit Configuration, then Additional Settings. The Atlas Administration API reports it as `terminationProtectionEnabled` on the clusters resource. Flex clusters are a separate deployment type reported through their own collection, so this check evaluates both so that a Flex deployment cannot be left unprotected while the project still passes. With protection on, Atlas refuses a delete request until protection is explicitly removed in a separate operation.
+
+        **Why this matters**
+
+        Deleting a deployment destroys the data store. What survives is whatever backups exist, and restoring from them costs downtime and loses the writes made since the last recovery point, so a single unintended delete is a genuine incident rather than a minor mistake.
+
+        The two-step requirement is what makes it hard to do by accident and hard to do quickly on purpose. Automation that names the wrong deployment, a script whose target variable is empty, or a console click on the row above the one intended all stop at the first step. So does an attacker. A credential that reaches the Atlas Administration API cannot destroy a protected deployment in one call; it must first disable protection, which is a second authenticated request that can be alerted on and that gives you a window to notice.
+
+        Restrict which project roles can remove protection so disabling it stays a deliberate, authorized act. Short-lived deployments that are created and destroyed by automation are the reasonable exception, provided the automation is the only thing that can reach them and no production data ever lands there.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Select the project, open the cluster from Database Deployments, choose Edit Configuration, and open Additional Settings.
+        3. Review whether Termination Protection is enabled for the cluster.
+
+        A passing result shows termination protection enabled; a failing result shows it turned off.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/groups/{groupId}/clusters" \
+          | jq '.results[] | {name, terminationProtectionEnabled}'
+        ```
+
+        A passing response shows `terminationProtectionEnabled` set to true; a failing response shows false.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Sign in to MongoDB Atlas at cloud.mongodb.com and select the project.
+            2. Open the cluster from Database Deployments and choose Edit Configuration.
+            3. Open Additional Settings and enable Termination Protection.
+            4. Apply the change.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API:
+
+            ```bash
+            curl -s -X PATCH --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/{groupId}/clusters/{clusterName}" \
+              --data '{ "terminationProtectionEnabled": true }'
+            ```
+  - uid: mondoo-mongodbatlas-security-project-cluster-redact-client-log-data
+    title: Ensure client log redaction is enabled for clusters
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-dsp-17
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-11
+      compliance/nis-2: false
+      compliance/nist-csf-1: nist-csf-1-pr-ds-5
+      compliance/nist-csf-2: false
+      compliance/nist-sp-800-53-rev5: false
+      compliance/nist-sp-800-171: false
+      compliance/owasp-top-10-2025: false
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: false
+    mql: |
+      mongodbatlas.clusters.all(redactClientLogData == true)
+    docs:
+      desc: |
+        This check verifies that client log redaction is turned on for every database deployment in the project.
+
+        Redact Client Log Data is set per cluster by opening it from Database Deployments, choosing Edit Configuration, then Additional Settings, and the Atlas Administration API reports it as `redactClientLogData` on the clusters resource. With redaction on, MongoDB strips the data portion of queries and operations from diagnostic and profiler output, leaving the operation type and shape but not the field values.
+
+        **Why this matters**
+
+        Diagnostic logs record the literal arguments of slow queries and the documents they touched. That means the log becomes a second copy of the data, held in a place with none of the protections the database has. It is not covered by the database roles that decide who can read a collection, it is not scoped by cluster, and it is not encrypted under the key that protects storage.
+
+        The copy then travels. Logs get exported to an observability platform, attached to support tickets, pasted into chat while somebody debugs a slow endpoint, and shipped to a bucket that a much wider group can read. An attacker who never gets database credentials at all can reach the log destination instead and read the same account numbers, tokens, and personal records straight out of the query text, along with a precise map of which collections hold what.
+
+        Redaction removes the values but keeps the operation shape, so query performance work still functions and you lose only the literals. Where an investigation genuinely needs the values, retrieve them from the database under the access controls that govern it rather than turning redaction off, and pair this with encryption at rest so any sensitive data that must be retained elsewhere stays protected.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Select the project, open the cluster from Database Deployments, choose Edit Configuration, and open Additional Settings.
+        3. Review whether Redact Client Log Data is enabled for the cluster.
+
+        A passing result shows log redaction enabled; a failing result shows it turned off.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/groups/{groupId}/clusters" \
+          | jq '.results[] | {name, redactClientLogData}'
+        ```
+
+        A passing response shows `redactClientLogData` set to true; a failing response shows false.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Sign in to MongoDB Atlas at cloud.mongodb.com and select the project.
+            2. Open the cluster from Database Deployments and choose Edit Configuration.
+            3. Open Additional Settings and enable Redact Client Log Data.
+            4. Apply the change.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API:
+
+            ```bash
+            curl -s -X PATCH --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/{groupId}/clusters/{clusterName}" \
+              --data '{ "redactClientLogData": true }'
+            ```
+  - uid: mondoo-mongodbatlas-security-project-cluster-supported-version
+    title: Ensure clusters run a supported MongoDB major version
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-12
+      compliance/nist-csf-2: nist-csf-2-pr-ps-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sa-22
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a03
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: vda-isa-5-5-2-5
+    mql: |
+      mongodbatlas.clusters.all(mongoDBMajorVersion >= "7.0")
+    docs:
+      desc: |
+        This check verifies that every database deployment in the project runs MongoDB 7.0 or newer.
+
+        The major version of a deployment is shown on Database Deployments and can be changed through Edit Configuration and Additional Settings, and the Atlas Administration API reports it on the clusters resource. This check requires 7.0 or a later major release, which is the boundary between versions MongoDB still ships security fixes for and versions it does not.
+
+        **Why this matters**
+
+        Support status decides whether a vulnerability in your database ever gets fixed. Once a major release passes end of life, a defect found in it afterward is patched in the current releases and left in place in yours, permanently. The gap widens every month, because the supported branches keep receiving fixes while the retired one stays where it was.
+
+        Those fixes are public, and that is what makes the position dangerous. Release notes and advisories describe exactly what was wrong and in which versions, so an attacker who fingerprints the version a cluster reports has a documented list of what to try, with no research required. Running an unsupported release turns a query about your version into a working attack plan.
+
+        The upgrade also gets harder the longer it waits, since major version jumps must generally be taken in order and each one carries its own driver and behavior changes.
+
+        Check application and driver compatibility with the target version before upgrading, because the change applies to a live deployment. Track MongoDB's release calendar so upgrades are scheduled before a release reaches end of life rather than after an advisory arrives naming a version you are still running.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Select the project and open Database Deployments to view each cluster.
+        3. Review the MongoDB version shown for each cluster, or open Edit Configuration and Additional Settings to see the selected major version.
+
+        A passing result shows version 7.0 or newer; a failing result shows an older major version.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/groups/{groupId}/clusters" \
+          | jq '.results[] | {name, mongoDBMajorVersion}'
+        ```
+
+        A passing response shows `mongoDBMajorVersion` of "7.0" or newer; a failing response shows an older version.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Sign in to MongoDB Atlas at cloud.mongodb.com and select the project.
+            2. Review application and driver compatibility with the target major version before upgrading.
+            3. Open the cluster from Database Deployments and choose Edit Configuration.
+            4. Open Additional Settings, select a supported MongoDB major version of 7.0 or newer, and apply the change.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API:
+
+            ```bash
+            curl -s -X PATCH --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/{groupId}/clusters/{clusterName}" \
+              --data '{ "mongoDBMajorVersion": "7.0" }'
+            ```
+  - uid: mondoo-mongodbatlas-security-project-cluster-maintained-release-track
+    title: Ensure clusters receive continuous security updates
+    impact: 30
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-12
+      compliance/nist-csf-2: nist-csf-2-pr-ps-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a03
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: vda-isa-5-5-2-5
+    mql: |
+      mongodbatlas.clusters.all(versionReleaseSystem == "CONTINUOUS")
+    docs:
+      desc: |
+        This check verifies that every database deployment in the project is on the continuous release track so patch and minor releases are applied automatically.
+
+        The choice is made per cluster through Version Release System, found by opening the cluster from Database Deployments, choosing Edit Configuration, then Additional Settings, where it appears as Continuous Delivery or as a pinned major version. The Atlas Administration API reports the same field on the clusters resource. On the continuous track Atlas rolls out maintenance and security releases as they become available; the alternative pins a major version and leaves patch adoption to you.
+
+        **Why this matters**
+
+        The interval between a fix being published and being installed is the interval during which the fix is a public description of how to attack your cluster. Advisories name the affected versions and the release that corrects them, so an attacker who can determine which version a deployment reports knows both that it is vulnerable and what to send. On the continuous track that interval is short and requires nobody to act. Pinned to a major version, it lasts until someone notices the release, schedules a maintenance window, and executes it, which in practice is often measured in months.
+
+        Pinning is not automatically wrong. Teams pin deliberately for stability, for a certification requirement, or because a driver has a known incompatibility. It becomes wrong when the pin is chosen for those reasons and then nobody owns the patch process that pinning made their responsibility.
+
+        If a deployment is pinned on purpose, put someone on the release notes and schedule patch upgrades on a defined cadence, and confirm the pinned major version is still supported at all, which the companion check in this policy on supported major versions evaluates.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Select the project, open the cluster from Database Deployments, choose Edit Configuration, and open Additional Settings.
+        3. Review the Version Release System, which shows either Continuous Delivery or a pinned major version.
+
+        A passing result shows the continuous release track; a failing result shows a pinned LTS major version.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/groups/{groupId}/clusters" \
+          | jq '.results[] | {name, versionReleaseSystem}'
+        ```
+
+        A passing response shows `versionReleaseSystem` set to "CONTINUOUS"; a failing response shows "LTS".
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Sign in to MongoDB Atlas at cloud.mongodb.com and select the project.
+            2. Open the cluster from Database Deployments and choose Edit Configuration.
+            3. Open Additional Settings and set the Version Release System to Continuous Delivery.
+            4. Apply the change.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API:
+
+            ```bash
+            curl -s -X PATCH --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/{groupId}/clusters/{clusterName}" \
+              --data '{ "versionReleaseSystem": "CONTINUOUS" }'
+            ```
+  - uid: mondoo-mongodbatlas-security-project-dbuser-external-auth
+    title: Ensure database users use federated or certificate-based authentication
+    impact: 50
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-14
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-2
+    mql: |
+      mongodbatlas.databaseUsers.all(databaseName == "$external")
+    docs:
+      desc: |
+        This check verifies that every database user in the project authenticates through a federated or certificate-based mechanism rather than a stored password.
+
+        Atlas database users authenticate either with a SCRAM password held in the admin database or with an external mechanism such as an X.509 certificate, AWS IAM, LDAP, or OIDC. Users on an external mechanism are defined against the `$external` authentication database, which is what the Authentication Method column reflects under Security and Database Access for the project. The Atlas Administration API reports the same distinction on the database users resource, and this check requires `$external` for every user.
+
+        **Why this matters**
+
+        A SCRAM password is a long-lived static secret that has to be readable by whatever connects. It lives in an application configuration file, an environment variable, a deployment manifest, and usually a shared note somewhere as well. Every one of those is a place an attacker reads without touching the database: a leaked repository, a container image layer, a misconfigured secrets store, or a crash dump that captured the environment.
+
+        Once read, it works from anywhere the network permits, for as long as nobody rotates it, which for database passwords is frequently never. Certificates and federated tokens change that. Tokens issued by AWS IAM or OIDC are short-lived and tied to a workload identity, so a captured one expires on its own, and an X.509 certificate can be revoked centrally the moment it is suspected. Both also tie database activity back to a real identity instead of an anonymous shared account.
+
+        Create the replacement user against `$external`, move the application to it, then delete the password user it replaces, since removing the old credential is the step that actually closes the exposure. Break-glass access may still warrant a password user, which should be tightly scoped and monitored.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Select the project, then open **Security** and choose **Database Access**.
+        3. On the **Database Users** tab, review the **Authentication Method** for each user.
+
+        A passing result shows every user authenticating with an X.509, AWS IAM, LDAP, or OIDC method; a failing result shows one or more users using a SCRAM password.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/groups/{groupId}/databaseUsers" \
+          | jq '.results[] | {username, databaseName}'
+        ```
+
+        A passing response shows `databaseName` set to `$external` for every user; a failing response shows a user with `databaseName` set to `admin`, which indicates SCRAM password authentication.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Select the project, then open **Security** and choose **Database Access**.
+            2. On the **Database Users** tab, select **Add New Database User**.
+            3. Choose an authentication method of **Certificate**, **AWS IAM**, **LDAP**, or **OIDC / Workforce Identity Federation** and configure the identity.
+            4. Assign the required roles and scopes, then save the new user.
+            5. Update the applications to use the new credentials and delete the SCRAM password user it replaces.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API, create a replacement user against the `$external` database with the appropriate authentication type, then remove the password user:
+
+            ```bash
+            curl -s -X POST --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/{groupId}/databaseUsers" \
+              --data '{
+                "databaseName": "$external",
+                "username": "CN=app-service,OU=engineering,O=example",
+                "x509Type": "MANAGED",
+                "roles": [ { "databaseName": "appdb", "roleName": "readWrite" } ]
+              }'
+            ```
+  - uid: mondoo-mongodbatlas-security-project-dbuser-no-atlas-admin
+    title: Ensure database users are not granted the atlasAdmin role
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a12
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-05
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-2
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-5
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-2
+      compliance/soc2-2017: soc2-control-cc6-3-1
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: |
+      mongodbatlas.databaseUsers.all(roles.none(_['roleName'] == "atlasAdmin"))
+    docs:
+      desc: |
+        This check verifies that no database user in the project is assigned the `atlasAdmin` role.
+
+        The role is the project-wide database superuser. It grants full administrative privilege across every cluster in the project, including reading and modifying all data, managing other database users, and running destructive administrative commands. Role assignments are visible under Security and Database Access for the project at cloud.mongodb.com by selecting Edit on a user, and the Atlas Administration API returns them on the database users resource.
+
+        **Why this matters**
+
+        The role converts any compromise of a single credential into control of the whole project. An attacker who obtains it does not need to move laterally, because there is nowhere left to move to; every cluster, every database, and every collection in the project is already reachable from the connection they hold.
+
+        That credential is usually easier to obtain than the privilege deserves, because superuser roles get handed to application accounts during setup and never narrowed afterward. The application's connection string then sits in the same configuration files, images, and pipeline variables as everything else, and a leak that would otherwise have exposed one database's contents exposes all of them instead. The role also lets the attacker create additional database users, so their access survives the rotation of the credential that let them in.
+
+        Replace it with the specific built-in roles each user needs, such as `readWrite` on the one database an application writes to, or `read` where the workload only queries. Keep genuine administrative work with a small, named set of human operators rather than with shared or application accounts, so an administrative action can always be traced to a person.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Select the project, then open **Security** and choose **Database Access**.
+        3. On the **Database Users** tab, review the roles listed for each user and expand **Edit** to see the full role assignment.
+
+        A passing result shows no user assigned `atlasAdmin`; a failing result shows one or more users holding the `atlasAdmin` role.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/groups/{groupId}/databaseUsers" \
+          | jq '.results[] | {username, roles: [.roles[].roleName]}'
+        ```
+
+        A passing response lists only scoped roles for each user; a failing response includes `atlasAdmin` in a user's role list.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Select the project, then open **Security** and choose **Database Access**.
+            2. On the **Database Users** tab, select **Edit** for the affected user.
+            3. Remove the `atlasAdmin` role and add the specific built-in roles the user needs, such as `readWrite` on the required database.
+            4. Save the user and confirm the application still functions with the reduced privileges.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API, replace the user's roles with a scoped set:
+
+            ```bash
+            curl -s -X PATCH --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/{groupId}/databaseUsers/admin/{username}" \
+              --data '{
+                "roles": [ { "databaseName": "appdb", "roleName": "readWrite" } ]
+              }'
+            ```
+  - uid: mondoo-mongodbatlas-security-project-dbuser-cluster-scoped
+    title: Ensure database users are scoped to specific clusters
+    impact: 40
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a12
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-05
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-3
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-5
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-2
+      compliance/soc2-2017: soc2-control-cc6-3-1
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: |
+      mongodbatlas.databaseUsers.all(scopes != empty)
+    docs:
+      desc: |
+        This check verifies that every database user in the project is restricted to named clusters rather than being able to connect to all of them.
+
+        By default an Atlas database user can authenticate to every deployment in the project. Restrict Access to Specific Clusters/Data Lakes, found by selecting Edit on a user under Security and Database Access, limits that reach to the deployments you list. The Atlas Administration API reports the same restriction as the scopes array on the database users resource, and this check requires it to be non-empty for every user.
+
+        **Why this matters**
+
+        Without a scope, a credential's reach has nothing to do with what the workload it belongs to actually uses. A reporting service that reads one analytics cluster can authenticate to the production cluster next to it using the very same credential, because nothing in the account says otherwise.
+
+        That is what turns a small leak into a large one. An attacker who recovers the connection string from the least protected service in the project, typically a batch job or an internal tool with looser deployment practices, does not get that service's data. They get every cluster in the project, and they enumerate them from the console or the Atlas Administration API to find the one worth taking. Scoping the credential ends that path at the first cluster, so the blast radius matches the workload rather than the project.
+
+        Give each workload its own scoped user instead of sharing one broad account, since a shared credential cannot be scoped to anything narrower than the union of everything that uses it. The scopes also document which service is expected to connect where, which shortens the work of deciding what a leaked credential could have reached.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Select the project, then open **Security** and choose **Database Access**.
+        3. On the **Database Users** tab, select **Edit** for each user and review the **Restrict Access to Specific Clusters/Data Lakes** setting.
+
+        A passing result shows each user restricted to named clusters; a failing result shows a user with access to all clusters and no scope defined.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/groups/{groupId}/databaseUsers" \
+          | jq '.results[] | {username, scopes}'
+        ```
+
+        A passing response shows a non-empty `scopes` array for every user; a failing response shows a user with an empty `scopes` array.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Select the project, then open **Security** and choose **Database Access**.
+            2. On the **Database Users** tab, select **Edit** for the affected user.
+            3. Enable **Restrict Access to Specific Clusters/Data Lakes** and select the clusters the user needs.
+            4. Save the user.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API, set the `scopes` array to the clusters the user requires:
+
+            ```bash
+            curl -s -X PATCH --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/{groupId}/databaseUsers/admin/{username}" \
+              --data '{
+                "scopes": [ { "name": "prod-cluster-0", "type": "CLUSTER" } ]
+              }'
+            ```
+  - uid: mondoo-mongodbatlas-security-project-dbuser-no-past-deletion
+    title: Ensure database users scheduled for deletion have been removed
+    impact: 30
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-07
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-308-a-3-ii-c-workforce-security-establish-termination-procedures
+      compliance/iso-27001-2022: iso-27001-2022-a-5-18
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-8-2-6
+      compliance/soc2-2017: soc2-control-cc6-2-2
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      mongodbatlas.databaseUsers.where(deleteAfterDate != null).all(deleteAfterDate > time.now)
+    docs:
+      desc: |
+        This check verifies that any database user with a scheduled deletion time still has that time in the future.
+
+        Atlas lets a database user carry a `deleteAfterDate` so the credential is removed automatically once the moment passes, which is how temporary and break-glass access is normally granted. Users with a scheduled expiration are visible under Security and Database Access for the project, and the Atlas Administration API returns the field on the database users resource. This check looks only at users that carry the field and requires the date to be later than now.
+
+        **Why this matters**
+
+        A user whose deletion time has passed but who is still listed means the expiry did not take effect. The access that was deliberately time-boxed is still live, and it is live in the worst possible way, because everyone involved believes it ended.
+
+        Temporary credentials are granted with less scrutiny precisely because they expire. A contractor is given access for a two-week engagement, a vendor is given access for a migration, an engineer is given elevated access for one incident. The password ends up in a chat message, an email, or a laptop that leaves with them, and nobody rotates it afterward because the account was supposed to be gone. An attacker who obtains it later, from that mailbox or that laptop, has a working database credential against an account nobody is watching and that appears on no current access review.
+
+        Delete the past-due user, or set a new valid expiration if the access is genuinely still needed rather than letting it drift with no end date. A failing result also points at the automation: find out why the scheduled removal did not run, because the same failure is likely affecting other expiring accounts.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Select the project, then open **Security** and choose **Database Access**.
+        3. On the **Database Users** tab, review any users that show a temporary or scheduled expiration and confirm none have an expiration in the past.
+
+        A passing result shows every temporary user with a future expiration; a failing result shows a user whose scheduled deletion time has already passed.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/groups/{groupId}/databaseUsers" \
+          | jq '.results[] | select(.deleteAfterDate != null) | {username, deleteAfterDate}'
+        ```
+
+        A passing response shows only future `deleteAfterDate` values; a failing response shows a `deleteAfterDate` that is earlier than the current time.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Select the project, then open **Security** and choose **Database Access**.
+            2. On the **Database Users** tab, locate the user whose scheduled deletion has passed.
+            3. Select **Delete** to remove the user, or **Edit** to set a new, valid expiration if the access is still required.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API, delete the expired user:
+
+            ```bash
+            curl -s -X DELETE --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/{groupId}/databaseUsers/{databaseName}/{username}"
+            ```
+  - uid: mondoo-mongodbatlas-security-project-custom-role-no-dangerous-actions
+    title: Ensure custom database roles do not grant destructive privilege actions
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a12
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-05
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-2
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-5
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-2
+      compliance/soc2-2017: soc2-control-cc6-3-1
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: |
+      mongodbatlas.customDatabaseRoles.all(actions.none(_['action'] == "DROP_DATABASE" || _['action'] == "DROP_COLLECTION" || _['action'] == "SHUTDOWN"))
+    docs:
+      desc: |
+        This check verifies that no custom database role in the project grants a destructive privilege action.
+
+        Custom roles let you assemble granular privilege actions and assign them to database users. Three of the available actions destroy or halt rather than read or write: `DROP_DATABASE` and `DROP_COLLECTION` delete data permanently, and `SHUTDOWN` stops a database process. Roles are defined on the Custom Roles tab under Security and Database Access for the project, and the Atlas Administration API returns each role's action list on the custom database roles resource. This check requires none of the three to appear.
+
+        **Why this matters**
+
+        These actions give an ordinary compromised account the ability to destroy rather than merely to read. An attacker holding a credential for a role that can only find and insert has to exfiltrate data to do damage, which takes time and leaves traffic to notice. An attacker holding a credential that can drop a collection ends the business process in one command, and if backups are weak the data does not come back.
+
+        That is also the mechanism behind extortion against databases. The attacker copies what they want, drops the collections, and leaves a note. The drop is what creates the pressure to pay, and it was authorized by a role somebody assembled for an application that never needed it. `SHUTDOWN` gives the same leverage without touching the data, by taking the process offline on demand.
+
+        Application and reporting roles have no legitimate use for any of the three, so remove them and confirm the workloads still function. Where destructive maintenance is genuinely required, put it in a separate role that a named operator assumes for the task, rather than leaving it in the role an application authenticates with every day.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Select the project, then open **Security** and choose **Database Access**.
+        3. On the **Custom Roles** tab, open each role and review the granted actions.
+
+        A passing result shows no custom role granting `DROP_DATABASE`, `DROP_COLLECTION`, or `SHUTDOWN`; a failing result shows a role that includes one of these actions.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/groups/{groupId}/customDBRoles/roles" \
+          | jq '.[] | {roleName, actions: [.actions[].action]}'
+        ```
+
+        A passing response lists only non-destructive actions; a failing response includes `DROP_DATABASE`, `DROP_COLLECTION`, or `SHUTDOWN` in a role's action list.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Select the project, then open **Security** and choose **Database Access**.
+            2. On the **Custom Roles** tab, select **Edit** for the affected role.
+            3. Remove the `DROP_DATABASE`, `DROP_COLLECTION`, and `SHUTDOWN` actions.
+            4. Save the role and confirm the workloads that use it still function.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API, update the role so its `actions` list excludes the destructive actions:
+
+            ```bash
+            curl -s -X PATCH --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/{groupId}/customDBRoles/roles/{roleName}" \
+              --data '{
+                "actions": [
+                  { "action": "FIND", "resources": [ { "db": "appdb", "collection": "" } ] },
+                  { "action": "INSERT", "resources": [ { "db": "appdb", "collection": "" } ] }
+                ]
+              }'
+            ```
+  - uid: mondoo-mongodbatlas-security-project-custom-role-no-privileged-inheritance
+    title: Ensure custom database roles do not inherit administrative built-in roles
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a12
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-05
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-2
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-5
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-2
+      compliance/soc2-2017: soc2-control-cc6-3-1
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: |
+      mongodbatlas.customDatabaseRoles.all(inheritedRoles.none(_['role'] == "atlasAdmin" || _['role'] == "dbAdminAnyDatabase" || _['role'] == "readWriteAnyDatabase" || _['role'] == "root"))
+    docs:
+      desc: |
+        This check verifies that no custom database role in the project inherits a broad administrative built-in role.
+
+        A custom role can define its own actions and also inherit built-in roles. Inheriting `atlasAdmin`, `root`, `readWriteAnyDatabase`, or `dbAdminAnyDatabase` gives every user assigned that custom role sweeping privilege across all databases, whatever the role's own action list says. Inherited roles are shown when you open a role on the Custom Roles tab under Security and Database Access, and the Atlas Administration API returns them on the custom database roles resource. This check requires that none of the four appear.
+
+        **Why this matters**
+
+        The danger is that the privilege is invisible at the point where people look for it. A role named for a single reporting job, with a short and unremarkable action list, can carry full administrative reach through one inherited entry further down the page. Reviewers approve it because the name and the actions look proportionate, and the users assigned to it inherit far more than anyone intended.
+
+        An attacker benefits from exactly the same blind spot. The credential they compromise belongs to a modest-looking service, so it attracts no particular attention, and yet it reads and writes every database in the project. Where the inheritance is `atlasAdmin` or `root` it also manages other database users, which lets the attacker create a second credential and keep access after the first is rotated.
+
+        Build custom roles from database-scoped built-in roles instead, such as `readWrite` on one named database, and add the individual actions the workload needs on top. Where a role genuinely requires any-database reach, make that explicit in its name and treat it as an administrative role rather than an application one.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Select the project, then open **Security** and choose **Database Access**.
+        3. On the **Custom Roles** tab, open each role and review the **Inherited Roles** it is built from.
+
+        A passing result shows no custom role inheriting an administrative or any-database role; a failing result shows a role inheriting `atlasAdmin`, `dbAdminAnyDatabase`, `readWriteAnyDatabase`, or `root`.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/groups/{groupId}/customDBRoles/roles" \
+          | jq '.[] | {roleName, inheritedRoles: [.inheritedRoles[].role]}'
+        ```
+
+        A passing response lists only scoped inherited roles; a failing response includes `atlasAdmin`, `dbAdminAnyDatabase`, `readWriteAnyDatabase`, or `root` among a role's inherited roles.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Select the project, then open **Security** and choose **Database Access**.
+            2. On the **Custom Roles** tab, select **Edit** for the affected role.
+            3. Remove the inherited `atlasAdmin`, `dbAdminAnyDatabase`, `readWriteAnyDatabase`, or `root` role.
+            4. Add the specific database-scoped roles and actions the workload requires, then save the role.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API, update the role so its `inheritedRoles` reference only scoped, database-specific roles:
+
+            ```bash
+            curl -s -X PATCH --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/{groupId}/customDBRoles/roles/{roleName}" \
+              --data '{
+                "inheritedRoles": [ { "role": "readWrite", "db": "appdb" } ]
+              }'
+            ```
+  - uid: mondoo-mongodbatlas-security-project-ip-access-list-no-anywhere
+    title: Ensure the project IP access list does not allow access from anywhere
+    impact: 90
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a4
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-4-1-2
+    mql: |
+      mongodbatlas.ipAccessList.none(cidrBlock == "0.0.0.0/0")
+    docs:
+      desc: |
+        This check verifies that the project IP access list contains no entry opening the clusters to the entire internet.
+
+        The IP access list decides which source addresses may reach the deployments in a project. It is managed under Security and Network Access at cloud.mongodb.com, and the Atlas Administration API returns the entries on the project access list resource. An entry of 0.0.0.0/0 matches every address there is, and this check requires that no such entry exists.
+
+        **Why this matters**
+
+        With that entry present, the network control is gone and database authentication is the only thing left. Every scanner on the internet reaches the cluster, and Atlas endpoints are found continuously by automated scanning that catalogues open MongoDB deployments by hostname pattern.
+
+        What those scanners then do is cheap and constant. They attempt credentials from breach dumps against the exposed deployment, try default and guessable database user names, and probe for any authentication weakness in the version reported. None of it requires a target list, since the target advertised itself. One reused password on one database user is enough, and there is no second control to stop the connection once the password is right. The same open entry lets an attacker who already stole a credential elsewhere use it from their own infrastructure rather than having to first gain a foothold inside your network.
+
+        Replace the entry with the specific addresses or ranges that legitimately need to connect, and prefer private endpoints or network peering so application traffic never crosses the public internet at all. If the entry was added temporarily during a migration or a debugging session, remove it now rather than at the end of the project, because those entries are the ones that survive for years.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Select the project, then open Security and choose Network Access.
+        3. Review the IP Access List tab for any entry with a value of 0.0.0.0/0.
+
+        A passing result shows no entry equal to 0.0.0.0/0; a failing result shows one or more entries that allow access from anywhere.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/groups/$GROUP_ID/accessList" \
+          | jq '.results[].cidrBlock'
+        ```
+
+        A passing response contains no cidrBlock of 0.0.0.0/0; a failing response lists 0.0.0.0/0 among the returned entries.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Select the project, then open Security and choose Network Access.
+            2. On the IP Access List tab, find the entry with value 0.0.0.0/0 and select Delete.
+            3. Choose Add IP Address and enter the specific addresses or CIDR ranges that require database access, then confirm.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API, remove the entry that allows access from anywhere. The entry value must be URL encoded, so 0.0.0.0/0 becomes 0.0.0.0%2F0:
+
+            ```bash
+            curl -s -X DELETE --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/$GROUP_ID/accessList/0.0.0.0%2F0"
+            ```
+
+            Then add the specific ranges that need access:
+
+            ```bash
+            curl -s -X POST --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/$GROUP_ID/accessList" \
+              --data '[ { "cidrBlock": "203.0.113.0/24", "comment": "Corporate egress" } ]'
+            ```
+  - uid: mondoo-mongodbatlas-security-project-ip-access-list-no-broad-cidr
+    title: Ensure project IP access list entries use narrow CIDR ranges
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a4
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-4-1-2
+    mql: |
+      mongodbatlas.ipAccessList.where(cidrBlock != empty).all(cidrBlock.split("/")[1] == /^(2[4-9]|3[0-2])$/)
+    docs:
+      desc: |
+        This check verifies that every CIDR entry in the project IP access list covers a narrow range of addresses.
+
+        Entries are managed under Security and Network Access at cloud.mongodb.com, and the Atlas Administration API returns each one on the project access list resource. This check requires every CIDR entry to carry a prefix length between 24 and 32, which limits a single entry to at most 256 addresses. A /8 authorizes millions of hosts and a /16 authorizes tens of thousands, and this check fails on both.
+
+        **Why this matters**
+
+        A broad entry grants standing network reach to every host inside it, and almost none of those hosts is the application you meant to allow. The access list stops meaning "our service can connect" and starts meaning "anything in this part of the network can connect".
+
+        That distinction decides what happens after an unrelated compromise. An attacker who takes over any machine inside an allowed /16, a developer laptop on the corporate range, a forgotten test instance, a printer, reaches the cluster from it and meets only database authentication. They do not need to be on the application host, and they do not need to defeat the network control, because the network control already includes them. Where the broad range belongs to a cloud provider, the problem is worse still, since an attacker can rent an address inside it.
+
+        Narrow entries also make the list reviewable. A /32 or a /24 can be tied to a named office, gateway, or service, so a reviewer can decide whether it still belongs; a /8 cannot be attributed to anything.
+
+        Route application traffic through a small set of known egress addresses so the list stays short and specific, and prefer private endpoints where the workload supports them.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Select the project, then open Security and choose Network Access.
+        3. On the IP Access List tab, review the CIDR value of each entry and note any prefix length shorter than 24.
+
+        A passing result shows every CIDR entry with a prefix length of 24 through 32; a failing result shows at least one entry with a broader range.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/groups/$GROUP_ID/accessList" \
+          | jq '.results[].cidrBlock'
+        ```
+
+        A passing response shows every cidrBlock ending in a prefix of 24 to 32; a failing response includes a cidrBlock with a shorter prefix.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Select the project, then open Security and choose Network Access.
+            2. On the IP Access List tab, select Edit on any entry with a prefix length shorter than 24.
+            3. Replace the broad range with the smallest CIDR that covers the legitimate source, then confirm. Repeat for each overly broad entry.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API, delete the broad entry and add a narrowly scoped replacement:
+
+            ```bash
+            curl -s -X DELETE --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/$GROUP_ID/accessList/10.0.0.0%2F8"
+
+            curl -s -X POST --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/$GROUP_ID/accessList" \
+              --data '[ { "cidrBlock": "10.1.2.0/24", "comment": "App subnet" } ]'
+            ```
+  - uid: mondoo-mongodbatlas-security-project-ip-access-list-no-past-expiry
+    title: Ensure expired IP access list entries have been removed
+    impact: 30
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a4
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-2-7
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-4-1-2
+    mql: |
+      mongodbatlas.ipAccessList.where(deleteAfterDate != null).all(deleteAfterDate > time.now)
+    docs:
+      desc: |
+        This check verifies that every temporary IP access list entry still has a deletion time in the future.
+
+        Atlas lets an access list entry carry a deletion date so short-lived network access removes itself, which is how access for a maintenance window, a contractor engagement, or a one-off debugging session is normally granted. Temporary entries are visible under Security and Network Access at cloud.mongodb.com, and the Atlas Administration API returns the deletion date alongside each entry. This check inspects only entries that carry a date and requires it to be later than now.
+
+        **Why this matters**
+
+        An entry whose deletion time has passed while the entry is still listed means the removal did not happen. Network access that was granted on the understanding that it would end has quietly become permanent, and it is permanent without anyone deciding that it should be.
+
+        Temporary entries are granted with less scrutiny than standing ones for exactly that reason, and they tend to point at the least controlled places: a contractor's home address, a laptop on a hotel network, a jump host built for one migration and never rebuilt. When the entry outlives its purpose, whoever holds that address next inherits network reach to your clusters. Residential and cloud addresses are reassigned constantly, so the host on the other end of an old entry is frequently no longer the one you approved.
+
+        Delete past-due entries rather than extending them by default. A failing result also says something about the process: find out why the scheduled removal did not take effect, since the same gap will apply to the next temporary entry somebody creates.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Select the project, then open Security and choose Network Access.
+        3. On the IP Access List tab, review entries marked as temporary and check their expiration.
+
+        A passing result shows every temporary entry with a deletion date still in the future; a failing result shows an entry whose deletion date has already passed.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/groups/$GROUP_ID/accessList" \
+          | jq '.results[] | select(.deleteAfterDate != null) | {cidrBlock, deleteAfterDate}'
+        ```
+
+        A passing response shows every deleteAfterDate in the future; a failing response shows a deleteAfterDate earlier than the current time.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Select the project, then open Security and choose Network Access.
+            2. On the IP Access List tab, locate the temporary entry whose deletion date has passed.
+            3. Select Delete on that entry and confirm.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API, delete the expired entry. The entry value must be URL encoded:
+
+            ```bash
+            curl -s -X DELETE --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/$GROUP_ID/accessList/203.0.113.5%2F32"
+            ```
+  - uid: mondoo-mongodbatlas-security-project-private-endpoints-configured
+    title: Ensure the project uses private endpoints for cluster connectivity
+    impact: 40
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a4
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-4-1-2
+    mql: |
+      mongodbatlas.privateEndpoints.where(status == "AVAILABLE") != empty
+    docs:
+      desc: |
+        This check verifies that the project has at least one private endpoint provisioned and available for cluster connectivity.
+
+        A private endpoint lets applications reach Atlas deployments across the cloud provider's own network using AWS PrivateLink, Azure Private Link, or Google Cloud Private Service Connect, instead of over the public internet. Endpoints are created and monitored on the Private Endpoint tab under Security and Network Access at cloud.mongodb.com, and the Atlas Administration API reports each one with its status. This check requires at least one endpoint reporting as available, which is the state in which it can actually carry traffic.
+
+        **Why this matters**
+
+        Public connectivity means the cluster has a resolvable, reachable address that anything on the internet can attempt to open a connection to. Everything protecting it from there is a control you have to keep correct: an access list that has to stay narrow, credentials that have to stay secret, a TLS floor that has to stay high. Private connectivity removes the attempt itself, because there is no route from the public internet to the endpoint at all.
+
+        That changes what an attacker can do with a stolen credential. Against a publicly reachable cluster, a leaked connection string is enough on its own. Against a private endpoint, the same credential is useless until they first obtain a foothold inside the specific virtual network the endpoint is bound to, which is a substantially harder and noisier step.
+
+        Point application connection strings at the private endpoint after provisioning it, since an endpoint that exists while traffic still flows over the public path provides no protection. Provision an endpoint for each provider and region hosting the project's deployments, and tighten the public access list once private routing is carrying the load.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Select the project, then open Security and choose Network Access.
+        3. Open the Private Endpoint tab and review the listed endpoints and their status.
+
+        A passing result shows at least one private endpoint with status Available; a failing result shows no available private endpoint.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/groups/$GROUP_ID/privateEndpoint/AWS/endpointService" \
+          | jq '.[] | {id, status}'
+        ```
+
+        A passing response shows at least one endpoint service with status AVAILABLE; a failing response returns none.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Select the project, then open Security and choose Network Access.
+            2. Open the Private Endpoint tab and select Add Private Endpoint.
+            3. Choose the cloud provider and region, then follow the guided steps to create the endpoint service and complete the connection in your cloud account.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API, create the endpoint service, then complete the interface endpoint in your cloud provider account:
+
+            ```bash
+            curl -s -X POST --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/$GROUP_ID/privateEndpoint/endpointService" \
+              --data '{ "providerName": "AWS", "region": "US_EAST_1" }'
+            ```
+  - uid: mondoo-mongodbatlas-security-project-network-peerings-healthy
+    title: Ensure network peering connections are not in a failed state
+    impact: 30
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a4
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: false
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-21
+      compliance/nis-2: false
+      compliance/nist-csf-1: false
+      compliance/nist-csf-2: false
+      compliance/nist-sp-800-53-rev5: false
+      compliance/nist-sp-800-171: false
+      compliance/owasp-top-10-2025: false
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: false
+    mql: |
+      mongodbatlas.networkPeerings.none(status == "FAILED")
+    docs:
+      desc: |
+        This check verifies that no network peering connection in the project is reporting a failed state.
+
+        Network peering joins the Atlas project's virtual network to one in your own cloud account so applications can reach the deployments privately. Peering connections and their status are shown on the Peering tab under Security and Network Access at cloud.mongodb.com, and the Atlas Administration API returns the status of each connection on the project peers resource. This check requires that none of them is failed.
+
+        **Why this matters**
+
+        A failed peering means the private path an application was built to use is not carrying traffic. The immediate effect is an outage, but the security consequence comes from how outages get resolved. Under pressure to restore a service, the fastest workaround is to add a wide entry to the public IP access list and let the application connect over the internet instead. That change is made in minutes, restores the service, and then stays, because nobody reverts a fix that is working.
+
+        The project is then exposed on the public path with a broad allowance, and the peering that was supposed to keep traffic private sits broken in the console where it is easy to stop noticing. An attacker gains a route that the network design said did not exist.
+
+        A failed peering is also a signal in its own right. It usually means a route table, security group, or CIDR assignment changed on your side without the Atlas configuration being updated, so the network is drifting from the design that was reviewed.
+
+        Investigate the reported error, correct the mismatched settings in your cloud account, and delete and recreate the connection if it cannot recover. Verify both ends after the repair rather than only the Atlas side.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Select the project, then open Security and choose Network Access.
+        3. Open the Peering tab and review the status of each peering connection.
+
+        A passing result shows no peering connection in a Failed state; a failing result shows at least one failed connection.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/groups/$GROUP_ID/peers" \
+          | jq '.results[] | {id, statusName, status}'
+        ```
+
+        A passing response shows no peering with a status of FAILED; a failing response includes a failed peering.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Select the project, then open Security and choose Network Access.
+            2. Open the Peering tab and locate the connection reporting a Failed status.
+            3. Review the error detail, correct the mismatched CIDR, route, or security settings in your cloud account, then delete and recreate the peering if it cannot recover.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API, remove the failed peering and recreate it with correct settings:
+
+            ```bash
+            curl -s -X DELETE --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/$GROUP_ID/peers/$PEER_ID"
+
+            curl -s -X POST --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/$GROUP_ID/peers" \
+              --data '{ "containerId": "CONTAINER_ID", "providerName": "AWS", "accepterRegionName": "us-east-1", "awsAccountId": "123456789012", "routeTableCidrBlock": "10.0.0.0/24", "vpcId": "vpc-abc123" }'
+            ```
+  - uid: mondoo-mongodbatlas-security-project-encryption-at-rest-cmk-enabled
+    title: Ensure customer-managed encryption at rest is enabled for the project
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a28
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-2-iv-access-control-encryption-and-decryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-1
+      compliance/nist-csf-2: nist-csf-2-pr-ds-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-28
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-3-5-1
+      compliance/soc2-2017: soc2-control-cc6-1-10
+      compliance/vda-isa-5: vda-isa-5-5-1-1
+    mql: |
+      mongodbatlas.encryptionAtRest.awsKmsEnabled == true || mongodbatlas.encryptionAtRest.azureKeyVaultEnabled == true || mongodbatlas.encryptionAtRest.googleCloudKmsEnabled == true
+    docs:
+      desc: |
+        This check verifies that the project has a customer-managed key provider enabled for encryption at rest.
+
+        Atlas always encrypts stored data with keys it manages. On top of that, a project can be bound to a key you hold in AWS KMS, Azure Key Vault, or Google Cloud KMS, configured under Encryption at Rest using your Key Management in the project settings at cloud.mongodb.com. The Atlas Administration API reports whether each provider is enabled on the project encryption at rest resource, and this check requires at least one of the three to be on.
+
+        **Why this matters**
+
+        Key custody is what turns encryption at rest into a control you can exercise. With provider-held keys alone, the data is encrypted but you have no lever attached to it: you cannot rotate the key when a rotation is warranted, you cannot disable it when you suspect exposure, and you cannot prove that a copy left somewhere is unreadable.
+
+        The lever matters at two moments in particular. When you learn that stored data or a snapshot has reached somewhere it should not have, revoking the key in your own key management service renders every copy protected by it inert within minutes, without depending on anyone else's process or timeline. When a system is decommissioned, destroying the key gives a defensible answer about the residual copies rather than a promise that they were deleted.
+
+        Enabling the provider at the project level is the prerequisite; deployments still have to be bound to it individually, which the companion check in this policy on cluster encryption evaluates. Restrict and monitor access to the key in your key management service as tightly as access to the data, because whoever can use the key can read what it protects, and whoever can delete it can make the data unrecoverable.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Select the project, then open the project Settings and locate Encryption at Rest using your Key Management.
+        3. Review whether an AWS KMS, Azure Key Vault, or Google Cloud KMS provider is enabled.
+
+        A passing result shows one of the key management providers enabled; a failing result shows all of them disabled.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/groups/$GROUP_ID/encryptionAtRest" \
+          | jq '{aws: .awsKms.enabled, azure: .azureKeyVault.enabled, gcp: .googleCloudKms.enabled}'
+        ```
+
+        A passing response shows one provider set to true; a failing response shows every provider set to false.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Select the project, then open the project Settings and find Encryption at Rest using your Key Management.
+            2. Choose your provider, then enable it and supply the key identifier, region, and the role or credentials Atlas should use.
+            3. Save the configuration and confirm that Atlas reports the provider as enabled.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API, enable a customer-managed key provider. This example enables AWS KMS:
+
+            ```bash
+            curl -s -X PATCH --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/$GROUP_ID/encryptionAtRest" \
+              --data '{ "awsKms": { "enabled": true, "customerMasterKeyID": "arn:aws:kms:us-east-1:123456789012:key/abc", "region": "US_EAST_1", "roleId": "ROLE_ID" } }'
+            ```
+  - uid: mondoo-mongodbatlas-security-project-encryption-at-rest-cmk-valid
+    title: Ensure enabled customer-managed encryption keys are valid
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a28
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-2-iv-access-control-encryption-and-decryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-1
+      compliance/nist-csf-2: nist-csf-2-pr-ds-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-12
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-10
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-3-6-1
+      compliance/soc2-2017: soc2-control-cc6-1-11
+      compliance/vda-isa-5: vda-isa-5-5-1-1
+    mql: |
+      mongodbatlas.encryptionAtRest.awsKmsEnabled == false || mongodbatlas.encryptionAtRest.awsKmsValid == true
+      mongodbatlas.encryptionAtRest.azureKeyVaultEnabled == false || mongodbatlas.encryptionAtRest.azureKeyVaultValid == true
+      mongodbatlas.encryptionAtRest.googleCloudKmsEnabled == false || mongodbatlas.encryptionAtRest.googleCloudKmsValid == true
+    docs:
+      desc: |
+        This check verifies that every customer-managed key provider enabled for the project is reporting as valid.
+
+        When encryption at rest is bound to AWS KMS, Azure Key Vault, or Google Cloud KMS, Atlas continuously confirms it can still reach and use the configured key and records the result on the project encryption at rest resource. The state is visible under Encryption at Rest using your Key Management in the project settings at cloud.mongodb.com. This check evaluates each provider independently and requires that any provider which is enabled also reports as valid, so a provider you deliberately leave disabled is not treated as a failure.
+
+        **Why this matters**
+
+        An enabled but invalid provider is the worst of both states. The configuration says the data is protected by a key you control, so it passes a casual review and satisfies whoever asked for customer-managed encryption, while Atlas cannot actually perform the operations that key was there to provide.
+
+        The usual causes are ordinary key management events with no visible connection to Atlas: the key was disabled or scheduled for deletion, the role Atlas assumes lost a permission during a policy cleanup, the credential behind the integration expired, or a key policy was rewritten by automation. None of those produces an obvious signal in Atlas, so the break is discovered later, often when an operation that needs the key fails and takes cluster availability with it.
+
+        Repair the key or the permissions in the key management service first, then update the provider configuration in Atlas and confirm it reports as valid again. Coordinate deliberate key rotations and permission changes with the Atlas configuration in advance, so the integration is updated in the same change rather than after it breaks.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Select the project, then open the project Settings and find Encryption at Rest using your Key Management.
+        3. Review each enabled provider for a warning that the key is invalid or unreachable.
+
+        A passing result shows every enabled provider reported as valid; a failing result shows an enabled provider flagged as invalid.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/groups/$GROUP_ID/encryptionAtRest" \
+          | jq '{aws: {enabled: .awsKms.enabled, valid: .awsKms.valid}, azure: {enabled: .azureKeyVault.enabled, valid: .azureKeyVault.valid}, gcp: {enabled: .googleCloudKms.enabled, valid: .googleCloudKms.valid}}'
+        ```
+
+        A passing response shows valid set to true for every enabled provider; a failing response shows an enabled provider with valid set to false.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. In your cloud key management service, confirm the key still exists and is enabled, and that the role or credentials Atlas uses retain permission to use it.
+            2. In Atlas, open the project Settings and find Encryption at Rest using your Key Management.
+            3. Update the provider with a working key identifier and credentials, then save and confirm that Atlas reports the configuration as valid.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API, update the affected provider with a valid key and credentials. This example repairs AWS KMS:
+
+            ```bash
+            curl -s -X PATCH --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/$GROUP_ID/encryptionAtRest" \
+              --data '{ "awsKms": { "enabled": true, "customerMasterKeyID": "arn:aws:kms:us-east-1:123456789012:key/abc", "region": "US_EAST_1", "roleId": "ROLE_ID" } }'
+            ```
+  - uid: mondoo-mongodbatlas-security-project-encryption-search-nodes
+    title: Ensure encryption at rest is enabled for search nodes
+    impact: 40
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a28
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-2-iv-access-control-encryption-and-decryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-1
+      compliance/nist-csf-2: nist-csf-2-pr-ds-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-28
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-3-5-1
+      compliance/soc2-2017: soc2-control-cc6-1-10
+      compliance/vda-isa-5: vda-isa-5-5-1-1
+    mql: |
+      mongodbatlas.encryptionAtRest.enabledForSearchNodes == true
+    docs:
+      desc: |
+        This check verifies that encryption at rest under your own key extends to the project's search nodes.
+
+        Atlas Search runs on dedicated search nodes that hold indexed copies of data drawn from the cluster. Customer-managed encryption at rest can be applied to those nodes as well, through the option to extend encryption to search nodes under Encryption at Rest using your Key Management in the project settings at cloud.mongodb.com. The Atlas Administration API reports it as `enabledForSearchNodes` on the project encryption at rest resource, and this check requires it to be on.
+
+        **Why this matters**
+
+        A search index is not a summary of the data; it contains the field values it indexes, and for many designs it stores the retrievable content as well. Names, addresses, message bodies, and identifiers that are protected by your key on the cluster exist a second time on the search nodes, in a form built specifically to be read quickly.
+
+        If that second copy is not covered by the same key, the protection you configured has a hole exactly where the data is most conveniently arranged. Revoking the key would render the cluster's storage unreadable while leaving the indexed copy under provider-held keys alone, so the control you rely on to cut off access does not actually cut off all of it. Anything that reaches the search node storage reads the values directly.
+
+        The project needs a customer-managed key enabled before this option is available, so configure that first. Recheck the setting after enabling search nodes on a new deployment or changing the key configuration, since coverage is easy to lose when the search tier is added later than the cluster it serves.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Select the project, then open the project Settings and find Encryption at Rest using your Key Management.
+        3. Review whether encryption at rest is extended to search nodes.
+
+        A passing result shows encryption at rest enabled for search nodes; a failing result shows it disabled.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/groups/$GROUP_ID/encryptionAtRest" \
+          | jq '.enabledForSearchNodes'
+        ```
+
+        A passing response shows enabledForSearchNodes set to true; a failing response shows it set to false.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Confirm the project already has a customer-managed key enabled for encryption at rest.
+            2. Open the project Settings and find Encryption at Rest using your Key Management.
+            3. Enable the option to extend encryption at rest to search nodes, then save the configuration.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API, set encryption at rest for search nodes to true:
+
+            ```bash
+            curl -s -X PATCH --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/$GROUP_ID/encryptionAtRest" \
+              --data '{ "enabledForSearchNodes": true }'
+            ```
+  - uid: mondoo-mongodbatlas-security-project-auditing-enabled
+    title: Ensure database auditing is enabled for the project
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a6
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-08
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-15
+      compliance/nis-2: false
+      compliance/nist-csf-1: nist-csf-1-pr-pt-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-04
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-12
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-2-1
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    mql: |
+      mongodbatlas.auditing.enabled == true
+    docs:
+      desc: |
+        This check verifies that database auditing is turned on for the project.
+
+        Database Auditing is enabled under Security and then Advanced in the project navigation at cloud.mongodb.com, and the Atlas Administration API reports its state on the project audit log resource. With auditing on, Atlas records authentication and data-access events across the project's deployments so activity leaves a durable trail attributable to the account that produced it.
+
+        **Why this matters**
+
+        Without auditing there is no record of who connected, from where, or what they read and changed. That absence does not slow an investigation down; it ends it. A responder who learns that a database credential leaked has no way to determine whether it was used, which collections were touched, or how much data left, so the honest answer to every question is that it is unknown.
+
+        That answer has consequences beyond the incident. Breach notification obligations turn on what was accessed, and an organization that cannot demonstrate the scope of an intrusion generally has to assume the worst case and disclose accordingly. Meanwhile the attacker benefits directly: with no trail, a compromised credential can be used repeatedly over months, and each use looks exactly like the last one, which is to say invisible.
+
+        Auditing also deters and detects insider misuse, which is the category least likely to trigger any other control, because the account involved is authorized and its traffic is ordinary.
+
+        Turn auditing on, then pair it with an audit filter that captures the events you care about and with log export so records are retained off the platform, which companion checks in this policy evaluate. Auditing enabled with no filter and no export produces very little usable evidence.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Select the project, then under Security in the left navigation open Advanced and locate Database Auditing.
+        3. Confirm whether the Database Auditing toggle is enabled.
+
+        A passing result shows auditing enabled; a failing result shows auditing turned off.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/groups/$ATLAS_GROUP_ID/auditLog" \
+          | jq '.enabled'
+        ```
+
+        A passing response shows `true`; a failing response shows `false`.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Select the project, then under Security in the left navigation open Advanced.
+            2. Locate Database Auditing and enable the toggle.
+            3. Save the change and confirm the setting is applied to the project.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API:
+
+            ```bash
+            curl -s -X PATCH --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/$ATLAS_GROUP_ID/auditLog" \
+              --data '{ "enabled": true }'
+            ```
+  - uid: mondoo-mongodbatlas-security-project-audit-authorization-success
+    title: Ensure successful authorization events are audited
+    impact: 40
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a6
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-07
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-15
+      compliance/nis-2: false
+      compliance/nist-csf-1: nist-csf-1-pr-pt-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-04
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-2-1-1
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    mql: |
+      mongodbatlas.auditing.auditAuthorizationSuccess == true
+    docs:
+      desc: |
+        This check verifies that database auditing records successful authorization events, not only denied ones.
+
+        By default the audit trail captures authorization failures. Auditing successful authorizations is a separate option, shown as "Audit authorization successes" under Database Auditing in Security and then Advanced for the project, and reported by the Atlas Administration API as `auditAuthorizationSuccess` on the project audit log resource. This check requires it to be enabled.
+
+        **Why this matters**
+
+        Failure-only auditing records the attacks that did not work and nothing about the ones that did. An attacker who obtains a valid database credential performs no unauthorized action at all, because every read they issue is permitted by the roles that credential holds. Their entire operation, connecting, enumerating collections, and reading every document in them, generates zero audit entries, while a mistyped collection name by a legitimate developer generates one.
+
+        The same blind spot covers insider misuse, which is the case failure logs are least able to see. An employee reading customer records they have no business reason to open is exercising exactly the privilege they were granted, so nothing is denied and nothing is recorded.
+
+        The cost of the answer during an incident is what makes this concrete. With successful events recorded, you can state which collections a compromised credential opened and roughly how much it read. Without them, you know only that the credential existed and worked, and every downstream decision about notification and scope has to assume the maximum.
+
+        Recording every successful authorization increases audit volume substantially, so size retention and export capacity for it and pair this with push-based log export, which a companion check in this policy evaluates. Narrow the audit filter rather than turning success auditing off when volume becomes a problem.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Select the project, then under Security in the left navigation open Advanced and locate Database Auditing.
+        3. Confirm whether auditing of successful authorization events, labeled "Audit authorization successes", is enabled.
+
+        A passing result shows successful authorization events being audited; a failing result shows only failures being recorded.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/groups/$ATLAS_GROUP_ID/auditLog" \
+          | jq '.auditAuthorizationSuccess'
+        ```
+
+        A passing response shows `true`; a failing response shows `false`.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Select the project, then under Security in the left navigation open Advanced and locate Database Auditing.
+            2. Enable the option to audit successful authorization events.
+            3. Save the change and confirm the setting is applied to the project.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API:
+
+            ```bash
+            curl -s -X PATCH --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/$ATLAS_GROUP_ID/auditLog" \
+              --data '{ "enabled": true, "auditAuthorizationSuccess": true }'
+            ```
+  - uid: mondoo-mongodbatlas-security-project-audit-filter-configured
+    title: Ensure a database audit filter is configured
+    impact: 40
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a6
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-07
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-15
+      compliance/nis-2: false
+      compliance/nist-csf-1: nist-csf-1-pr-pt-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-04
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-2-1
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    mql: |
+      mongodbatlas.auditing.enabled == true && mongodbatlas.auditing.configurationType != "NONE"
+    docs:
+      desc: |
+        This check verifies that database auditing is enabled for the project and that a filter defining what to capture has actually been set.
+
+        The audit filter decides which events the audit trail records. It is defined under Database Auditing in Security and then Advanced for the project at cloud.mongodb.com, and the Atlas Administration API reports the configuration type alongside the enabled flag on the project audit log resource. A configuration type of NONE means no filter is in place. This check requires auditing to be on and the configuration type to be anything other than NONE.
+
+        **Why this matters**
+
+        Auditing that is switched on with no filter is the most expensive kind of gap, because it produces the appearance of a control without the evidence one. The setting reads as enabled on the page, it satisfies a checklist, and it reassures everyone who looks at it, while the events an investigation would need were never selected for capture.
+
+        The cost lands during an incident, at the point where it can no longer be fixed. A responder asks which accounts authenticated to the cluster in the days around a suspected compromise and finds that the question cannot be answered from the trail that exists. Nothing can be done about it retroactively; audit data not captured at the time does not become available later.
+
+        Define a filter that captures at least authentication and authorization events, and extend it to the data-access events that matter for the sensitivity of what the project holds. Revisit it as the data and the threat model change, because a filter written for one application's risk profile quietly stops matching once the project grows to hold something more sensitive.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Select the project, then under Security in the left navigation open Advanced and locate Database Auditing.
+        3. Confirm that auditing is enabled and that an audit filter is defined rather than left empty.
+
+        A passing result shows an active filter; a failing result shows auditing disabled or no filter configured.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/groups/$ATLAS_GROUP_ID/auditLog" \
+          | jq '{ enabled: .enabled, configurationType: .configurationType }'
+        ```
+
+        A passing response shows `enabled` true with a `configurationType` other than `NONE`; a failing response shows auditing disabled or a `configurationType` of `NONE`.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Select the project, then under Security in the left navigation open Advanced and locate Database Auditing.
+            2. Enable auditing and define an audit filter that captures the events relevant to your environment.
+            3. Save the change and confirm the filter is applied to the project.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API:
+
+            ```bash
+            curl -s -X PATCH --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/$ATLAS_GROUP_ID/auditLog" \
+              --data '{ "enabled": true, "auditFilter": "{ \"atype\": { \"$in\": [\"authenticate\", \"authCheck\"] } }" }'
+            ```
+  - uid: mondoo-mongodbatlas-security-project-log-export-active
+    title: Ensure push-based log export is active
+    impact: 50
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a6
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-08
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-15
+      compliance/nis-2: false
+      compliance/nist-csf-1: nist-csf-1-pr-pt-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-04
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-9
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-3-3
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    mql: |
+      mongodbatlas.pushBasedLogExport != empty && mongodbatlas.pushBasedLogExport.state == "ACTIVE"
+    docs:
+      desc: |
+        This check verifies that push-based log export is configured for the project and is actively delivering.
+
+        Push-based log export streams the project's audit and access logs to an S3 bucket you own. It is set up under Push-Based Log Export in the project settings at cloud.mongodb.com, using a bucket name and the role that grants Atlas write access, and the Atlas Administration API reports the resulting state on the project push-based log export resource. This check requires the configuration to exist and its state to be active, which is the state in which records are genuinely being delivered.
+
+        **Why this matters**
+
+        Logs that stay on the platform live under the platform's retention window, and intrusions are routinely discovered long after that window closes. By the time a leaked credential surfaces in a scan of a public repository, or a partner reports data appearing where it should not, the records covering the period an investigator needs have already aged out. The evidence did not survive long enough to be read.
+
+        Keeping the records in your own account also removes them from the reach of whoever compromised the platform account. An attacker with sufficient Atlas privilege can change audit settings and remove what points at them; they cannot reach into your bucket to do the same. Delivered records are the copy that outlives their cleanup.
+
+        A configuration that exists but is not active provides none of this while appearing to. Watch the state so a stalled or failed export is noticed and corrected rather than discovered during an investigation. Apply restrictive access controls and retention rules on the destination, and pair this with a configured audit filter so the records being shipped are the ones worth keeping.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Select the project, then open Project Settings and locate Push-Based Log Export.
+        3. Confirm that log export is configured and reports an active state.
+
+        A passing result shows export in an active state; a failing result shows export unconfigured or not active.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/groups/$ATLAS_GROUP_ID/pushBasedLogExport" \
+          | jq '.state'
+        ```
+
+        A passing response shows `"ACTIVE"`; a failing response shows another state or no configuration.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Select the project, then open Project Settings and locate Push-Based Log Export.
+            2. Provide the target S3 bucket and the IAM role that grants Atlas write access, then enable the export.
+            3. Save the configuration and confirm the state reaches active.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API:
+
+            ```bash
+            curl -s -X POST --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/$ATLAS_GROUP_ID/pushBasedLogExport" \
+              --data '{ "bucketName": "my-atlas-logs", "iamRoleId": "$ATLAS_IAM_ROLE_ID", "prefixPath": "atlas-logs" }'
+            ```
+  - uid: mondoo-mongodbatlas-security-project-log-export-bucket-configured
+    title: Ensure push-based log export delivers to a configured bucket
+    impact: 30
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a6
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-08
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-15
+      compliance/nis-2: false
+      compliance/nist-csf-1: nist-csf-1-pr-pt-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-04
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-9
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-3-3
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    mql: |
+      mongodbatlas.pushBasedLogExport != empty && mongodbatlas.pushBasedLogExport.bucketName != empty
+    docs:
+      desc: |
+        This check verifies that push-based log export for the project names the destination bucket it delivers to.
+
+        The export is configured under Push-Based Log Export in the project settings at cloud.mongodb.com, where the destination S3 bucket is entered along with the role that grants Atlas permission to write to it. The Atlas Administration API reports the bucket name on the project push-based log export resource. This check requires the export configuration to exist and the bucket name to be set rather than empty.
+
+        **Why this matters**
+
+        The destination is the part of the export that determines who controls the records once they leave the platform. A bucket in your own cloud account means the retention period, the access policy, the object lock settings, and the encryption are yours to set, and none of them can be altered by anyone acting through Atlas.
+
+        With no bucket named, the export has nowhere to send anything, so no copy of the audit and access logs exists outside the platform at all. Every consequence follows from that single omission: records age out on the platform's schedule rather than yours, an attacker with enough Atlas privilege can reach the only surviving copy, and responders looking for the trail during an incident find that the export they were told about never had a target.
+
+        Name the bucket, confirm the role permits Atlas to write to it, and verify that objects actually arrive rather than trusting the saved configuration. Treat the destination as security-relevant storage: restrict who can read and delete from it, apply retention that matches how long you may need to look back, and keep it in an account that is not administered by the same people whose activity the logs record.
+      audit: |
+        ### Audit via Dashboard
+
+        1. Sign in to MongoDB Atlas at cloud.mongodb.com.
+        2. Select the project, then open Project Settings and locate Push-Based Log Export.
+        3. Confirm that a destination S3 bucket name is set for the export.
+
+        A passing result shows a configured bucket name; a failing result shows no bucket name.
+
+        ### Audit via Atlas Administration API
+
+        ```bash
+        curl -s --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+          -H "Accept: application/vnd.atlas.2025-03-12+json" \
+          "https://cloud.mongodb.com/api/atlas/v2/groups/$ATLAS_GROUP_ID/pushBasedLogExport" \
+          | jq '.bucketName'
+        ```
+
+        A passing response shows a non-empty bucket name; a failing response shows an empty or absent bucket name.
+      remediation:
+        - id: console
+          desc: |
+            To fix this using the Atlas dashboard:
+
+            1. Select the project, then open Project Settings and locate Push-Based Log Export.
+            2. Enter the destination S3 bucket name along with the IAM role that grants Atlas write access.
+            3. Save the configuration and confirm the bucket name is recorded.
+        - id: api
+          desc: |
+            To fix this through the Atlas Administration API:
+
+            ```bash
+            curl -s -X PATCH --user "$ATLAS_PUBLIC_KEY:$ATLAS_PRIVATE_KEY" --digest \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.atlas.2025-03-12+json" \
+              "https://cloud.mongodb.com/api/atlas/v2/groups/$ATLAS_GROUP_ID/pushBasedLogExport" \
+              --data '{ "bucketName": "my-atlas-logs", "iamRoleId": "$ATLAS_IAM_ROLE_ID", "prefixPath": "atlas-logs" }'
+            ```

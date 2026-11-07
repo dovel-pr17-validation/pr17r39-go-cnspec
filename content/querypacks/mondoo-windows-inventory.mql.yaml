@@ -1,0 +1,366 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+
+packs:
+  - uid: mondoo-windows-asset-inventory
+    name: Windows Asset Inventory Pack
+    version: 1.11.0
+    license: BUSL-1.1
+    require:
+      - provider: os
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    tags:
+      mondoo.com/platform: windows
+      mondoo.com/category: best-practices
+      mondoo.com/icon: windows
+    summary: Inventory Windows host OS, software, and configuration
+    docs:
+      desc: |
+        Inventories a Windows host: OS and computer information, installed software and hotfixes, services, listening ports, IIS websites, network configuration, MDM enrollment, security products, and audit policy.
+
+        Enable this query pack in [Mondoo Platform](https://mondoo.com/platform) to automatically inventory your Windows hosts, or scan a host manually with cnspec:
+
+        ```bash
+        cnspec scan local -f mondoo-windows-inventory.mql.yaml
+        ```
+    groups:
+      - uid: mondoo-windows-asset-inventory-system-group
+        title: System
+        filters: asset.platform == "windows"
+        queries:
+          - uid: mondoo-windows-asset-info
+            title: Asset information
+            docs:
+              desc: Asset kind, platform, name, architecture, and version.
+            mql: asset { kind title platform name arch runtime version }
+          - uid: mondoo-windows-hostname
+            title: Hostname
+            docs:
+              desc: Returns the system hostname.
+            mql: os.hostname
+          - uid: mondoo-windows-uptime
+            title: Operating system uptime
+            docs:
+              desc: How long the system has run since the last boot.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: os.uptime
+          - uid: mondoo-windows-timezone
+            title: System timezone
+            docs:
+              desc: Returns the configured timezone of the remote system.
+            mql: os.date.timezone
+          - uid: mondoo-windows-cloud-instance
+            title: Cloud instance metadata
+            docs:
+              desc: |
+                Cloud instance identity from the metadata service.
+
+                Covers public and private IPs and hostnames plus the raw metadata dict carrying account or subscription, region, and instance type. Runs only on hosts that detect as a cloud instance; other hosts skip it.
+            filters: cloud.provider != "Unknown"
+            mql: cloud { provider instance { publicHostname privateHostname publicIpv4 { ip } privateIpv4 { ip } metadata } }
+          - uid: mondoo-windows-computer-info
+            title: Windows Computer/ System information
+            docs:
+              desc: Returns comprehensive Windows computer and OS information.
+            mql: windows.computerInfo
+          - uid: mondoo-windows-logged-in-users
+            title: Logged-in users
+            docs:
+              desc: |
+                Accounts with an interactive or Remote Desktop session.
+
+                Each account appears once as `DOMAIN\name`, however many sessions it holds. Network logons such as SMB or WinRM, services, and the `DWM-` and `UMFD-` accounts Windows creates for each desktop are not counted.
+            mql: |
+              windows.logonSessions.where(logonType == 2 || logonType == 10 || logonType == 11).where(accountName != /^(DWM|UMFD)-[0-9]+$/).map(accountDomain + "\\" + accountName).unique
+      - uid: mondoo-windows-asset-inventory-identity-group
+        title: Identity & Active Directory
+        filters: asset.platform == "windows"
+        queries:
+          - uid: mondoo-windows-users
+            title: Regular users
+            docs:
+              desc: Lists all user accounts on the system.
+            mql: users
+          - uid: mondoo-windows-ad-distinguished-name
+            title: Active Directory distinguished name (DN)
+            docs:
+              desc: |
+                The computer's distinguished name in Active Directory.
+
+                For example `CN=WEB01,OU=Servers,OU=Production,DC=corp,DC=example,DC=com`. Empty for computers that are not joined to a domain. Read from the registry, so no commands are run on the host.
+            mql: |
+              if (registrykey.property(path: 'HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Group Policy\State\Machine', name: 'Distinguished-Name').exists) {
+                registrykey.property(path: 'HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Group Policy\State\Machine', name: 'Distinguished-Name').data
+              }
+          - uid: mondoo-windows-organizational-unit
+            title: Active Directory Organizational Unit (OU)
+            docs:
+              desc: |
+                Where the computer sits in the Active Directory tree.
+
+                - **OrganizationalUnit**: the organizational unit (OU) the computer is in
+                - **OUPath**: the full path of OUs it sits under (e.g. `Servers/Production`)
+                - **Domain**: the Active Directory domain (e.g. `corp.example.com`)
+                - **DistinguishedName**: the computer's full Active Directory location
+                - **PartOfDomain**: whether the computer is joined to a domain
+
+                These are empty for computers that aren't joined to a domain, including cloud-only (Entra)
+                hosts. The value comes from Windows' own cached copy, so it can be slightly out of date, for
+                example just after a computer is moved to a different OU or first joined to the domain.
+            mql: |
+              # The DN is parsed by splitting on raw ',' and '=' . AD escapes those characters inside an
+              # OU/CN name as '\,' and '\=' (RFC 4514); this parse does not unescape them, so the rare OU/DC
+              # name containing an escaped separator is split incorrectly. Accepted limitation of parsing the
+              # DN in MQL rather than shelling out to PowerShell, which is the whole point of this query.
+              #
+              # PartOfDomain is derived from the registry value being present, not from a live directory
+              # check, so it is an approximation: the Group Policy client populates this value and it can lag
+              # reality (absent right after a domain join, and able to persist on un-joined or cloned images).
+              #
+              # The fields are assigned with '=' (which only creates local bindings) and then listed again as
+              # bare references on their own lines; the bare references are what emit the values into the
+              # result record. Both halves are required.
+              registrykey.property(path: 'HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Group Policy\State\Machine', name: 'Distinguished-Name') {
+                PartOfDomain = exists
+                DistinguishedName = data
+                OrganizationalUnit = if (exists) { data.split(",").where(_.split("=")[0].downcase == "ou").map(_.split("=")[1]).first }
+                OUPath = if (exists && data.split(",").where(_.split("=")[0].downcase == "ou").length > 0) { data.split(",").where(_.split("=")[0].downcase == "ou").map(_.split("=")[1]).join("/") }
+                Domain = if (exists) { data.split(",").where(_.split("=")[0].downcase == "dc").map(_.split("=")[1]).join(".") }
+                PartOfDomain
+                DistinguishedName
+                OrganizationalUnit
+                OUPath
+                Domain
+              }
+      - uid: mondoo-windows-asset-inventory-device-management-group
+        title: Device Management
+        filters: asset.platform == "windows"
+        queries:
+          - uid: mondoo-windows-mdm-enrollment
+            title: MDM enrollment status
+            docs:
+              desc: |
+                MDM enrollment, vendor, method, and server URL.
+
+                The vendor is recognized from the server host, so it is null for a self-hosted or unlisted MDM server. The method is `automated` for Windows Autopilot, `policy` for Group Policy auto-enrollment, and `user` otherwise.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: mdm { enrolled vendor method serverUrl }
+      - uid: mondoo-windows-asset-inventory-processes-services-group
+        title: Processes & Services
+        filters: asset.platform == "windows"
+        queries:
+          - uid: mondoo-windows-processes
+            title: Running processes
+            docs:
+              desc: Running processes with their PID and executable path.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: processes { pid executable }
+          - uid: mondoo-windows-running-services
+            title: Running services
+            docs:
+              desc: Windows services currently running, and their status.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: services.where(running == true) { name running enabled masked type }
+          - uid: mondoo-windows-scheduled-tasks
+            title: Scheduled tasks
+            docs:
+              desc: Scheduled tasks with run-as account, actions, and triggers.
+            mql: |
+              windows.scheduledTasks { path name state enabled author principal { userId groupId logonType runLevel } actions { execute arguments workingDirectory } triggers { type enabled startBoundary } }
+      - uid: mondoo-windows-asset-inventory-packages-group
+        title: Packages & Features
+        filters: asset.platform == "windows"
+        queries:
+          - uid: mondoo-windows-packages
+            title: Installed packages
+            docs:
+              desc: |
+                Installed software with version, origin, and install scope.
+
+                `installScope` is `user` for software installed into one user's profile, and `installUser` names that user. A scan over a remote connection reads per-user installs only for users who are logged in.
+            mql: packages { name version arch installed epoch origin purl installScope installUser { name } }
+          - uid: mondoo-windows-hotfixes
+            title: All installed Windows hotfixes
+            docs:
+              desc: Installed hotfixes with ID and installation date.
+            mql: windows.hotfixes { hotfixId installedOn }
+          - uid: mondoo-windows-features
+            title: Installed Windows features
+            docs:
+              desc: Lists installed Windows Server features and roles.
+            mql: windows.serverFeatures.where(installed == true) { path name displayName }
+          - uid: mondoo-windows-exchange-server-version
+            title: Exchange Server Version
+            docs:
+              desc: Returns the installed Microsoft Exchange Server version.
+            filters: package('Microsoft Exchange Server').installed
+            mql: |
+              powershell('(Get-Command ExSetup.exe | ForEach-Object { $_.FileVersionInfo } | Select-Object -First 1).FileVersion').stdout
+      - uid: mondoo-windows-asset-inventory-network-group
+        title: Network
+        filters: asset.platform == "windows"
+        queries:
+          - uid: mondoo-windows-ports-listening
+            title: Listening ports
+            docs:
+              desc: Listening ports and the processes that own them.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: ports.listening { user state port address protocol process remoteAddress remotePort }
+          - uid: mondoo-windows-websites
+            title: Websites
+            docs:
+              desc: |
+                Sites the web servers serve, per name and listener.
+
+                Read from the IIS site bindings, one entry per HTTP and HTTPS binding. `process` is the System process, which holds the listeners of http.sys, or null when nothing listens on the port. `proxyTarget` stays empty, since IIS reverse proxy rules are not read.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: websites { name address port tls sources isDefault documentRoot proxyTarget file.path process { pid executable } certificates { fingerprints serial subject.commonName issuer.commonName sanExtension.dnsNames notAfter } }
+          - uid: mondoo-windows-active-connections
+            title: Active connections of the system
+            docs:
+              desc: Active network connections and their processes.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: ports.where(state != "close") { user state port address protocol process remoteAddress remotePort }
+          - uid: mondoo-windows-interface-configuration
+            title: Network interfaces
+            docs:
+              desc: Interface MAC, MTU, flags, and per-address CIDR.
+            mql: network.interfaces { name mac vendor mtu flags active virtual ips { ip cidr subnet broadcast gateway } }
+          - uid: mondoo-windows-etc-hosts
+            title: Static host entries
+            docs:
+              desc: Static hostname to IP mappings from the hosts file.
+            mql: |
+              if (file("C:\\Windows\\System32\\drivers\\etc\\hosts").exists) { file("C:\\Windows\\System32\\drivers\\etc\\hosts").content }
+          - uid: mondoo-windows-network-neighbors
+            title: ARP/NDP neighbor cache
+            docs:
+              desc: ARP and NDP neighbor cache entries with IP and MAC.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: network.neighbors { ip mac interface state }
+      - uid: mondoo-windows-asset-inventory-smb-group
+        title: File Sharing (SMB)
+        filters: asset.platform == "windows"
+        queries:
+          - uid: mondoo-windows-smb-shares
+            title: SMB shares
+            docs:
+              desc: SMB shares published by the host, with path and type.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: windows.smb.shares { name path description scopeName shareType }
+          - uid: mondoo-windows-smb-sessions
+            title: SMB sessions
+            docs:
+              desc: |
+                Inbound SMB sessions with client, user, and dialect.
+
+                Requires administrative privileges. Returns data only on hosts serving SMB.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: windows.smb.sessions { clientComputerName clientUserName dialect numOpens }
+          - uid: mondoo-windows-smb-connections
+            title: SMB connections
+            docs:
+              desc: Outbound SMB connections with server, share, and user.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: windows.smb.connections { serverName shareName userName dialect }
+      - uid: mondoo-windows-asset-inventory-firewall-group
+        title: Firewall
+        filters: asset.platform == "windows"
+        queries:
+          - uid: mondoo-windows-windows-firewall-settings
+            title: Windows Firewall settings
+            docs:
+              desc: Returns Windows Firewall configuration and profile settings.
+            mql: windows.firewall { settings profiles { allowUnicastResponseToMulticast logIgnored enabled allowLocalFirewallRules allowLocalIPsecRules logAllowed logBlocked allowUserApps instanceID allowUserPorts name notifyOnListen logFileName enableStealthModeForIPsec defaultInboundAction logMaxSizeKilobytes defaultOutboundAction allowInboundRules } }
+          - uid: mondoo-windows-windows-firewall-rules
+            title: Windows Firewall rules
+            docs:
+              desc: Lists all Windows Firewall rules with their configuration.
+            mql: windows.firewall.rules { edgeTraversalPolicy status instanceID enabled looseSourceMapping displayGroup policyStoreSource name enforcementStatus description direction displayName policyStoreSourceType primaryStatus localOnlyMapping action }
+      - uid: mondoo-windows-asset-inventory-security-group
+        title: Security & Audit Policy
+        filters: asset.platform == "windows"
+        queries:
+          - uid: mondoo-windows-edr-agents
+            title: Endpoint security agents
+            docs:
+              desc: |
+                Recognized EDR and antivirus agents with health state.
+
+                `mode` and the signature fields are reported for Microsoft Defender Antivirus only and are null for other agents.
+            mql: edr.products { id name vendor category version running enabled healthy mode signatureAge signatureVersion detectedBy }
+          - uid: mondoo-windows-security-products
+            title: Installed Security Products
+            docs:
+              desc: Security products registered with Windows Security Center.
+            filters: windows.computerInfo['OsProductType'] == 1
+            mql: windows.security.products { guid state type name productState signatureState timestamp }
+          - uid: mondoo-windows-bitlocker-volumes
+            title: BitLocker Volumes
+            docs:
+              desc: Returns BitLocker encryption status for all volumes.
+            filters: windows.computerInfo['OsProductType'] == 1
+            mql: windows.bitlocker.volumes { deviceID driveLetter encryptionMethod version persistentVolumeID protectionStatus lockStatus conversionStatus }
+          - uid: mondoo-windows-security-center-health
+            title: Windows Security Health Information
+            docs:
+              desc: Windows Security Center health for each component.
+            filters: windows.computerInfo['OsProductType'] == 1
+            mql: windows.security.health { autoUpdate internetSettings securityCenterService firewall uac antiVirus antiSpyware }
+          - uid: mondoo-windows-windows-audit-policies
+            title: Windows audit policies
+            docs:
+              desc: Configured audit policies for security event logging.
+            mql: windows.auditPolicy { name category guid inclusionSetting exclusionSetting success failure }
+          - uid: mondoo-windows-windows-system-access-policy
+            title: Windows local System Access security policy
+            docs:
+              desc: Local password, lockout, and system access policy.
+            mql: secpol.systemaccess
+          - uid: mondoo-windows-windows-event-audit-policy
+            title: Windows local Event Audit security policy
+            docs:
+              desc: Returns local security policy settings for event auditing.
+            mql: secpol.eventaudit
+          - uid: mondoo-windows-registry-values-policy
+            title: Windows local Registry Values security policy
+            docs:
+              desc: Security-related registry values from local policy.
+            mql: secpol.registryvalues
+          - uid: mondoo-windows-privilege-rights-policy
+            title: Windows local Privilege Rights security policy
+            docs:
+              desc: User privilege rights assignments from local policy.
+            mql: secpol.privilegerights
+      - uid: mondoo-windows-asset-inventory-hardware-group
+        title: Hardware & Firmware
+        filters: asset.platform == "windows"
+        queries:
+          - uid: mondoo-windows-smbios-baseboard
+            title: SMBIOS baseboard (or module) information
+            docs:
+              desc: SMBIOS baseboard and motherboard information.
+            mql: machine.baseboard { manufacturer version serial assetTag product }
+          - uid: mondoo-windows-smbios-bios
+            title: SMBIOS BIOS information
+            docs:
+              desc: SMBIOS BIOS vendor, version, and release date.
+            mql: machine.bios { vendor version releaseDate }
+          - uid: mondoo-windows-smbios-system
+            title: SMBIOS System information
+            docs:
+              desc: SMBIOS system manufacturer, model, serial, and UUID.
+            mql: machine.system { sku serial family version product uuid manufacturer }
+          - uid: mondoo-windows-smbios-chassis
+            title: SMBIOS Chassis information
+            docs:
+              desc: Returns SMBIOS chassis information for hardware inventory.
+            mql: machine.chassis { manufacturer serial version assetTag }
+          - uid: mondoo-windows-disks
+            title: Disks
+            docs:
+              desc: Disks with size, bus type, partition style, and health.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: windows.disks { number friendlyName serialNumber size busType partitionStyle isBoot isSystem isOffline isReadOnly operationalStatus healthStatus }

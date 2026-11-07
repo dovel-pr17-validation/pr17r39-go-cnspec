@@ -1,0 +1,20 @@
+[Unit]
+Description=cnspec Service
+After=network-online.target
+ConditionPathExists=/etc/opt/mondoo/
+ConditionFileNotEmpty=/etc/opt/mondoo/mondoo.yml
+StartLimitIntervalSec=280
+
+[Service]
+Type=simple
+WorkingDirectory=/etc/opt/mondoo/
+ExecStart=/usr/bin/cnspec --config /etc/opt/mondoo/mondoo.yml serve
+KillMode=process
+Restart=on-failure
+RestartPreventExitStatus=78
+StartLimitBurst=3
+RestartSec=90
+
+[Install]
+WantedBy=multi-user.target
+Alias=mondoo.service

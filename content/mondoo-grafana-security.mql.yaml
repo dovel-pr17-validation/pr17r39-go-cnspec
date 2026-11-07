@@ -1,0 +1,1079 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+policies:
+  - summary: Secure Grafana organizations across service accounts, user roles, datasources, and alerting
+    uid: mondoo-grafana-security
+    name: Mondoo Grafana Security
+    version: 1.1.1
+    license: BUSL-1.1
+    tags:
+      mondoo.com/category: security
+      mondoo.com/platform: grafana,saas
+      mondoo.com/icon: grafana
+    require:
+      - provider: grafana
+    authors:
+      - name: Mondoo, Inc.
+        email: hello@mondoo.com
+    docs:
+      desc: |
+        The Mondoo Grafana Security policy identifies misconfigurations in Grafana organizations that could expose dashboards, datasource credentials, and observability data to unauthorized users. This policy helps organizations apply the principle of least privilege, protect credentials, and detect insecure datasource and alerting configurations before attackers can exploit them to access sensitive telemetry, pivot into connected datastores, or disrupt monitoring.
+
+        This policy provides security checks across key Grafana areas:
+
+        - Service account scope and lifecycle
+        - User roles, organization membership, and permissions
+        - Datasource configuration and credential handling
+        - Alerting and notification channel configuration
+        - Authentication and session settings
+
+        Have suggestions for new checks in this policy? Visit our [cnspec repository](https://github.com/mondoohq/cnspec).
+    groups:
+      - title: Service Account Security
+        filters: asset.platform == "grafana-org"
+        checks:
+          - uid: mondoo-grafana-no-admin-service-accounts
+          - uid: mondoo-grafana-service-account-tokens-have-expiration
+          - uid: mondoo-grafana-no-expired-service-account-tokens
+          - uid: mondoo-grafana-disabled-service-accounts-no-tokens
+      - title: User Role Security
+        filters: asset.platform == "grafana-org"
+        checks:
+          - uid: mondoo-grafana-limit-org-admins
+          - uid: mondoo-grafana-no-default-admin-login
+      - title: Datasource Security
+        filters: asset.platform == "grafana-org"
+        checks:
+          - uid: mondoo-grafana-datasources-use-proxy-mode
+          - uid: mondoo-grafana-datasources-no-basic-auth
+          - uid: mondoo-grafana-datasources-use-tls
+      - title: Alerting Security
+        filters: asset.platform == "grafana-org"
+        checks:
+          - uid: mondoo-grafana-notification-policy-has-receiver
+          - uid: mondoo-grafana-contact-points-resolve-enabled
+      - title: Authentication Security
+        filters: asset.platform == "grafana-org"
+        checks:
+          - uid: mondoo-grafana-users-mfa-enabled
+          - uid: mondoo-grafana-saml-enabled
+    scoring_system: average
+queries:
+  - uid: mondoo-grafana-no-admin-service-accounts
+    title: Ensure service accounts do not use the Admin role
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-05
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-2
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-5
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-5
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    filters: asset.platform == "grafana-org"
+    mql: grafana.serviceAccounts.none(role == "Admin")
+    docs:
+      desc: |
+        This check verifies that no Grafana service account holds the Admin role.
+
+        Service accounts are the machine identities that dashboard-as-code pipelines, provisioning jobs, and alerting integrations authenticate as, and each one carries an organization role. That role is set under **Administration > Users and access > Service accounts** in the Grafana UI, or through the service account API, and it should be Viewer for read-only automation and Editor for anything that writes dashboards. This check requires that none of them is Admin.
+
+        **Why this matters**
+
+        Service account tokens live in places human passwords do not: CI runner environments, Terraform state, container images, and repository secrets that several teams can read. They are used without any second factor, and unless someone set an expiry they do not lapse on their own. Treat one as eventually readable by someone outside the team that created it.
+
+        An Admin token is worth far more than the pipeline holding it. The Admin role manages users and their roles inside the organization, so whoever holds it invites an account they control and grants it access. It manages data sources, so it can repoint an existing data source at a server the attacker runs and collect the queries and credentials that follow, or read the estate through the ones already configured. It installs plugins, which is code that then runs in the Grafana server. A leaked Viewer token reads dashboards; a leaked Admin token owns the organization and everything Grafana can reach from it.
+
+        Automation that appears to need Admin usually needs one specific privileged action. Service accounts are cheap, so the right answer is a separate, narrowly scoped identity for that action rather than an Admin role on the pipeline that runs every day.
+      audit: |
+        ### Audit via UI
+
+        1. Sign in to Grafana and open **Administration > Users and access > Service accounts**.
+        2. Review the **Role** column for each service account in the list.
+        3. Note any service account showing the **Admin** role.
+
+        A passing result shows every service account assigned the Viewer or Editor role; a failing result shows one or more service accounts with the Admin role.
+
+        ### Audit via API
+
+        Query the Grafana HTTP API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $GRAFANA_TOKEN" \
+          https://grafana.example.com/api/serviceaccounts/search
+        ```
+
+        A passing response lists every entry in `serviceAccounts[]` with a `role` of `Viewer` or `Editor`; a failing response includes at least one entry where `role` equals `Admin`.
+      remediation:
+        - id: console
+          desc: |
+            To downgrade Admin service accounts using the Grafana UI:
+
+            1. Navigate to **Administration > Users and access > Service accounts**.
+            2. Identify service accounts with the **Admin** role.
+            3. Change the role to **Viewer** or **Editor** depending on the service account's purpose.
+            4. Update any automation that depended on Admin-only API endpoints so it works with the reduced role.
+            5. If a workflow genuinely requires the Admin role, document it as an accepted exception. The service account continues to be reported by this check until its role is downgraded.
+        - id: api
+          desc: |
+            To downgrade a service account through the Grafana HTTP API:
+
+            ```bash
+            curl -s -X PATCH -H "Authorization: Bearer $ADMIN_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d '{"role":"Viewer"}' \
+              "https://grafana.example.com/api/serviceaccounts/$SA_ID"
+            ```
+    refs:
+      - url: https://grafana.com/docs/grafana/latest/administration/service-accounts/
+        title: Grafana Service Accounts
+      - url: https://grafana.com/docs/grafana/latest/administration/roles-and-permissions/
+        title: Grafana Roles and Permissions
+  - uid: mondoo-grafana-service-account-tokens-have-expiration
+    title: Ensure all service account tokens have an expiration date
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-2
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-6-3
+      compliance/soc2-2017: soc2-control-cc6-1-9
+      compliance/vda-isa-5: vda-isa-5-4-1-1
+    filters: asset.platform == "grafana-org"
+    mql: grafana.serviceAccounts.all(tokens.all(hasExpiration == true))
+    docs:
+      desc: |
+        This check verifies that every Grafana service account token has an expiration date.
+
+        Tokens are created under **Administration > Users and access > Service accounts** by selecting the account and adding a token, and the dialog offers an optional expiration. Leave it unset and the token is valid forever. This check requires that every existing token carries an expiry, which in practice means choosing a rotation period short enough that a leak has an end date. Ninety days is a common choice.
+
+        **Why this matters**
+
+        A non-expiring token is a credential with no failure mode that ever removes it. It stays in the CI variable it was pasted into, in the shell history of whoever tested it, and in the repository it was accidentally committed to, and it keeps working through every reorganization, contractor offboarding, and laptop replacement that follows. Search a large organization's repositories and the Grafana tokens found there are almost always the ones created without an expiry.
+
+        The consequence is that time-to-discovery equals duration of access. An attacker who finds a token in a public repository, a leaked container image, or a build log gets whatever the account can do for as long as they want it, and use of a valid token looks exactly like the automation it was issued for. There is no failed sign-in, no new device, and no second factor to trip an alert.
+
+        What they reach is the estate, not just a dashboard. Grafana panels describe which systems exist, which environments they belong to, and what normal traffic looks like, and the data sources behind them can often be queried through the server itself.
+
+        Expiry is the control that works while nobody is paying attention, so the real operational task is a rotation job rather than a calendar reminder.
+      audit: |
+        ### Audit via UI
+
+        1. Sign in to Grafana and open **Administration > Users and access > Service accounts**.
+        2. Select each service account and review its **Tokens** section.
+        3. Check the **Expires** column for each token.
+
+        A passing result shows every token with a defined expiration date; a failing result shows one or more tokens with no expiration set.
+
+        ### Audit via API
+
+        Query the Grafana HTTP API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $GRAFANA_TOKEN" \
+          https://grafana.example.com/api/serviceaccounts/{id}/tokens
+        ```
+
+        A passing response returns tokens that each include an `expiration` timestamp; a failing response includes at least one token with no `expiration` value.
+      remediation:
+        - id: console
+          desc: |
+            To replace non-expiring service account tokens using the Grafana UI:
+
+            1. Navigate to **Administration > Users and access > Service accounts**.
+            2. For each service account, review its tokens.
+            3. Delete tokens without an expiration date.
+            4. Create new tokens that expire within 90 days or less.
+            5. Update any systems that use the old token with the new token value.
+        - id: api
+          desc: |
+            To create a replacement token with a 90-day expiration through the Grafana HTTP API:
+
+            ```bash
+            curl -s -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d '{"name":"rotated-token","secondsToLive":7776000}' \
+              "https://grafana.example.com/api/serviceaccounts/$SA_ID/tokens"
+            ```
+    refs:
+      - url: https://grafana.com/docs/grafana/latest/administration/service-accounts/#service-account-tokens
+        title: Grafana Service Account Tokens
+  - uid: mondoo-grafana-no-expired-service-account-tokens
+    title: Ensure no expired service account tokens exist
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-2
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-6-3
+      compliance/soc2-2017: soc2-control-cc6-1-9
+      compliance/vda-isa-5: vda-isa-5-4-1-1
+    filters: asset.platform == "grafana-org"
+    mql: grafana.serviceAccounts.all(tokens.none(isExpired == true))
+    docs:
+      desc: |
+        This check verifies that no expired tokens remain attached to a Grafana service account.
+
+        An expired token cannot authenticate, so removing it is housekeeping rather than a fix for live access. Delete them by opening the account under **Administration > Users and access > Service accounts** and removing the entries whose expiry has passed, or by deleting them through the service account token API. This check requires that none is left behind.
+
+        **Why this matters**
+
+        The reason to care is that dead tokens make the live ones hard to see. A service account with nine expired tokens and one working one is a page an operator scrolls past, and the review that was supposed to answer which credentials can reach this organization today becomes an exercise in reading dates. Access reviews that are tedious get skipped, and a token that should have been revoked survives because nobody wanted to work out which entry it was.
+
+        A pile of them also encodes a specific failure. Every expired token was either rotated properly, in which case the old entry should have gone with the new one, or it lapsed and broke an integration nobody noticed. The second case is usually resolved by someone creating a replacement token without an expiry, which is precisely the outcome a companion check in this policy exists to prevent.
+
+        There is a cleanup consequence as well. Deleting an unused service account is an obvious decision once its token list is empty and a hesitant one while entries are still shown, so stale entries keep abandoned accounts alive in the organization, and each of those is another identity someone has to keep track of.
+
+        Removing the dead entries costs nothing and makes the remaining list mean something.
+      audit: |
+        ### Audit via UI
+
+        1. Sign in to Grafana and open **Administration > Users and access > Service accounts**.
+        2. Select each service account and review its **Tokens** section.
+        3. Look for tokens marked as expired in the **Expires** column.
+
+        A passing result shows no expired tokens listed under any service account; a failing result shows one or more tokens past their expiration date.
+
+        ### Audit via API
+
+        Query the Grafana HTTP API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $GRAFANA_TOKEN" \
+          https://grafana.example.com/api/serviceaccounts/{id}/tokens
+        ```
+
+        A passing response returns tokens that all show `hasExpired` set to `false`; a failing response includes at least one token with `hasExpired` set to `true`.
+      remediation:
+        - id: console
+          desc: |
+            To remove expired service account tokens using the Grafana UI:
+
+            1. Navigate to **Administration > Users and access > Service accounts**.
+            2. For each service account, review its tokens and identify expired ones.
+            3. Delete all expired tokens.
+            4. If the associated integration is still active, create a new token with proper expiration and update the integration.
+        - id: api
+          desc: |
+            To delete an expired token through the Grafana HTTP API:
+
+            ```bash
+            # List the account's tokens to find the expired one's ID
+            curl -s -H "Authorization: Bearer $ADMIN_TOKEN" \
+              "https://grafana.example.com/api/serviceaccounts/$SA_ID/tokens"
+
+            # Delete the expired token
+            curl -s -X DELETE -H "Authorization: Bearer $ADMIN_TOKEN" \
+              "https://grafana.example.com/api/serviceaccounts/$SA_ID/tokens/$TOKEN_ID"
+            ```
+    refs:
+      - url: https://grafana.com/docs/grafana/latest/administration/service-accounts/#service-account-tokens
+        title: Grafana Service Account Tokens
+  - uid: mondoo-grafana-disabled-service-accounts-no-tokens
+    title: Ensure disabled service accounts have no active tokens
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-07
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-5-18
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-2
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-6-3
+      compliance/soc2-2017: soc2-control-cc6-1-9
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    filters: asset.platform == "grafana-org"
+    mql: |
+      grafana.serviceAccounts.where(isDisabled == true).all(
+        tokens == empty
+      )
+    docs:
+      desc: |
+        This check verifies that Grafana service accounts which have been disabled have no tokens left attached.
+
+        Disabling an account under **Administration > Users and access > Service accounts** stops its tokens from authenticating, but it does not delete them. They stay listed against the account, and they become valid again the moment the account is switched back on. This check requires a disabled account's token list to be empty, which means deleting each token as part of disabling the account.
+
+        **Why this matters**
+
+        Accounts are usually disabled at exactly the moments when their credentials should be treated as compromised: a contractor's integration ends, a build system is decommissioned, or someone noticed the token in a place it should not have been. Disabling is the fast reaction, and leaving the tokens attached means the reaction was never completed.
+
+        What that leaves is a single toggle between an attacker and working access. Anyone who can administer service accounts, including a lower-privileged account an attacker has already taken, can re-enable an old identity and immediately hold every credential it ever had, without creating a token and without the record that creating one would leave. A token that leaked months earlier and was quietly parked by disabling the account starts working again.
+
+        Re-enablement by mistake is the more common version. A cleanup script or a restored configuration flips the flag back, and dormant credentials that several people believe are dead are live again, held by whoever collected them in the meantime.
+
+        Emptying the token list makes recovery deliberate. Turning the account back on then requires issuing a fresh token for a stated purpose, which is the decision that should have been made in the first place.
+      audit: |
+        ### Audit via UI
+
+        1. Sign in to Grafana and open **Administration > Users and access > Service accounts**.
+        2. Filter or sort the list to find service accounts shown as disabled.
+        3. Select each disabled account and review its **Tokens** section.
+
+        A passing result shows disabled service accounts with no tokens attached; a failing result shows a disabled service account that still has one or more tokens.
+
+        ### Audit via API
+
+        Query the Grafana HTTP API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $GRAFANA_TOKEN" \
+          https://grafana.example.com/api/serviceaccounts/search
+        ```
+
+        A passing response shows every entry in `serviceAccounts[]` with `isDisabled` set to `true` reporting a `tokens` count of `0`; a failing response includes a disabled service account with a `tokens` count greater than `0`.
+      remediation:
+        - id: console
+          desc: |
+            To delete all tokens from disabled service accounts using the Grafana UI:
+
+            1. Navigate to **Administration > Users and access > Service accounts**.
+            2. Filter for disabled service accounts.
+            3. For each disabled account, delete all associated tokens.
+            4. If the service account is no longer needed, delete it entirely.
+        - id: api
+          desc: |
+            To list and delete the tokens still attached to a disabled service account through the Grafana HTTP API:
+
+            ```bash
+            # List tokens still attached to a disabled service account
+            curl -s -H "Authorization: Bearer $ADMIN_TOKEN" \
+              "https://grafana.example.com/api/serviceaccounts/$SA_ID/tokens"
+
+            # Delete each remaining token
+            curl -s -X DELETE -H "Authorization: Bearer $ADMIN_TOKEN" \
+              "https://grafana.example.com/api/serviceaccounts/$SA_ID/tokens/$TOKEN_ID"
+            ```
+    refs:
+      - url: https://grafana.com/docs/grafana/latest/administration/service-accounts/
+        title: Grafana Service Accounts
+  - uid: mondoo-grafana-limit-org-admins
+    title: Ensure the number of organization administrators is limited
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-05
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-2
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-5
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-2
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    filters: asset.platform == "grafana-org"
+    mql: grafana.users.where(role == "Admin").length <= 3
+    docs:
+      desc: |
+        This check verifies that a Grafana organization keeps its Admin-role users to a small number.
+
+        Organization roles are assigned under **Administration > Users and access > Users** in the Grafana UI, or through the organization users API. Admin is the top of the three roles, above Editor and Viewer, and it carries user management, data source configuration, and plugin installation. This check counts the users holding Admin in the organization and requires the total to be 3 or fewer, a threshold to adjust if your operating model genuinely needs more.
+
+        **Why this matters**
+
+        Every Admin account is a complete path into the organization, so the count is the number of independent ways in. Compromise one and the attacker manages roles, which is how they establish a persistent account of their own, and manages data sources, which is how they reach the systems behind Grafana rather than only the pictures of them. Ten Admins mean ten phishing targets, ten sets of session cookies worth stealing, and ten laptops whose compromise is a full compromise.
+
+        Those accounts also tend to be the least defended. Admin is often granted early to whoever set the instance up and then never reviewed, so the list accumulates people who changed teams, contractors whose engagement ended, and shared logins nobody owns. Those are the accounts with weak passwords and no second factor, because nobody thinks of them as privileged any more.
+
+        A short list has a second effect that matters during an incident. When four people hold Admin, an unexpected configuration change has four plausible authors and can be resolved in minutes. When thirty do, the same change is unattributable and the investigation stalls while the intruder keeps working.
+
+        Most of what people request Admin for is Editor work. Reserve the role for the users who administer Grafana itself, and review the list on a schedule rather than after something goes wrong.
+      audit: |
+        ### Audit via UI
+
+        1. Sign in to Grafana and open **Administration > Users and access > Users**.
+        2. Review the **Role** column and count the users assigned the **Admin** role.
+        3. Compare the count against your approved Admin threshold.
+
+        A passing result shows the number of Admin users at or below the allowed limit; a failing result shows more Admin users than the threshold permits.
+
+        ### Audit via API
+
+        Query the Grafana HTTP API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $GRAFANA_TOKEN" \
+          https://grafana.example.com/api/org/users
+        ```
+
+        A passing response returns three or fewer entries where `role` equals `Admin`; a failing response returns more than three entries with `role` set to `Admin`.
+      remediation:
+        - id: console
+          desc: |
+            To downgrade organization administrators who do not require Admin access using the Grafana UI:
+
+            1. Navigate to **Administration > Users and access > Users**.
+            2. Identify users with the **Admin** role.
+            3. For each user, evaluate whether Admin access is operationally required.
+            4. Change unnecessary Admin users to **Editor** or **Viewer** roles.
+            5. Document the justification for each remaining Admin user.
+
+            This check allows up to 3 organization administrators. If your organization requires more, adjust the threshold to match your operational needs.
+        - id: api
+          desc: |
+            To change a user's organization role through the Grafana HTTP API:
+
+            ```bash
+            # List the organization's users to find the user ID
+            curl -s -H "Authorization: Bearer $ADMIN_TOKEN" \
+              "https://grafana.example.com/api/org/users"
+
+            # Downgrade the user to Editor
+            curl -s -X PATCH -H "Authorization: Bearer $ADMIN_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d '{"role":"Editor"}' \
+              "https://grafana.example.com/api/org/users/$USER_ID"
+            ```
+    refs:
+      - url: https://grafana.com/docs/grafana/latest/administration/roles-and-permissions/
+        title: Grafana Roles and Permissions
+  - uid: mondoo-grafana-no-default-admin-login
+    title: Ensure the default admin login has been changed
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-15
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-2
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-2-2-2
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    filters: asset.platform == "grafana-org"
+    mql: grafana.users.none(login == "admin" && role == "Admin")
+    docs:
+      desc: |
+        This check verifies that no administrator signs in to Grafana with the default `admin` login name.
+
+        A fresh Grafana installation creates one user whose login is `admin`. On self-hosted instances the credentials for it come from the `[security]` section of `grafana.ini`, as `admin_user` and `admin_password`, or from the matching `GF_SECURITY_ADMIN_USER` and `GF_SECURITY_ADMIN_PASSWORD` environment variables. Set a unique login there before the first start, or afterwards create a replacement administrator with its own login name, confirm it can reach both organization and server administration, and then rename or delete the original.
+
+        **Why this matters**
+
+        The default login is half of a credential the attacker does not have to discover. Every scanner and credential-stuffing list already carries `admin` for Grafana, so an exposed instance is attacked with a known username from the first request and the attacker only has to be right about the password. Leave the shipped password in place as well and the instance is taken over by automation rather than by a person.
+
+        The account is also worth taking. The original administrator normally holds the server-level Grafana Admin permission on top of its organization role, which reaches every organization on the instance, all of its users, and every data source configured anywhere in it. From there the attacker reads the dashboards that describe what the estate contains and where it runs, then queries the data sources themselves through the Grafana proxy using credentials they never have to see.
+
+        A unique login also makes failed sign-ins meaningful. Attempts against `admin` are constant background noise on any reachable instance, while attempts against a name only your team knows are worth alerting on.
+
+        Rename or replace the account rather than deleting it before the replacement holds the server administration permission, or you lose the ability to administer the instance at all.
+      audit: |
+        ### Audit via UI
+
+        1. Sign in to Grafana and open **Administration > Users and access > Users**.
+        2. Look for a user whose login name is `admin`.
+        3. If that user exists, check whether it holds the **Admin** role.
+
+        A passing result shows no user with the login `admin` holding the Admin role; a failing result shows an Admin-role user still using the default `admin` login.
+
+        ### Audit via API
+
+        Query the Grafana HTTP API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $GRAFANA_TOKEN" \
+          https://grafana.example.com/api/org/users
+        ```
+
+        A passing response contains no entry where `login` equals `admin` and `role` equals `Admin`; a failing response includes an entry with `login` set to `admin` and `role` set to `Admin`.
+      remediation:
+        - id: console
+          desc: |
+            To replace or rename the default admin login so no Admin-role user signs in as `admin`:
+
+            1. Sign in to Grafana with a server administrator account.
+            2. Navigate to **Administration > Users and access > Users** and create a new user with a unique login name.
+            3. Grant the new user the **Admin** organization role and enable the **Grafana Admin** server permission so server-level administration is preserved.
+            4. Sign out, then sign in as the new user and confirm both organization and server administration pages are accessible.
+            5. Edit the default `admin` user and change its login to a unique name, or delete the account once you confirm nothing depends on it.
+
+            > **Warning:** Never delete the default admin before the replacement account holds the Grafana Admin server permission and you have verified it in step 4, or you lose server-level administration.
+
+            For new self-hosted installations, set a unique admin login and a strong password before first startup. Prefer environment variables over a plaintext password in `grafana.ini`:
+
+            ```bash
+            export GF_SECURITY_ADMIN_USER="your_unique_admin_name"
+            export GF_SECURITY_ADMIN_PASSWORD="strong_random_password"
+            ```
+
+            These settings correspond to `admin_user` and `admin_password` in the `[security]` section and only take effect when Grafana initializes its database at first startup. Changing them later does not rename an existing admin user.
+
+            On Grafana Cloud you have no access to `grafana.ini` or the server process, so the default `admin` account does not apply in the same way. Manage administrators through the Grafana Cloud UI or the HTTP API instead.
+    refs:
+      - url: https://grafana.com/docs/grafana/latest/setup-grafana/configure-access/configure-authentication/
+        title: Grafana Authentication Configuration
+  - uid: mondoo-grafana-datasources-use-proxy-mode
+    title: Ensure datasources use proxy access mode
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-22
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-1
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-6-1
+      compliance/vda-isa-5: vda-isa-5-5-2-7
+    filters: asset.platform == "grafana-org"
+    mql: grafana.datasources.all(access == "proxy")
+    docs:
+      desc: |
+        This check verifies that every Grafana data source is queried by the Grafana server rather than by the user's browser.
+
+        A data source's access mode is either proxy, where the server makes the query and returns the result, or direct, where the browser connects to the data source itself. Recent Grafana versions removed the setting from the UI for most data source types, so it is normally read and changed through the data source API, or set as `access: proxy` in the provisioning YAML on self-hosted instances. This check requires proxy mode on every data source.
+
+        **Why this matters**
+
+        Direct mode has to give the browser everything the query needs, which means the data source credentials are delivered to the client. They are then readable in the browser's developer tools, by any extension the user has installed, and by any script running on the page. A dashboard viewer who was only ever meant to see a chart ends up holding the credential for the database behind it, and can query it directly for everything the chart does not show.
+
+        It also requires the data source to be reachable from wherever the user's browser is. That is what turns an internal metrics store or database into something answering requests from laptops on home networks and hotel wifi. The address of that internal endpoint is published in the dashboard's own configuration, so an attacker who can load a dashboard learns both where the system is and, from the same page, how to authenticate to it.
+
+        Proxy mode also keeps the query on a path Grafana controls, so its permissions and its logging apply. Direct queries are invisible to the Grafana server and leave no record of who read what.
+
+        Browser access exists for the rare data source that must be reached from the client. If one is genuinely required, treat its credentials as public.
+      audit: |
+        ### Audit via API
+
+        The API reports the access mode for every datasource regardless of version, so it is the most reliable way to audit this setting. Query the Grafana HTTP API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $GRAFANA_TOKEN" \
+          https://grafana.example.com/api/datasources
+        ```
+
+        A passing response shows every datasource with `access` set to `proxy`; a failing response includes at least one datasource with `access` set to `direct`.
+
+        ### Audit via UI
+
+        1. Sign in to Grafana and open **Connections > Data sources**.
+        2. Select each datasource. If it still shows an **Access** setting, confirm it is set to **Server (default)**, which corresponds to proxy mode.
+
+        Recent Grafana versions removed the **Access** setting from the UI for most datasource types, so the API audit above is the authoritative check. A passing result shows every datasource using Server access mode; a failing result shows one or more datasources set to Browser access mode.
+      remediation:
+        - id: console
+          desc: |
+            Switch datasources from direct to proxy access mode. Browser access mode sends datasource credentials to the user's browser and requires the datasource to be reachable from the client network, so proxy mode keeps credentials server-side and shields internal endpoints.
+
+            Recent Grafana versions removed the **Access** setting from the UI for most datasource types, so the API path below is the primary way to change it. If the datasource still shows an **Access** setting in the UI, you can change it there:
+
+            1. Navigate to **Connections > Data sources**.
+            2. Select the datasource configured with direct access and set **Access** to **Server (default)**.
+            3. Save and test the datasource connection.
+
+            For self-hosted Grafana datasources defined through provisioning files, set `access: proxy` in the provisioning YAML and restart Grafana to apply the change. On Grafana Cloud you cannot edit provisioning files or restart the server, so manage datasources through the API or the UI instead.
+        - id: api
+          desc: |
+            To switch a datasource to proxy access mode through the Grafana HTTP API, fetch its definition, set `access` to `proxy`, and put it back:
+
+            ```bash
+            curl -s -H "Authorization: Bearer $GRAFANA_TOKEN" \
+              "https://grafana.example.com/api/datasources/uid/$DS_UID" > datasource.json
+
+            # Edit datasource.json and set "access": "proxy", then:
+            curl -s -X PUT -H "Authorization: Bearer $GRAFANA_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d @datasource.json \
+              "https://grafana.example.com/api/datasources/uid/$DS_UID"
+            ```
+    refs:
+      - url: https://grafana.com/docs/grafana/latest/datasources/
+        title: Grafana Datasources
+  - uid: mondoo-grafana-datasources-no-basic-auth
+    title: Ensure datasources do not use basic authentication
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-14
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-2
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-9
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-3-2
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    filters: asset.platform == "grafana-org"
+    mql: grafana.datasources.none(basicAuth == true)
+    docs:
+      desc: |
+        This check verifies that no Grafana data source authenticates with a static username and password.
+
+        Basic authentication is enabled per data source under **Connections > Data sources**, and is reported as `basicAuth` by the data source API. It sends the username and password base64-encoded in a header on every request, which is an encoding rather than encryption. This check requires it to be off, with a bearer token, mutual TLS, or an identity provider integration configured in its place.
+
+        **Why this matters**
+
+        The credential travels with every single query. A dashboard that refreshes on a timer sends the same reusable password to the data source thousands of times a day, so the number of places it can be captured grows with use: any hop where TLS is absent or terminated, any proxy that logs request headers, and any intermediary recording traffic for debugging. Recovering the password from a captured header is a base64 decode, not an attack.
+
+        Because it is a static password, capture is enough. There is no exchange to replay and no binding to a session, so an attacker who reads one header authenticates to the data source directly from anywhere, bypassing Grafana and every permission Grafana would have applied. They then query the underlying database or metrics store for everything it holds rather than the series a panel displays.
+
+        These passwords are also usually shared and rarely rotated. The same account tends to be configured across several data sources and copied into provisioning files kept in version control, so one exposure reaches multiple systems, and revoking it breaks dashboards nobody has inventoried.
+
+        Tokens and certificates can be revoked one at a time and attributed to a single integration, which is what makes the migration worth doing.
+      audit: |
+        ### Audit via UI
+
+        1. Sign in to Grafana and open **Connections > Data sources**.
+        2. Select each datasource and review its authentication settings.
+        3. Check whether the **Basic Auth** toggle is enabled.
+
+        A passing result shows every datasource using an alternative authentication method with Basic Auth disabled; a failing result shows one or more datasources with Basic Auth enabled.
+
+        ### Audit via API
+
+        Query the Grafana HTTP API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $GRAFANA_TOKEN" \
+          https://grafana.example.com/api/datasources
+        ```
+
+        A passing response shows every datasource with `basicAuth` set to `false`; a failing response includes at least one datasource with `basicAuth` set to `true`.
+      remediation:
+        - id: console
+          desc: |
+            To replace basic authentication with a stronger method using the Grafana UI:
+
+            1. Navigate to **Connections > Data sources**.
+            2. For each datasource using basic authentication, switch to an alternative method:
+               - **API key or bearer token**: Configure token-based access in the datasource settings.
+               - **TLS client certificates**: Use mutual TLS for datasource authentication.
+               - **OAuth or managed identity**: Use identity provider integration where supported.
+            3. Disable the **Basic Auth** toggle for the datasource.
+            4. Remove the stored basic auth credentials.
+            5. Test the datasource connection.
+        - id: api
+          desc: |
+            To turn basic authentication off through the Grafana HTTP API, fetch the datasource definition, set `basicAuth` to `false`, and put it back. Configure the replacement credential in the same request so the datasource does not lose access:
+
+            ```bash
+            curl -s -H "Authorization: Bearer $GRAFANA_TOKEN" \
+              "https://grafana.example.com/api/datasources/uid/$DS_UID" > datasource.json
+
+            # Edit datasource.json, set "basicAuth": false, and add the replacement
+            # credential under secureJsonData, then:
+            curl -s -X PUT -H "Authorization: Bearer $GRAFANA_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d @datasource.json \
+              "https://grafana.example.com/api/datasources/uid/$DS_UID"
+            ```
+    refs:
+      - url: https://grafana.com/docs/grafana/latest/datasources/
+        title: Grafana Datasources
+  - uid: mondoo-grafana-datasources-use-tls
+    title: Ensure datasource connections use TLS
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-2-ii-transmission-security-encryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    filters: asset.platform == "grafana-org"
+    mql: |
+      grafana.datasources.where(url != "").all(
+        isHttps == true || url == /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])([:\/]|$)/
+      )
+    docs:
+      desc: |
+        This check verifies that Grafana reaches its data sources over an encrypted connection.
+
+        The URL field of a data source, set under **Connections > Data sources** and stored as `url` by the API, decides the transport. A URL beginning with `https://` is encrypted and one beginning with `http://` is not. This check requires HTTPS on every data source that has a URL, treating `localhost`, `127.0.0.1`, and the IPv6 loopback address as exempt because those connections never leave the machine.
+
+        **Why this matters**
+
+        The hop from the Grafana server to a data source carries the query results, which is the actual content of every dashboard in the organization. Over plain HTTP anyone positioned between the two reads that traffic: business metrics, log lines with their message bodies, trace payloads, and whatever identifiers those records contain. This is often the most sensitive path in the deployment and the one least likely to be reviewed, because it sits inside a network that is assumed to be trusted.
+
+        The authentication credential moves over the same hop. A bearer token or a basic authentication header is sent with every query, so an observer who captures one request can then query the data source directly, without Grafana and without whatever permissions Grafana would have applied.
+
+        Plaintext responses are also modifiable in flight. An attacker able to rewrite the answer to a query controls what the dashboard shows and, more importantly, what an alert rule evaluates, which means alerts can be held quiet while the condition they watch for is true.
+
+        An internal network is not an exemption here. Traffic between a Grafana pod and a data source crosses shared infrastructure that other workloads sit on, and one compromised neighbor is enough to be on that path.
+      audit: |
+        ### Audit via UI
+
+        1. Sign in to Grafana and open **Connections > Data sources**.
+        2. Select each datasource and review the **URL** field.
+        3. Confirm the URL begins with `https://`, treating localhost and 127.0.0.1 URLs as exempt.
+
+        A passing result shows every networked datasource URL using HTTPS; a failing result shows one or more datasources with an `http://` URL pointing to a non-local host.
+
+        ### Audit via API
+
+        Query the Grafana HTTP API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $GRAFANA_TOKEN" \
+          https://grafana.example.com/api/datasources
+        ```
+
+        A passing response shows every datasource with a non-empty `url` using the `https://` scheme or pointing to localhost; a failing response includes a datasource whose `url` uses `http://` for a remote host.
+      remediation:
+        - id: console
+          desc: |
+            To move datasource URLs to HTTPS using the Grafana UI:
+
+            1. Navigate to **Connections > Data sources**.
+            2. For each datasource with an HTTP URL, update it to HTTPS.
+            3. Ensure the datasource endpoint has a valid TLS certificate.
+            4. If using self-signed certificates, add the issuing CA certificate under the datasource TLS settings instead of enabling Skip TLS Verify.
+            5. Save and test the datasource connection.
+        - id: api
+          desc: |
+            To move a datasource URL to HTTPS through the Grafana HTTP API, fetch its definition, rewrite `url`, and put it back:
+
+            ```bash
+            curl -s -H "Authorization: Bearer $GRAFANA_TOKEN" \
+              "https://grafana.example.com/api/datasources/uid/$DS_UID" > datasource.json
+
+            # Edit datasource.json and change "url" to the https:// endpoint, then:
+            curl -s -X PUT -H "Authorization: Bearer $GRAFANA_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d @datasource.json \
+              "https://grafana.example.com/api/datasources/uid/$DS_UID"
+            ```
+    refs:
+      - url: https://grafana.com/docs/grafana/latest/setup-grafana/configure-security/configure-database-encryption/
+        title: Grafana Security Configuration
+  - uid: mondoo-grafana-notification-policy-has-receiver
+    title: Ensure notification policy has a default receiver configured
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-03
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-308-a-6-ii-security-incident-procedures-response-and-reporting
+      compliance/iso-27001-2022: iso-27001-2022-a-8-16
+      compliance/nis-2: nis-2-21-2-b
+      compliance/nist-csf-1: nist-csf-1-de-dp-4
+      compliance/nist-csf-2: nist-csf-2-de-ae-06
+      compliance/nist-sp-800-171: false
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-7-2
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    filters: asset.platform == "grafana-org"
+    mql: grafana.notificationPolicy.receiver != ""
+    docs:
+      desc: |
+        This check verifies that Grafana's alert notification tree has a default contact point set.
+
+        The root of the tree, edited under **Alerting > Notification policies**, has a default contact point that receives every alert not matched by a more specific route. Leave it unset and those alerts are evaluated, recorded as firing, and delivered nowhere. This check requires the root policy to name a receiver.
+
+        **Why this matters**
+
+        The failure is quiet in both directions. The alert rule fires correctly, the state change is visible to anyone who happens to open the alerting page, and no error is raised, so the team's evidence that alerting works comes entirely from the rules that do match a route. A gap in the tree is discovered when someone asks why nobody responded to something.
+
+        Routing gaps appear exactly where the alerts are least expected. Specific routes are written for the systems people already worry about and are matched on labels, so a rule added later by a different team, or one whose labels were renamed during a refactor, falls through all of them. New and unfamiliar alerts are the ones most likely to matter, and they are the ones with no route.
+
+        That has a direct security consequence, because detection content is delivered by the same tree. Alerts on bursts of failed authentication, on a certificate about to expire, on an agent that stopped reporting, and on a data source that went unreachable all travel this path. An attacker does not need to disable anything for those to go unnoticed, because an unset default has already done it.
+
+        Set the root receiver to something a human actually reads, then send a test notification through it, since a contact point that is configured but broken fails just as quietly.
+      audit: |
+        ### Audit via UI
+
+        1. Sign in to Grafana and open **Alerting > Notification policies**.
+        2. Review the root of the notification policy tree.
+        3. Confirm a **Default contact point** is selected.
+
+        A passing result shows a default contact point assigned to the root policy; a failing result shows the default contact point unset.
+
+        ### Audit via API
+
+        Query the Grafana HTTP API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $GRAFANA_TOKEN" \
+          https://grafana.example.com/api/v1/provisioning/policies
+        ```
+
+        A passing response returns a policy with a non-empty `receiver` value; a failing response returns a policy whose `receiver` is empty or absent.
+      remediation:
+        - id: console
+          desc: |
+            To configure a default receiver in the notification policy using the Grafana UI:
+
+            1. Navigate to **Alerting > Notification policies**.
+            2. Edit the **Default policy** and set the **Default contact point** to a receiver such as email, Slack, or PagerDuty.
+            3. Verify that the selected contact point is properly configured and send a test notification.
+        - id: api
+          desc: |
+            To set the root receiver through the Grafana HTTP API, fetch the current policy tree, set its `receiver`, and put it back. The update replaces the entire policy tree, so always start from the current tree to preserve existing routes:
+
+            ```bash
+            curl -s -H "Authorization: Bearer $GRAFANA_TOKEN" \
+              "https://grafana.example.com/api/v1/provisioning/policies" > policies.json
+
+            # Edit policies.json and set the top-level "receiver", then:
+            curl -s -X PUT -H "Authorization: Bearer $GRAFANA_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d @policies.json \
+              "https://grafana.example.com/api/v1/provisioning/policies"
+            ```
+    refs:
+      - url: https://grafana.com/docs/grafana/latest/alerting/fundamentals/notifications/notification-policies/
+        title: Grafana Notification Policies
+  - uid: mondoo-grafana-contact-points-resolve-enabled
+    title: Ensure contact points do not disable resolve messages
+    impact: 50
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-03
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-308-a-6-ii-security-incident-procedures-response-and-reporting
+      compliance/iso-27001-2022: iso-27001-2022-a-8-16
+      compliance/nis-2: nis-2-21-2-b
+      compliance/nist-csf-1: nist-csf-1-de-dp-4
+      compliance/nist-csf-2: nist-csf-2-de-ae-06
+      compliance/nist-sp-800-171: false
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-7-2
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    filters: asset.platform == "grafana-org"
+    mql: grafana.contactPoints.none(disableResolveMessage == true)
+    docs:
+      desc: |
+        This check verifies that Grafana contact points still send a notification when an alert stops firing.
+
+        Each contact point under **Alerting > Contact points** has a toggle that suppresses resolved notifications, reported as `disableResolveMessage` by the provisioning API. Turn it on and the destination is told when a condition starts and never told when it ends. This check requires the toggle to be off on every contact point.
+
+        **Why this matters**
+
+        Without the resolved message nothing downstream can close anything. A ticketing system or chat integration fed by Grafana accumulates open incidents that were fixed hours ago, and the queue an on-call engineer scans at handover stops distinguishing what is broken now from what was broken last week. The signal each alert carries decays as the noise around it grows.
+
+        That decay is what makes this a security concern rather than a tidiness one. Responders learn from an unreliable channel that most of what it sends is stale, and the next real alert arrives into that assumption. An intrusion detection alert, a burst of failed sign-ins, or a certificate expiry warning gets the same treatment as the twenty open records nobody has closed.
+
+        It also removes the fastest way to tell a fix from a coincidence. Confirming that a condition cleared means going back to the dashboard by hand, and during an incident that is time spent proving the problem is over rather than working on it. Teams under pressure skip the confirmation and move on, which is how a partially fixed condition gets closed.
+
+        The toggle exists for destinations that can only accept an event without a lifecycle, such as a one-way webhook into a system that cannot correlate the two. Turn it off only where the receiving system genuinely cannot use the message.
+      audit: |
+        ### Audit via UI
+
+        1. Sign in to Grafana and open **Alerting > Contact points**.
+        2. Select each contact point and review its settings.
+        3. Confirm the **Disable resolve message** toggle is turned off.
+
+        A passing result shows every contact point with resolve messages enabled; a failing result shows one or more contact points with resolve messages disabled.
+
+        ### Audit via API
+
+        Query the Grafana HTTP API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $GRAFANA_TOKEN" \
+          https://grafana.example.com/api/v1/provisioning/contact-points
+        ```
+
+        A passing response shows every contact point with `disableResolveMessage` set to `false`; a failing response includes at least one contact point with `disableResolveMessage` set to `true`.
+      remediation:
+        - id: console
+          desc: |
+            To enable resolve messages for all contact points using the Grafana UI:
+
+            1. Navigate to **Alerting > Contact points**.
+            2. For each contact point, ensure the **Disable resolve message** toggle is turned off.
+            3. Save the contact point configuration.
+        - id: api
+          desc: |
+            To re-enable resolve messages through the Grafana HTTP API, fetch the contact point, set `disableResolveMessage` to `false`, and put it back. The update replaces the whole contact point, so start from the current definition to preserve its settings:
+
+            ```bash
+            # List the contact points to find the one to change and its UID
+            curl -s -H "Authorization: Bearer $GRAFANA_TOKEN" \
+              "https://grafana.example.com/api/v1/provisioning/contact-points"
+
+            # Send the contact point back with resolve messages enabled
+            curl -s -X PUT -H "Authorization: Bearer $GRAFANA_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d @contact-point.json \
+              "https://grafana.example.com/api/v1/provisioning/contact-points/$CONTACT_POINT_UID"
+            ```
+    refs:
+      - url: https://grafana.com/docs/grafana/latest/alerting/fundamentals/notifications/contact-points/
+        title: Grafana Contact Points
+  - uid: mondoo-grafana-users-mfa-enabled
+    filters: asset.platform == "grafana-org"
+    title: Ensure active Grafana users have multi-factor authentication
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-02
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-1
+    mql: |
+      grafana.users.where(isDisabled == false).all(mfaEnabled == true)
+    docs:
+      desc: |-
+        This check ensures that every active (non-disabled) Grafana user has multi-factor authentication enabled, so that a stolen password alone cannot sign in to the organization. Multi-factor enrollment is a Grafana Cloud and Grafana Enterprise capability.
+
+        **Why this matters**
+
+        - **Credential theft resistance:** A second factor blocks account takeover when a password is phished, reused, or leaked.
+        - **Elevated access:** Grafana users often hold access to data sources, alerting, and dashboards that expose sensitive operational data.
+        - **Consistent coverage:** Requiring MFA for every active user, not just administrators, removes weak links an attacker can pivot through.
+
+        **Risk mitigation**
+
+        - **Blocked reuse:** Passwords exposed in unrelated breaches cannot be replayed against Grafana.
+        - **Attributable access:** Strong per-user authentication keeps sessions tied to a verified identity.
+      audit: |-
+        ### Audit via the Grafana UI
+
+        1. Sign in to Grafana as an administrator.
+        2. Open **Administration > Users**.
+        3. Review each active (non-disabled) user and confirm that multi-factor authentication is enrolled.
+
+        If every active user has multi-factor authentication enabled, the check passes. If any active user is missing a second factor, the check fails.
+      remediation:
+        - id: console
+          desc: |-
+            To require multi-factor authentication for active users in the Grafana UI:
+
+            1. Open **Administration > Users**.
+            2. For each active user, require and confirm that they enroll a second factor.
+            3. Disable or remove any account that cannot complete enrollment.
+        - id: config
+          desc: |-
+            To enable and require multi-factor authentication through the Grafana configuration where supported, edit the authentication settings in `grafana.ini` and restart Grafana:
+
+            ```ini
+            [auth]
+            # require multi-factor authentication for user logins where supported
+            ```
+
+            After updating the configuration, restart the Grafana service so the change takes effect, then confirm each active user completes enrollment.
+    refs:
+      - url: https://grafana.com/docs/grafana/latest/setup-grafana/configure-access/configure-authentication/
+        title: Grafana Configure Authentication
+  - uid: mondoo-grafana-saml-enabled
+    filters: asset.platform == "grafana-org"
+    title: Ensure Grafana SAML single sign-on is enabled
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-02
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-1
+    mql: |
+      grafana.samlSettings.enabled == true
+    docs:
+      desc: |-
+        This check ensures that SAML single sign-on is enabled so that users authenticate through the organization's identity provider. Centralizing authentication puts account lifecycle, multi-factor, and conditional access under the identity provider rather than relying on local Grafana logins.
+
+        **Why this matters**
+
+        - **Centralized identity:** The identity provider governs who can sign in, so joiner and leaver events immediately propagate to Grafana access.
+        - **Inherited controls:** MFA, conditional access, and session policies enforced by the identity provider apply to Grafana automatically.
+        - **Fewer standing secrets:** Single sign-on reduces reliance on local passwords that can drift out of policy or be shared.
+
+        **Risk mitigation**
+
+        - **Prompt deprovisioning:** Disabling a user at the identity provider revokes their Grafana access without a separate cleanup step.
+        - **Consistent enforcement:** Authentication policy is applied uniformly instead of per-application.
+      audit: |-
+        ### Audit via the Grafana UI
+
+        1. Sign in to Grafana as an administrator.
+        2. Open **Administration > Authentication > SAML** and confirm that SAML is configured and enabled.
+        3. Alternatively, inspect the `[auth.saml]` section of `grafana.ini` and confirm `enabled = true`.
+
+        If SAML single sign-on is configured and enabled, the check passes. If it is not enabled, the check fails.
+      remediation:
+        - id: console
+          desc: |-
+            To enable SAML single sign-on in the Grafana UI:
+
+            1. Open **Administration > Authentication > SAML**.
+            2. Configure the identity provider metadata for your organization.
+            3. Enable SAML and save the configuration.
+        - id: config
+          desc: |-
+            To enable SAML single sign-on through the Grafana configuration, set the option under `[auth.saml]` in `grafana.ini` and provide the identity provider metadata, then restart Grafana:
+
+            ```ini
+            [auth.saml]
+            enabled = true
+            # provide the identity provider metadata (for example idp_metadata_url or idp_metadata_path)
+            ```
+
+            After updating the configuration, restart the Grafana service so the change takes effect.
+    refs:
+      - url: https://grafana.com/docs/grafana/latest/setup-grafana/configure-access/configure-authentication/saml/
+        title: Grafana SAML Authentication

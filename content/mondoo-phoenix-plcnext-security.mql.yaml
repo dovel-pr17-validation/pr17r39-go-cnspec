@@ -1,0 +1,1335 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+policies:
+  - uid: phoenix-plcnext
+    name: Phoenix PLCnext Security Policy
+    version: 1.2.2
+    license: BUSL-1.1
+    tags:
+      benchmark: Mondoo Phoenix PLCnext
+      date: "2023-02-11"
+      mondoo.com/category: security
+      mondoo.com/platform: plcnext
+      profile: PLCnext base security
+      mondoo.com/icon: policy
+    require:
+      - provider: os
+    authors:
+      - name: Mondoo Inc.
+        email: hello@mondoo.com
+    summary: Secure Phoenix PLCnext industrial controllers
+    docs:
+      desc: |
+        The Mondoo Phoenix Contact PLCnext Security policy identifies critical misconfigurations on PLCnext industrial automation controllers that could expose operational technology (OT) infrastructure to attackers. This policy helps organizations detect and remediate hardening gaps before they can be exploited, reducing the likelihood of unauthorized device access, process manipulation, and disruption of physical processes that depend on PLC reliability.
+
+        This policy provides security checks across key PLCnext areas:
+
+        - Secure device configuration
+        - Firmware version and supported releases
+        - Authentication and access controls
+        - System hardening and exposed services
+
+        Have suggestions for new checks in this policy? Visit our [cnspec repository](https://github.com/mondoohq/cnspec).
+    groups:
+      - title: System Configuration
+        filters: |
+          asset.family.contains("linux")
+          asset.arch == "armv7l"
+          file("/opt/plcnext").exists
+        checks:
+          - uid: phoenix-plcnext-01
+          - uid: phoenix-plcnext-02
+          - uid: phoenix-plcnext-03
+      - title: SSH Access Control & Authentication
+        filters: |
+          asset.family.contains("linux")
+          asset.arch == "armv7l"
+          file("/opt/plcnext").exists
+        checks:
+          - uid: phoenix-plcnext-04
+          - uid: phoenix-plcnext-05
+          - uid: phoenix-plcnext-06
+          - uid: phoenix-plcnext-07
+          - uid: phoenix-plcnext-08
+          - uid: phoenix-plcnext-09
+          - uid: phoenix-plcnext-10
+          - uid: phoenix-plcnext-11
+          - uid: phoenix-plcnext-12
+          - uid: phoenix-plcnext-13
+          - uid: phoenix-plcnext-14
+      - title: SSH Cryptographic Settings
+        filters: |
+          asset.family.contains("linux")
+          asset.arch == "armv7l"
+          file("/opt/plcnext").exists
+        checks:
+          - uid: phoenix-plcnext-15
+          - uid: phoenix-plcnext-16
+          - uid: phoenix-plcnext-17
+      - title: SSH File Permissions
+        filters: |
+          asset.family.contains("linux")
+          asset.arch == "armv7l"
+          file("/opt/plcnext").exists
+        checks:
+          - uid: phoenix-plcnext-18
+          - uid: phoenix-plcnext-19
+          - uid: phoenix-plcnext-20
+          - uid: phoenix-plcnext-21
+          - uid: phoenix-plcnext-22
+    scoring_system: highest impact
+queries:
+  - uid: phoenix-plcnext-01
+    title: Ensure latest PLCnext Firmware is installed
+    impact: 95
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-id-ra-1
+      compliance/nist-csf-2: nist-csf-2-id-ra-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a03
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: soc2-control-cc7-1-2
+      compliance/vda-isa-5: vda-isa-5-5-2-5
+    mql: |
+      // A missing or malformed arpversion file fails cleanly via the else
+      // branch instead of erroring inside version(null).
+      if (file("/etc/plcnext/arpversion").content.find(/\d+\.\d+\.\d+/) != empty) {
+        version(file("/etc/plcnext/arpversion").content.find(/\d+\.\d+\.\d+/).first) >= version("23.0.0")
+      } else {
+        false
+      }
+    docs:
+      desc: |
+        This check verifies that the controller is running a supported PLCnext firmware release.
+
+        The firmware version is recorded in `/etc/plcnext/arpversion`. The check reads that file and requires version `23.0.0` or later. A missing or malformed file fails the check rather than being skipped, since a controller whose firmware cannot be determined cannot be assumed current.
+
+        **Why this matters**
+
+        PLCnext controllers run a full Linux system, not the fixed-function firmware of a classic PLC. That means they inherit the vulnerability stream of the kernel, the SSH server, the TLS libraries, and the web-based management interface, and each firmware release carries the accumulated fixes for all of it.
+
+        The exposure lasts longer here than on a server. Controllers are patched during planned downtime, and on a production line that may come once or twice a year, so a controller running old firmware stays vulnerable for months after a fix exists and after the vulnerability is public.
+
+        What an attacker gains is not data but control. Code execution on a controller means the ability to change setpoints, alter interlock logic, suppress alarms, and stop the process, with physical consequences for equipment and for the people working near it.
+
+        Phoenix Contact publishes security advisories for PLCnext through their PSIRT. Track them alongside the firmware release notes, and plan controller updates into scheduled maintenance rather than deferring them until an incident forces one.
+      audit: |
+        Run the `cat /etc/plcnext/arpversion` command and verify that the reported firmware version is 23.0.0 or later.
+      remediation: |-
+        Update the device firmware using the Web-based Management interface:
+
+        1. Download the latest firmware update file for your controller model from the Phoenix Contact product page.
+        2. Back up the device configuration and your PLCnext Engineer project before you start.
+        3. Log in to the WBM at `https://<device-ip>/wbm` with an administrative account.
+        4. Navigate to **Administration > Firmware Update**.
+        5. Upload the firmware update file and start the update.
+        6. Wait for the device to install the update and reboot, then verify the new version with `cat /etc/plcnext/arpversion`.
+
+        For details, follow the Phoenix Contact guide [Firmware Update](https://www.plcnext.help/te/WBM/Administration_Firmware_Update.htm).
+
+        Do not treat a fixed version number as the target. Check Phoenix Contact's current supported-release list for your controller model on the product page and install the latest release the vendor still supports, because older firmware that once met a benchmark may now be out of support and missing recent security fixes.
+
+        > **Warning:** The firmware update reboots the controller and stops the running PLC program. Outputs change to their configured fail-safe state during the reboot. Perform the update only during a planned maintenance window after confirming the automation process is in a safe state.
+    refs:
+      - url: https://www.phoenixcontact.com/en-pc/products/controller-axc-f-2152-2404267#firmware-link-target
+        title: PLCnext Firmware download page
+      - url: https://www.plcnext-runtime.com/ch02-04-firmware.html#firmware
+        title: The PLCnext Runtime
+  - uid: phoenix-plcnext-02
+    title: Ensure Firewall is active
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      nftables.tables.contains(name == "plcnext_filter")
+      nftables.tables.contains(name == "plcnext_ip6_filter")
+    docs:
+      desc: |
+        This check verifies that the PLCnext firewall is active for both IPv4 and IPv6.
+
+        PLCnext filters traffic with nftables, and its rules live in two tables created by the platform. The check reads the loaded nftables ruleset and requires both `plcnext_filter` and `plcnext_ip6_filter` to be present.
+
+        **Why this matters**
+
+        A controller with no firewall accepts connections to every service it runs, from anywhere it is reachable. That includes the web-based management interface, SSH, and the industrial protocol endpoints, none of which were designed on the assumption that the network in front of them is hostile.
+
+        The assumption that they are protected by isolation is usually wrong. Plant networks are routinely flatter than their diagrams suggest, connected to the corporate network for historian data, remote support, or a single engineering workstation that also reads email. Once anything on that path is compromised, an unfiltered controller is directly reachable.
+
+        The IPv6 table matters as much as the IPv4 one and is the half more often missed. Linux enables IPv6 by default, so a controller that is carefully filtered on IPv4 and unfiltered on IPv6 is fully exposed over a path nobody is monitoring.
+
+        PLCnext exposes predefined rule sets through the web-based management interface, so the firewall can be configured without writing nftables syntax. Restrict management access to the engineering network and permit only the industrial protocols the installation actually uses.
+      audit: |
+        Run the `nft list tables` and `nft list table <table>` command and verify that output.
+      remediation: |-
+        Activate the firewall using the Web-based Management interface:
+
+        1. Log in to the WBM at `https://<device-ip>/wbm` with an administrative account.
+        2. Navigate to **Security > Firewall**.
+        3. Select **Activate Firewall**.
+        4. Review the basic rules and confirm that required connections such as PLCnext Engineer, HMI clients, and SSH management access are still permitted.
+        5. Apply the configuration and verify with `nft list tables` on the device shell that the `plcnext_filter` and `plcnext_ip6_filter` tables are present.
+
+        For details, follow the Phoenix Contact guide [Firewall configuration](https://www.plcnext.help/te/WBM/Security_Firewall.htm).
+
+        > **Warning:** Activating the firewall with an incomplete rule set can cut off engineering stations, HMIs, and other clients that communicate with the controller. Verify the rules before applying them, perform the change during a maintenance window, and keep local access to the device available so you can revert the change if needed.
+    refs:
+      - url: https://www.plcnext.help/te/WBM/Security_Firewall.htm
+        title: PLCnext Firewall configuration
+      - url: https://www.plcnext.help/te/Security/Security_nftables.htm
+        title: Additional firewall filters via nftables
+  - uid: phoenix-plcnext-03
+    title: Ensure only strong Key Exchange algorithms are used
+    impact: 100
+    props:
+      - uid: PLCKexAlgos
+        title: Define the hardened key exchange algorithms for all SSH configurations
+        mql: |
+          return ["sntrup761x25519-sha512@openssh.com","curve25519-sha256@libssh.org","diffie-hellman-group-exchange-sha256"]
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      sshd.config.kexs != empty
+      sshd.config.kexs.containsOnly(props.PLCKexAlgos)
+    docs:
+      desc: |
+        This check verifies that the SSH server on the controller offers only strong key exchange algorithms.
+
+        Key exchange establishes the session keys that protect everything sent afterward. The check reads the `KexAlgorithms` directive in the SSH configuration and requires that every algorithm it names appears in the approved list carried by this policy's property, currently `sntrup761x25519-sha512@openssh.com`, `curve25519-sha256@libssh.org`, and `diffie-hellman-group-exchange-sha256`. The directive must be present; a configuration relying on the compiled-in default fails this check.
+
+        **Why this matters**
+
+        A weakness in key exchange is not compensated for by a strong cipher, because the attacker derives the same session keys the two endpoints do and then reads the traffic as though it were plaintext.
+
+        The algorithms excluded here are excluded for concrete reasons. `diffie-hellman-group1-sha1` uses a single fixed 1024-bit group shared by everything that implements it, which makes precomputation against that one group worthwhile to a well-resourced attacker, and the Logjam work showed a negotiation can be forced down to it.
+
+        Key exchange also decides whether traffic recorded today can be read later. An exchange without forward secrecy means an attacker who captures sessions now and obtains the host key at any point in the future can decrypt all of it, and on a controller with a ten-year service life that is a long window.
+
+        The SSH session to a controller carries engineering credentials and configuration changes, which is exactly the material worth recording and decrypting later.
+      audit: |
+        Run `grep -riE '^\s*KexAlgorithms' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/ 2>/dev/null` and review the configured key exchange algorithms.
+
+        A passing controller sets `KexAlgorithms` and lists only algorithms from the approved set in the `PLCKexAlgos` property. A failing controller leaves the directive unset, or names an algorithm outside that set. Run `ssh -Q kex` to see which algorithms the firmware supports before changing the list.
+      remediation: |-
+        Edit the `/etc/ssh/sshd_config` file to add or modify the `KexAlgorithms` parameter so that it contains a comma-separated list of the site approved key exchange algorithms:
+
+        ```text
+        KexAlgorithms sntrup761x25519-sha512@openssh.com,curve25519-sha256@libssh.org,diffie-hellman-group-exchange-sha256
+        ```
+
+        Run `ssh -Q kex` on the controller first and include only algorithm names the device firmware supports. Validate the configuration with `sshd -t`, then restart the SSH service to apply the change. Restarting SSH ends active shell sessions but does not affect the running PLC program.
+
+        > **Warning:** An unsupported algorithm name prevents the SSH daemon from starting, which cuts off shell access to the controller. Always validate with `sshd -t` before restarting and keep your current session open until you confirm a new login works.
+    refs:
+      - url: https://www.plcnext.help/te/About/Home.htm
+        title: PLCnext Technology Documentation
+      - url: https://csrc.nist.gov/pubs/sp/800/82/r3/final
+        title: NIST SP 800-82 Rev. 3 - Guide to OT Security
+  - uid: phoenix-plcnext-04
+    title: Ensure only strong MAC algorithms are used
+    impact: 80
+    props:
+      - uid: PLCMacAlgos
+        title: Define the accepted MAC algorithms
+        mql: |
+          return ["hmac-sha2-512-etm@openssh.com","hmac-sha2-256-etm@openssh.com","umac-128-etm@openssh.com","hmac-sha2-512","hmac-sha2-256"]
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      sshd.config.macs != empty
+      sshd.config.macs.containsOnly(props.PLCMacAlgos)
+    docs:
+      desc: |
+        This check verifies that the SSH server on the controller offers only strong message authentication algorithms.
+
+        The MAC protects session integrity, preventing an attacker on the network path from altering packets they cannot read. The check reads the `MACs` directive in the SSH configuration and requires that every algorithm it names appears in the approved list carried by this policy's property, currently the SHA-2 based and UMAC-128 variants. The directive must be present; a configuration relying on the compiled-in default fails this check.
+
+        **Why this matters**
+
+        Integrity matters more than confidentiality on a control system. An attacker who reads an engineering session learns the configuration; an attacker who can modify one changes it.
+
+        That is the scenario this defends against. A session in which packets can be altered undetected is one where a command sent to the controller need not be the command that arrives, and on a device that drives physical equipment the consequences are measured in damaged product, damaged machinery, or an unsafe state rather than in disclosed records.
+
+        Two properties separate the approved list from the rest. Algorithms built on MD5 or truncated to 96 bits no longer offer a sufficient margin. And the encrypt-then-MAC variants, marked with the `-etm@openssh.com` suffix, let the receiver reject a forged packet before decrypting it, which removes a class of oracle attacks the older ordering permits.
+
+        Note that AEAD ciphers such as ChaCha20-Poly1305 and the AES-GCM modes provide integrity themselves and ignore this list.
+      audit: |
+        Run `grep -riE '^\s*MACs' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/ 2>/dev/null` and review the configured MAC algorithms.
+
+        A passing controller sets `MACs` and lists only algorithms from the approved set in the `PLCMacAlgos` property. A failing controller leaves the directive unset, or names an algorithm outside that set. Run `ssh -Q mac` to see which algorithms the firmware supports before changing the list.
+      remediation: |-
+        Edit the `/etc/ssh/sshd_config` file to add or modify the `MACs` parameter so that it contains a comma-separated list of the site approved MACs:
+
+        ```text
+        MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,umac-128-etm@openssh.com,hmac-sha2-512,hmac-sha2-256
+        ```
+
+        Run `ssh -Q mac` on the controller first and include only algorithm names the device firmware supports. Validate the configuration with `sshd -t`, then restart the SSH service to apply the change. Restarting SSH ends active shell sessions but does not affect the running PLC program.
+
+        > **Warning:** An unsupported algorithm name prevents the SSH daemon from starting, which cuts off shell access to the controller. Always validate with `sshd -t` before restarting and keep your current session open until you confirm a new login works.
+    refs:
+      - url: https://www.plcnext.help/te/About/Home.htm
+        title: PLCnext Technology Documentation
+      - url: https://csrc.nist.gov/pubs/sp/800/82/r3/final
+        title: NIST SP 800-82 Rev. 3 - Guide to OT Security
+  - uid: phoenix-plcnext-05
+    title: Ensure only strong ciphers are used
+    impact: 100
+    props:
+      - uid: PLCSshdCiphers
+        title: Define the hardened ciphers for all SSH configurations
+        mql: |
+          return ["chacha20-poly1305@openssh.com","aes256-gcm@openssh.com","aes128-gcm@openssh.com","aes256-ctr","aes192-ctr","aes128-ctr"]
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      sshd.config.ciphers != empty
+      sshd.config.ciphers.containsOnly(props.PLCSshdCiphers)
+    docs:
+      desc: |
+        This check verifies that the SSH server on the controller offers only strong encryption ciphers.
+
+        The cipher protects the confidentiality of everything inside the session, and the server's list determines the weakest option a connecting client can select. The check reads the `Ciphers` directive in the SSH configuration and requires that every algorithm it names appears in the approved list carried by this policy's property, currently the ChaCha20-Poly1305, AES-GCM, and AES-CTR variants. The directive must be present; a configuration relying on the compiled-in default fails this check.
+
+        **Why this matters**
+
+        An SSH session to a controller carries the credentials used to reach it and the configuration changes made through it. Recovering that traffic gives an attacker both a way in and a description of how the process is set up.
+
+        Two categories are excluded deliberately. CBC-mode ciphers are subject to a plaintext recovery attack against the SSH binary packet protocol, exploitable by an attacker able to observe and inject traffic. Anything built on RC4, offered as `arcfour` and its variants, is broken outright by biases in its keystream. Both remain compiled into some builds for compatibility with old clients.
+
+        Requiring an explicit directive rather than accepting the default matters on a device with a long service life. Defaults vary between OpenSSH versions, so a controller that negotiates acceptably today can offer a weaker set after a firmware update, and nothing would announce the change.
+
+        Prefer the AEAD constructions, which authenticate and encrypt in a single pass.
+      audit: |
+        Run `grep -riE '^\s*Ciphers' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/ 2>/dev/null` and review the configured ciphers.
+
+        A passing controller sets `Ciphers` and lists only ciphers from the approved set in the `PLCSshdCiphers` property. A failing controller leaves the directive unset, or names a cipher outside that set. Run `ssh -Q cipher` to see which ciphers the firmware supports before changing the list.
+      remediation: |-
+        Edit the `/etc/ssh/sshd_config` file to add or modify the `Ciphers` parameter so that it contains a comma-separated list of the site approved ciphers:
+
+        ```text
+        Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
+        ```
+
+        Run `ssh -Q cipher` on the controller first and include only cipher names the device firmware supports. Validate the configuration with `sshd -t`, then restart the SSH service to apply the change. Restarting SSH ends active shell sessions but does not affect the running PLC program.
+
+        > **Warning:** An unsupported cipher name prevents the SSH daemon from starting, which cuts off shell access to the controller. Always validate with `sshd -t` before restarting and keep your current session open until you confirm a new login works.
+    refs:
+      - url: https://www.plcnext.help/te/About/Home.htm
+        title: PLCnext Technology Documentation
+      - url: https://csrc.nist.gov/pubs/sp/800/82/r3/final
+        title: NIST SP 800-82 Rev. 3 - Guide to OT Security
+  - uid: phoenix-plcnext-06
+    title: Ensure current system time is synchronized
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-06
+      compliance/dora: false
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-17
+      compliance/nis-2: false
+      compliance/nist-csf-1: false
+      compliance/nist-csf-2: false
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-45
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-10-6-1
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: false
+    mql: |
+      processes.any(executable == /ntpd/)
+      file("/etc/ntp.conf").content == /(server|pool)\s+\S+/
+    docs:
+      desc: |
+        This check verifies that the controller's clock is synchronized to a time source.
+
+        The check confirms that an `ntpd` process is running and that `/etc/ntp.conf` defines at least one `server` or `pool` entry. Both are required: a daemon with no configured source has nothing to synchronize against, and a configuration file with no running daemon does nothing.
+
+        **Why this matters**
+
+        On a control system, timestamps are how events on the controller are matched to events in the physical process. Reconstructing why a batch failed, why an interlock tripped, or what preceded an unplanned stop means lining up controller logs against historian data, alarm records, and operator actions from other systems. A controller whose clock has drifted cannot be lined up with any of them, and the drift is silent.
+
+        The security consequence follows from the same property. Determining whether a configuration change on the controller was made by an engineer during a maintenance window or by someone else at another time depends entirely on the clock being right, and an attacker who can move it can place their activity outside the window anyone is examining.
+
+        Accurate time also underpins certificate validity, so a controller with a badly wrong clock will either reject valid certificates or accept expired ones.
+
+        Point the controller at the plant's own time source rather than a public one, so that synchronization does not depend on a path out of the OT network.
+      audit: |
+        Run the `ntpq -p` command and verify that an NTP peer is listed and selected. Inspect the `/etc/ntp.conf` file and verify that at least one `server` or `pool` entry is configured.
+      remediation: |-
+        Configure NTP time synchronization on the controller:
+
+        1. Log in to the controller over SSH with an administrative account.
+        2. Edit the `/etc/ntp.conf` file and add at least one reachable time server from your OT network:
+
+           ```text
+           server 192.0.2.10 iburst
+           ```
+
+        3. Restart the NTP service so the daemon picks up the new configuration.
+        4. Confirm synchronization with `ntpq -p` and verify that a peer is selected.
+
+        For details, follow the Phoenix Contact guide [System time](https://www.plcnext.help/te/Operating_System/System_time.htm).
+
+        > **Warning:** Large clock corrections can affect time-stamped process data, alarm ordering, and certificate validation. Apply time changes during a planned maintenance window.
+    refs:
+      - url: https://www.plcnext.help/te/Operating_System/System_time.htm
+        title: PLCnext System Time Configuration
+      - url: https://www.cisa.gov/topics/industrial-control-systems
+        title: CISA Industrial Control Systems Security
+  - uid: phoenix-plcnext-07
+    title: Ensure secure permissions on SSH private host key files are set
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-3
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: |
+      files.
+        find(from: "/etc/ssh", type: "file").
+        where(path == /ssh_host_.*key$/).list {
+          permissions.atMost(0600)
+        }
+    docs:
+      desc: |
+        This check verifies that the controller's SSH private host keys are readable only by their owner.
+
+        The check reads the permissions of files in `/etc/ssh` matching `ssh_host_*key` and requires that they carry no execute bit for the owner and no read, write, or execute permission for the group or for other users.
+
+        **Why this matters**
+
+        The private host key is the controller's identity. When an engineering workstation connects, the controller proves it holds this key, and the workstation compares the corresponding fingerprint against the one it recorded the first time. That comparison is the entire basis on which anyone can tell they are talking to the right controller.
+
+        An attacker who can read the key can stand up a service that is cryptographically indistinguishable from this controller. An engineer connecting to it sees no host key warning, because the key matches, and enters credentials into the impostor. The warning that would normally make an interception attempt obvious is exactly what a stolen host key suppresses.
+
+        That matters more in a plant than in a data center, because the engineer's next action is usually to push a configuration or logic change, and the impostor is positioned to alter it in transit.
+
+        If a private host key may have been exposed, restoring permissions is not sufficient. Regenerate the host keys, distribute the new fingerprints to the engineering workstations, and treat any credential entered during the exposure window as compromised.
+      audit: |
+        Run `ls -l /etc/ssh/ssh_host_*_key` and review the mode of each private host key.
+
+        A passing controller reports `-rw-------` or stricter on every private host key, so only the owner can read it. A failing controller grants any read, write, or execute permission to the group or to other users, or marks the key executable for its owner.
+      remediation:
+        - id: cli
+          desc: |
+            Run this command to set restrictive permissions and root ownership on the SSH host private key files:
+
+            ```bash
+            find /etc/ssh -xdev -type f -name 'ssh_host_*_key' -exec chmod 0600 {} \; -exec chown root:root {} \;
+            ```
+    refs:
+      - url: https://www.plcnext.help/te/About/Home.htm
+        title: PLCnext Technology Documentation
+      - url: https://csrc.nist.gov/pubs/sp/800/82/r3/final
+        title: NIST SP 800-82 Rev. 3 - Guide to OT Security
+  - uid: phoenix-plcnext-08
+    title: Ensure secure permissions on SSH public host key files are set
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-3
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: |
+      files.
+        find(from: "/etc/ssh", type: "file").
+        where(path == /ssh_host_.*key\.pub$/).list {
+          permissions.atMost(0644)
+        }
+    docs:
+      desc: |
+        This check verifies that the controller's SSH public host keys cannot be modified by unprivileged accounts.
+
+        Public host keys are meant to be readable, so read access is not restricted. The check reads the permissions of files in `/etc/ssh` matching `ssh_host_*key.pub` and requires that they carry no execute bit for the owner and no write or execute permission for the group or for other users.
+
+        **Why this matters**
+
+        Public host keys are not secret, but their integrity determines what the controller advertises about itself. `sshd` reads them to present its identity, and any tooling that collects fingerprints for distribution to engineering workstations reads them too.
+
+        An account that can write these files can therefore change the identity the controller claims. Substituting a key the attacker holds the private half of pre-authorizes their own machine in whatever known-hosts distribution consumes it.
+
+        Even without an attacker, a modified public key file causes host key mismatch failures on every workstation that already recorded the real fingerprint. On a plant floor that presents as engineering access failing during a maintenance window, and the failure looks identical to an interception attempt, which consumes the time of the people least able to spare it.
+
+        Writable key material in `/etc/ssh` is also a signal in itself. The same directory holds the private host keys, and permissions wrong on one file are worth checking on all of them.
+      audit: |
+        Run `ls -l /etc/ssh/ssh_host_*_key.pub` and review the mode of each public host key.
+
+        A passing controller reports `-rw-r--r--` or stricter, so the keys are world-readable but writable only by their owner. A failing controller grants write or execute permission to the group or to other users, or marks the key executable for its owner.
+      remediation: |-
+        Run this command to set permissions and ownership on the SSH host public key files:
+
+        ```bash
+        find /etc/ssh -xdev -type f -name 'ssh_host_*_key.pub' -exec chmod 0644 {} \; -exec chown root:root {} \;
+        ```
+    refs:
+      - url: https://www.plcnext.help/te/About/Home.htm
+        title: PLCnext Technology Documentation
+      - url: https://csrc.nist.gov/pubs/sp/800/82/r3/final
+        title: NIST SP 800-82 Rev. 3 - Guide to OT Security
+  - uid: phoenix-plcnext-09
+    title: Ensure SSH Protocol is set to 2
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      sshd.config.params["Protocol"] == 2
+    docs:
+      desc: |
+        This check verifies that the controller's SSH configuration explicitly declares protocol version 2.
+
+        The check reads `Protocol` in the SSH configuration, which must be `2`. On current firmware this is a documentation requirement rather than a functional one: OpenSSH 7.4 and later implement only protocol 2 and treat the keyword as deprecated, so an absent directive still fails this check even though the behavior is already correct.
+
+        **Why this matters**
+
+        SSH protocol 1 is broken in ways no configuration can compensate for. Its integrity check is a CRC-32, which is not a cryptographic function, and that allowed an attacker able to observe and modify a session to insert chosen ciphertext undetected. The best known result was remote root compromise of the server.
+
+        The reason to keep the directive on a controller rather than relying on the implementation is the service life of the device. A PLC installed today may still be running in fifteen years, through firmware updates, replacement units, and spares pulled from stock that shipped with much older software. An explicit `Protocol 2` line states the requirement in the configuration, so it survives being copied onto a unit whose OpenSSH is old enough for the setting to matter.
+
+        Where this check fails on a controller running genuinely old firmware, the directive closes the immediate exposure but the firmware update is the actual remedy, since software of that age is missing years of fixes to the protocol 2 implementation as well.
+      audit: |
+        Run `grep -riE '^\s*Protocol' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/ 2>/dev/null`.
+
+        A passing controller sets `Protocol 2`. A failing controller sets protocol 1 or leaves the directive unset. OpenSSH 7.4 and later implement only protocol 2 and treat the keyword as deprecated, so on current firmware the directive documents the requirement rather than changing behavior, and this check still expects it to be present.
+      remediation: |-
+        Edit the `/etc/ssh/sshd_config` file to set the `Protocol` parameter as follows:
+
+        ```text
+        Protocol 2
+        ```
+
+        SSH protocol 1 had cryptographic weaknesses that allowed traffic to be decrypted or tampered with, so only protocol 2 is considered safe. OpenSSH 7.4 and later only implement protocol version 2 and treat this directive as deprecated, so on current firmware this setting documents the requirement rather than changing behavior. On those versions the daemon may reject the `Protocol` keyword, so validate the file with `sshd -t` and remove the line if validation reports it as unsupported. After validation passes, restart the SSH service to apply the change. Keep your current session open until you confirm a new login works, so a configuration error does not lock you out of the controller.
+    refs:
+      - url: https://www.plcnext.help/te/About/Home.htm
+        title: PLCnext Technology Documentation
+      - url: https://www.cisa.gov/topics/industrial-control-systems
+        title: CISA Industrial Control Systems Security
+  - uid: phoenix-plcnext-10
+    title: Ensure SSH LogLevel is appropriate
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-3
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-17
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-12
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc6-1-5
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      sshd.config.params["LogLevel"] == /INFO|VERBOSE/
+    docs:
+      desc: |
+        This check verifies that the controller's SSH server records authentication activity in enough detail to investigate it.
+
+        The check reads `LogLevel` in the SSH configuration, which must be `INFO` or `VERBOSE`. The directive must be present; an absent `LogLevel` fails even though `INFO` is the OpenSSH default.
+
+        **Why this matters**
+
+        SSH log lines are frequently the only record that anyone reached the controller. Controllers are not covered by the endpoint monitoring that watches servers and workstations, so there is rarely a second source to fall back on.
+
+        At `INFO`, the log records each authentication result with the account and the source address, which is what makes it possible to establish who connected to a controller and when. Correlated against a change in process behavior, that is often the whole investigation.
+
+        `VERBOSE` adds the fingerprint of the public key used to authenticate. On a controller that matters more than usual, because engineering access is commonly shared: one account, several authorized keys, several engineers and possibly an integrator or vendor support contract. Without the fingerprint, a login is attributable only to the shared account and the question of which party connected has no answer. With it, a key can be identified and revoked individually.
+
+        Avoid `DEBUG` and above, which are documented as violating user privacy and produce volume that fills the limited storage on an embedded device.
+      audit: |
+        Run `grep -riE '^\s*LogLevel' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/ 2>/dev/null`.
+
+        A passing controller sets `LogLevel` to `INFO` or `VERBOSE`, so logins and logouts are recorded. A failing controller sets a quieter level such as `QUIET` or `ERROR`, or leaves the directive unset, which leaves no record of who reached the controller and when.
+      remediation: |-
+        Edit the `/etc/ssh/sshd_config` file to set the `LogLevel` parameter as follows:
+
+        ```text
+        LogLevel VERBOSE
+        ```
+
+        or
+
+        ```text
+        LogLevel INFO
+        ```
+
+        A useful log level matters because without a record of who logged in and when, you cannot reconstruct what happened to the controller after a security incident. Validate the configuration with `sshd -t`, then restart the SSH service to apply the change. Restarting SSH ends active shell sessions but does not affect the running PLC program. Keep your current session open until you confirm a new login works.
+    refs:
+      - url: https://www.plcnext.help/te/About/Home.htm
+        title: PLCnext Technology Documentation
+      - url: https://csrc.nist.gov/pubs/sp/800/82/r3/final
+        title: NIST SP 800-82 Rev. 3 - Guide to OT Security
+  - uid: phoenix-plcnext-11
+    title: Ensure SSH X11 forwarding is disabled
+    impact: 50
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-3
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-17
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-12
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc6-1-5
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      sshd.config.params["X11Forwarding"] == "no"
+    docs:
+      desc: |
+        This check verifies that the controller's SSH server does not tunnel X11 graphical sessions.
+
+        The check reads `X11Forwarding` in the SSH configuration, which must be `no`. The directive must be present; an absent `X11Forwarding` fails even though `no` is the OpenSSH default.
+
+        **Why this matters**
+
+        X11 forwarding sets up a proxy display on the controller and relays anything drawn to it back to the display on the engineer's workstation.
+
+        The exposure runs from the controller toward the workstation, which is the opposite of how it is usually described. The X protocol provides no separation between clients of the same display, so any process that can reach the forwarded display can read every keystroke sent to it, capture the contents of other windows, and inject synthetic input. If the controller is compromised, the attacker obtains the engineer's keyboard and screen on their own machine, including whatever they type into other applications there.
+
+        On a plant floor that workstation is usually the engineering station that programs every other controller in the cell, which makes it a considerably more valuable target than the PLC itself.
+
+        There is also no reason to enable it here. A controller has no graphical applications to forward; management is through the web-based interface or the command line.
+      audit: |
+        Run `grep -riE '^\s*X11Forwarding' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/ 2>/dev/null`.
+
+        A passing controller sets `X11Forwarding no`. A failing controller sets it to `yes` or leaves the directive unset. The check reads the configured value rather than the effective one, so a directive that is absent from the configuration fails even though `sshd -T` reports the secure default.
+      remediation: |-
+        Edit the `/etc/ssh/sshd_config` file to set the `X11Forwarding` parameter as follows:
+
+        ```text
+        X11Forwarding no
+        ```
+
+        A controller has no graphical desktop, so X11 forwarding serves no legitimate purpose here and only adds an attack surface that a graphical session could be tunneled through. Validate the configuration with `sshd -t`, then restart the SSH service to apply the change. Restarting SSH ends active shell sessions but does not affect the running PLC program. Keep your current session open until you confirm a new login works.
+    refs:
+      - url: https://www.plcnext.help/te/About/Home.htm
+        title: PLCnext Technology Documentation
+      - url: https://csrc.nist.gov/pubs/sp/800/82/r3/final
+        title: NIST SP 800-82 Rev. 3 - Guide to OT Security
+  - uid: phoenix-plcnext-12
+    title: Ensure SSH MaxAuthTries is set to 4 or less
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-02
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-j
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      sshd.config.params["MaxAuthTries"] <= 4
+    docs:
+      desc: |
+        This check verifies that the controller's SSH server limits how many authentication attempts a single connection may make.
+
+        The check reads `MaxAuthTries` in the SSH configuration, which must be `4` or lower. The OpenSSH default is `6`.
+
+        **Why this matters**
+
+        `MaxAuthTries` caps authentication attempts within one TCP connection, and `sshd` begins writing failures to the log once more than half the limit is consumed. The value therefore decides both how many guesses a connection buys and how quickly the attempt becomes visible.
+
+        Lowering it makes password guessing expensive. Each small batch of attempts costs the attacker a fresh TCP handshake and key exchange, which is far more work than another guess on an open connection, and it multiplies the number of connection events left behind.
+
+        The visibility half matters most on a controller. There is usually no account lockout, no fail2ban, and no endpoint agent watching, so the log entries this setting produces may be the only indication that anyone is trying.
+
+        Be clear about what it does not do. This is a rate limiter, not a lockout; an attacker can reconnect immediately and continue. Treat it as one layer beneath disabling password authentication entirely, which a companion check in this policy requires, and restricting SSH to named accounts.
+      audit: |
+        Run `grep -riE '^\s*MaxAuthTries' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/ 2>/dev/null`.
+
+        A passing controller sets `MaxAuthTries` to 4 or less. A failing controller sets a higher value or leaves the directive unset, in which case the OpenSSH default of 6 applies and the check fails.
+      remediation: |-
+        Edit the `/etc/ssh/sshd_config` file to set the `MaxAuthTries` parameter as follows:
+
+        ```text
+        MaxAuthTries 4
+        ```
+
+        Limiting the number of authentication attempts per connection slows down password-guessing and brute-force attacks, because each new guess forces the attacker to open a fresh connection. Avoid setting the value too low. A very small limit can lock out a legitimate operator who mistypes a passphrase during maintenance or an incident, when fast access to the controller matters most. Validate the configuration with `sshd -t`, then restart the SSH service to apply the change. Restarting SSH ends active shell sessions but does not affect the running PLC program. Keep your current session open until you confirm a new login works.
+    refs:
+      - url: https://www.plcnext.help/te/About/Home.htm
+        title: PLCnext Technology Documentation
+      - url: https://www.cisa.gov/topics/industrial-control-systems
+        title: CISA Industrial Control Systems Security
+  - uid: phoenix-plcnext-13
+    title: Ensure SSH IgnoreRhosts is enabled
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-02
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-j
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      sshd.config.params["IgnoreRhosts"] == "yes"
+    docs:
+      desc: |
+        This check verifies that the controller's SSH server ignores `.rhosts` and `.shosts` files.
+
+        The check reads `IgnoreRhosts` in the SSH configuration, which must be `yes`. The directive must be present; an absent `IgnoreRhosts` fails even though `yes` is the OpenSSH default.
+
+        **Why this matters**
+
+        `.rhosts` and `.shosts` files let an account declare which remote hosts and users may log in as it without presenting a credential. They live in the account's own home directory, which means the account, and anyone able to write to that directory, decides who gets in.
+
+        That inverts the control. An administrator can restrict which accounts may connect, require keys, and disable passwords, and a single `.shosts` file still grants access to whoever it names. Because the file sits in a home directory rather than in `/etc`, it is outside anything a configuration review or a firmware comparison would examine.
+
+        The trust it expresses is weak on its own terms. It identifies the peer by hostname, so anyone able to influence name resolution on a plant network, or to compromise the named host, inherits the access.
+
+        Set the directive explicitly rather than relying on the default, so the intent is recorded in the configuration and survives a firmware update or a replacement unit.
+      audit: |
+        Run `grep -riE '^\s*IgnoreRhosts' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/ 2>/dev/null`.
+
+        A passing controller sets `IgnoreRhosts yes`, so `.rhosts` and `.shosts` trust files are ignored. A failing controller sets it to `no` or leaves the directive unset. The check reads the configured value rather than the effective one, so a directive that is absent from the configuration fails even though `sshd -T` reports the secure default.
+      remediation: |-
+        Setting `IgnoreRhosts yes` stops the SSH daemon from honoring per-user `.rhosts` and `.shosts` trust files, which closes off an old and easily spoofed way to bypass real authentication. Modern OpenSSH usually defaults to this already, so on current firmware this setting often just confirms the secure behavior rather than changing it.
+
+        Edit the `/etc/ssh/sshd_config` file to set the `IgnoreRhosts` parameter as follows:
+
+        ```text
+        IgnoreRhosts yes
+        ```
+
+        Validate the configuration with `sshd -t`, then restart the SSH service to apply the change. Restarting SSH ends active shell sessions but does not affect the running PLC program. Keep your current session open until you confirm a new login works.
+    refs:
+      - url: https://www.plcnext.help/te/About/Home.htm
+        title: PLCnext Technology Documentation
+      - url: https://csrc.nist.gov/pubs/sp/800/82/r3/final
+        title: NIST SP 800-82 Rev. 3 - Guide to OT Security
+  - uid: phoenix-plcnext-14
+    title: Ensure SSH HostbasedAuthentication is disabled
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-02
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-j
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      sshd.config.params["HostbasedAuthentication"] == "no"
+    docs:
+      desc: |
+        This check verifies that the controller's SSH server does not accept host-based authentication.
+
+        The check reads `HostbasedAuthentication` in the SSH configuration, which must be `no`. The directive must be present; an absent `HostbasedAuthentication` fails even though `no` is the OpenSSH default.
+
+        **Why this matters**
+
+        Host-based authentication moves the trust decision from the person to the machine. The connecting host proves its own identity with its host key, and the controller then accepts whatever username that host asserts, with no credential from the user at all.
+
+        On a plant network that makes every trusted engineering station a single point of failure for every controller that trusts it. An attacker who obtains administrative access to one workstation authenticates to all of them as any account listed, with no password, no key of their own, and no second factor anywhere in the path.
+
+        The credential involved is also effectively permanent. Host keys are generated once at commissioning and typically remain for the life of the device, so an attacker who reads one from a workstation retains that access indefinitely and across password changes.
+
+        Where automation genuinely needs to reach controllers without an interactive login, use per-account keys with `command=` and source restrictions in `authorized_keys`. That keeps the credential scoped to one task and revocable on its own.
+      audit: |
+        Run `grep -riE '^\s*HostbasedAuthentication' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/ 2>/dev/null`.
+
+        A passing controller sets `HostbasedAuthentication no`, so a remote host cannot vouch for the user. A failing controller sets it to `yes` or leaves the directive unset. The check reads the configured value rather than the effective one, so a directive that is absent from the configuration fails even though `sshd -T` reports the secure default.
+      remediation: |-
+        Setting `HostbasedAuthentication no` ensures every login is authenticated by the user's own credentials, such as an SSH key, instead of trusting a remote host to vouch for the user. Host-based trust is easily spoofed and obsolete, so disabling it removes a weak way into the controller. Modern OpenSSH usually defaults to this already, so on current firmware this setting often just confirms the secure behavior rather than changing it.
+
+        Edit the `/etc/ssh/sshd_config` file to set the `HostbasedAuthentication` parameter as follows:
+
+        ```text
+        HostbasedAuthentication no
+        ```
+
+        Validate the configuration with `sshd -t`, then restart the SSH service to apply the change. Restarting SSH ends active shell sessions but does not affect the running PLC program. Keep your current session open until you confirm a new login works.
+    refs:
+      - url: https://www.plcnext.help/te/About/Home.htm
+        title: PLCnext Technology Documentation
+      - url: https://www.cisa.gov/topics/industrial-control-systems
+        title: CISA Industrial Control Systems Security
+  - uid: phoenix-plcnext-15
+    title: Ensure SSH root login is disabled or set to prohibit-password
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-02
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-j
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      sshd.config.params["PermitRootLogin"] == "no" || sshd.config.params["PermitRootLogin"] == "prohibit-password"
+    docs:
+      desc: |
+        This check verifies that the controller does not allow the root account to log in over SSH with a password.
+
+        The check reads `PermitRootLogin` in the SSH configuration, which must be `no` or `prohibit-password`. The directive must be present; an absent `PermitRootLogin` fails even though `prohibit-password` is the OpenSSH default on current versions.
+
+        **Why this matters**
+
+        `root` is the one account name an attacker never has to discover, which is why automated guessing against SSH is aimed at it more than anything else. A single correct guess yields complete control of the controller with no escalation step, and complete control of a controller means the ability to change logic, setpoints, and interlocks.
+
+        Accountability is the other half, and on a controller it is frequently the harder problem. Access to a PLC is shared among plant engineers, integrators, and vendor support, and when they all log in as `root` every action is attributed to `root`. Establishing which party made a change, during an investigation or simply during a dispute about who altered a running process, becomes impossible.
+
+        `prohibit-password` is usually the right setting, permitting key-based root access where automation needs it while removing the guessable path entirely.
+
+        Before applying `no`, confirm a named administrative account exists on the controller, can reach it, and can escalate. Losing administrative access to a PLC in a running plant is not a recoverable mistake during production.
+      audit: |
+        Run `grep -riE '^\s*PermitRootLogin' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/ 2>/dev/null`.
+
+        A passing controller sets `PermitRootLogin` to `no` or to `prohibit-password`, so root cannot log in with a password. A failing controller sets `yes` or `forced-commands-only`, or leaves the directive unset. The check reads the configured value rather than the effective one, so a directive that is absent from the configuration fails even though `sshd -T` reports the secure default.
+      remediation: |-
+        Disabling direct root SSH login forces administrators to log in as a named user and then elevate, which both adds a barrier for attackers and creates an audit trail of who did what. Setting `prohibit-password` is a middle ground that still allows root login by SSH key while blocking password-based root login.
+
+        On many OT controllers root is the primary administrative account, so confirm a working non-root admin login first. If you disable root SSH access without another account that can log in and gain administrative rights, you can lock yourself out of the controller.
+
+        1. Create or confirm a non-root administrative account, and verify from a separate session that you can log in with it and elevate privileges.
+        2. Edit the `/etc/ssh/sshd_config` file to set the `PermitRootLogin` parameter as follows:
+
+           ```text
+           PermitRootLogin no
+           ```
+
+           or
+
+           ```text
+           PermitRootLogin prohibit-password
+           ```
+
+        3. Validate the configuration with `sshd -t`, then restart the SSH service to apply the change. Restarting SSH ends active shell sessions but does not affect the running PLC program.
+
+        > **Warning:** Keep your current session open until you confirm that the non-root administrative account can log in and elevate. Closing your only working session before verifying the replacement login can leave you locked out of the controller.
+    refs:
+      - url: https://www.plcnext.help/te/About/Home.htm
+        title: PLCnext Technology Documentation
+      - url: https://csrc.nist.gov/pubs/sp/800/82/r3/final
+        title: NIST SP 800-82 Rev. 3 - Guide to OT Security
+  - uid: phoenix-plcnext-16
+    title: Ensure SSH PermitEmptyPasswords is disabled
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-02
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-j
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      sshd.config.params["PermitEmptyPasswords"] == "no"
+    docs:
+      desc: |
+        This check verifies that the controller's SSH server refuses accounts that have no password set.
+
+        The check reads `PermitEmptyPasswords` in the SSH configuration, which must be `no`. The directive must be present; an absent `PermitEmptyPasswords` fails even though `no` is the OpenSSH default.
+
+        **Why this matters**
+
+        An account with an empty password field authenticates to anyone who supplies an empty password. Where SSH permits it, that account is reachable over the network with no secret at all.
+
+        Accounts reach this state through ordinary work rather than malice. A commissioning process that creates an account before its password is set, a `passwd -d` run while troubleshooting a controller that would not accept a login, or a configuration restored from a unit before its credentials were applied all produce the same result, and the window between creating the account and securing it becomes a window of unauthenticated access.
+
+        That window is longer on a controller than on a server. Commissioning happens under time pressure during installation, the device may sit on the plant network for weeks before anyone revisits its accounts, and nothing about a working controller prompts a review.
+
+        This setting is the backstop for exactly that class of mistake. It keeps the error a local misconfiguration instead of letting it become remote access to a device that drives physical equipment.
+      audit: |
+        Run `grep -riE '^\s*PermitEmptyPasswords' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/ 2>/dev/null`.
+
+        A passing controller sets `PermitEmptyPasswords no`. A failing controller sets it to `yes` or leaves the directive unset. The check reads the configured value rather than the effective one, so a directive that is absent from the configuration fails even though `sshd -T` reports the secure default.
+      remediation: |-
+        Edit the `/etc/ssh/sshd_config` file to set the `PermitEmptyPasswords` parameter as follows:
+
+        ```text
+        PermitEmptyPasswords no
+        ```
+
+        An account with a blank password lets anyone who knows the user name log in with no credential at all, so blocking empty passwords closes an open door into the controller. Validate the configuration with `sshd -t`, then restart the SSH service to apply the change. Restarting SSH ends active shell sessions but does not affect the running PLC program. Keep your current session open until you confirm a new login works.
+    refs:
+      - url: https://www.plcnext.help/te/About/Home.htm
+        title: PLCnext Technology Documentation
+      - url: https://www.cisa.gov/topics/industrial-control-systems
+        title: CISA Industrial Control Systems Security
+  - uid: phoenix-plcnext-17
+    title: Ensure SSH PermitUserEnvironment is disabled
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-02
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-j
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-8-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      sshd.config.params["PermitUserEnvironment"] == "no"
+    docs:
+      desc: |
+        This check verifies that the controller's SSH server does not apply user-supplied environment variables to a session.
+
+        The check reads `PermitUserEnvironment` in the SSH configuration, which must be `no`. The directive must be present; an absent `PermitUserEnvironment` fails even though `no` is the OpenSSH default.
+
+        **Why this matters**
+
+        When this option is enabled, `sshd` reads `~/.ssh/environment` and the `environment=` options in `~/.ssh/authorized_keys` and applies those variables before the session's shell or command starts.
+
+        The variables it applies include the ones controlling the dynamic linker. Setting `LD_PRELOAD` or `LD_LIBRARY_PATH` causes a library the account controls to load into the process at startup, so code of the attacker's choosing runs first, inside a session the controller has just authenticated.
+
+        That defeats the mechanisms used to constrain access to a controller. A key restricted with `command=` to run one specific diagnostic, or an account confined to a restricted shell for a vendor support contract, both assume the session runs the program the controller chose. Preloaded code runs before that program and can replace what it does entirely.
+
+        The exposure applies to any account able to write its own `authorized_keys`, which is normally every account on the device.
+
+        Where a session genuinely needs an environment variable set, use `SetEnv` or `AcceptEnv` in the server configuration, which keeps the decision with the administrator.
+      audit: |
+        Run `grep -riE '^\s*PermitUserEnvironment' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/ 2>/dev/null`.
+
+        A passing controller sets `PermitUserEnvironment no`, so a user cannot inject environment options at login. A failing controller sets it to `yes` or leaves the directive unset. The check reads the configured value rather than the effective one, so a directive that is absent from the configuration fails even though `sshd -T` reports the secure default.
+      remediation: |-
+        Edit the `/etc/ssh/sshd_config` file to set the `PermitUserEnvironment` parameter as follows:
+
+        ```text
+        PermitUserEnvironment no
+        ```
+
+        Allowing users to set environment options at login lets a user influence how their session runs, which can be abused to load unexpected libraries or override paths and weaken other protections. A controller is administered by a small set of operators and has no need for this, so leaving it off keeps the login environment predictable. Validate the configuration with `sshd -t`, then restart the SSH service to apply the change. Restarting SSH ends active shell sessions but does not affect the running PLC program. Keep your current session open until you confirm a new login works.
+    refs:
+      - url: https://www.plcnext.help/te/About/Home.htm
+        title: PLCnext Technology Documentation
+      - url: https://csrc.nist.gov/pubs/sp/800/82/r3/final
+        title: NIST SP 800-82 Rev. 3 - Guide to OT Security
+  - uid: phoenix-plcnext-18
+    title: Ensure SSH Idle Timeout Interval is configured
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-3
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-17
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-12
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc6-1-5
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      sshd.config.params {
+        _["ClientAliveInterval"] >= 1
+        _["ClientAliveInterval"] <= 300
+        _["ClientAliveCountMax"] >= 1
+        _["ClientAliveCountMax"] <= 3
+      }
+    docs:
+      desc: |
+        This check verifies that the controller's SSH server terminates sessions whose client has stopped responding.
+
+        The check reads `ClientAliveInterval`, which must be between 1 and 300 seconds, and `ClientAliveCountMax`, which must be between 1 and 3. `sshd` sends an encrypted keepalive every interval and closes the session after that many go unanswered, so the product of the two is the longest a session can survive with nothing on the other end.
+
+        **Why this matters**
+
+        An abandoned SSH session to a controller is an authenticated shell with engineering privileges, held open with nobody at the other end.
+
+        Plant floors are where this happens most. An engineer connects from a laptop on a cart, gets pulled to another line, and closes the lid; a session opened from a shared HMI station stays live after the engineer walks away. Anyone who reaches that workstation reaches the controller, with no authentication step in between and nothing in the logs to distinguish them from the person who logged in.
+
+        The other reason is availability. Controllers are small embedded devices with limited memory and a low cap on concurrent sessions. Stale sessions accumulate until new connections are refused, and the moment that is discovered is usually the moment someone urgently needs to reach the controller.
+
+        These directives use the encrypted channel, so they detect a genuinely dead peer rather than merely holding a NAT mapping open, which is what the unrelated `TCPKeepAlive` option does.
+      audit: |
+        Run `grep -riE '^\s*ClientAlive(Interval|CountMax)' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/ 2>/dev/null` and review both values together.
+
+        A passing controller sets `ClientAliveInterval` between 1 and 300 seconds and `ClientAliveCountMax` between 1 and 3, so an idle session is closed within a bounded time. A failing controller leaves either directive unset, or sets either to 0, which OpenSSH treats as never terminating an idle connection.
+      remediation: |-
+        Edit the `/etc/ssh/sshd_config` file to set the `ClientAliveInterval` and `ClientAliveCountMax` parameters according to site policy:
+
+        ```text
+        ClientAliveInterval 300
+        ClientAliveCountMax 3
+        ```
+
+        Closing idle sessions matters because an unattended logged-in terminal, for example an operator who walked away, is an open path for anyone with physical access to the engineering station. Do not set `ClientAliveCountMax` to 0. OpenSSH treats 0 as disabling connection termination, so idle sessions would never be closed and this check rejects that value. Validate the configuration with `sshd -t`, then restart the SSH service to apply the change. Restarting SSH ends active shell sessions but does not affect the running PLC program. Keep your current session open until you confirm a new login works.
+    refs:
+      - url: https://www.plcnext.help/te/About/Home.htm
+        title: PLCnext Technology Documentation
+      - url: https://www.cisa.gov/topics/industrial-control-systems
+        title: CISA Industrial Control Systems Security
+  - uid: phoenix-plcnext-19
+    title: Ensure SSH LoginGraceTime is set to one minute or less
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-02
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-j
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      sshd.config.params {
+        _["LoginGraceTime"] >= 1
+        _["LoginGraceTime"] <= 60
+      }
+    docs:
+      desc: |
+        This check verifies that the controller's SSH server closes connections that have not authenticated within one minute.
+
+        The check reads `LoginGraceTime` in the SSH configuration, which must be between 1 and 60 seconds. The OpenSSH default is 120 seconds.
+
+        **Why this matters**
+
+        `LoginGraceTime` bounds how long a connection may sit unauthenticated before `sshd` closes it, and every connection in that state holds a slot and an unauthenticated `sshd` process.
+
+        On an embedded controller that is a denial of service parameter rather than a theoretical one. The device has far less memory and a far lower connection ceiling than a server, so the number of half-open connections needed to exhaust it is small. An attacker who opens connections and never authenticates can hold the SSH service full at almost no cost, and the engineer who needs to reach the controller during a fault cannot get in.
+
+        Halving the grace period halves the number of connections required to sustain that.
+
+        The pre-authentication window matters for a second reason: it is where `sshd` parses attacker-supplied protocol data before any credential has been accepted, which on a controller running older firmware is the code least likely to have been patched.
+
+        A minute is generous for an automated client and for an engineer typing a password or touching a hardware key.
+      audit: |
+        Run `grep -riE '^\s*LoginGraceTime' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/ 2>/dev/null`.
+
+        A passing controller sets `LoginGraceTime` between 1 and 60 seconds. A failing controller sets a longer window or 0, which removes the limit entirely, or leaves the directive unset, in which case the OpenSSH default of 120 seconds applies and the check fails.
+      remediation: |-
+        Edit the `/etc/ssh/sshd_config` file to set the `LoginGraceTime` parameter as follows:
+
+        ```text
+        LoginGraceTime 60
+        ```
+
+        A shorter grace period means each unauthenticated connection is held open for less time, which limits how many half-open sessions an attacker can pile up to exhaust the daemon or stall legitimate logins. Validate the configuration with `sshd -t`, then restart the SSH service to apply the change. Restarting SSH ends active shell sessions but does not affect the running PLC program. Keep your current session open until you confirm a new login works.
+    refs:
+      - url: https://www.plcnext.help/te/About/Home.htm
+        title: PLCnext Technology Documentation
+      - url: https://csrc.nist.gov/pubs/sp/800/82/r3/final
+        title: NIST SP 800-82 Rev. 3 - Guide to OT Security
+  - uid: phoenix-plcnext-20
+    title: Ensure SSH access is limited
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-3
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-17
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-12
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc6-1-5
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      sshd.config.params["AllowUsers"] != empty || sshd.config.params["AllowGroups"] != empty || sshd.config.params["DenyUsers"] != empty || sshd.config.params["DenyGroups"] != empty
+    docs:
+      desc: |
+        This check verifies that SSH access to the controller is restricted to an explicit list of accounts or groups.
+
+        The check reads the SSH configuration and requires that at least one of `AllowUsers`, `AllowGroups`, `DenyUsers`, or `DenyGroups` is present with a non-empty value.
+
+        **Why this matters**
+
+        Without one of these directives, `sshd` will attempt to authenticate any account that exists on the controller. That set is larger than the set of people who should be reaching it: accounts created during commissioning, accounts belonging to the integrator who installed the line, accounts for vendor support that was needed once, and service accounts added by firmware components.
+
+        Each is a name an attacker can try and an account that must be individually secured. An allowlist reduces that surface to the accounts that are supposed to connect, and it does so at the SSH layer, so a mistake in account management elsewhere on the device does not become remote access.
+
+        This matters more on a controller than on a server because account hygiene is harder to maintain. Devices are commissioned by one party, operated by another, and supported by a third, and nobody owns the account list end to end. The SSH allowlist is the one place that can be reviewed as a single statement of who may connect.
+
+        Prefer `AllowGroups` naming a dedicated group, so access is granted and revoked by membership rather than by editing the configuration and reloading `sshd` on a running controller.
+      audit: |
+        Run `grep -riE '^\s*(Allow|Deny)(Users|Groups)' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/ 2>/dev/null`.
+
+        A passing controller sets at least one of `AllowUsers`, `AllowGroups`, `DenyUsers`, or `DenyGroups`, so SSH is limited to a named set of accounts. A failing controller sets none of them, which leaves every account on the device able to log in over SSH.
+      remediation: |-
+        Edit the `/etc/ssh/sshd_config` file and add at least one of these parameters:
+
+        ```text
+        AllowUsers <userlist>
+        AllowGroups <grouplist>
+
+        DenyUsers <userlist>
+        DenyGroups <grouplist>
+        ```
+
+        Restricting SSH to a named set of users or groups means a stolen or default credential for any other account cannot be used to reach the controller over SSH. Validate the configuration with `sshd -t`, then restart the SSH service to apply the change.
+
+        > **Warning:** Once `AllowUsers` or `AllowGroups` is set, every account not on the list loses SSH access to the controller. Make sure the list includes the administrative account you use to manage the device, and keep your current SSH session open while you verify that a new login still succeeds.
+    refs:
+      - url: https://www.plcnext.help/te/About/Home.htm
+        title: PLCnext Technology Documentation
+      - url: https://www.cisa.gov/topics/industrial-control-systems
+        title: CISA Industrial Control Systems Security
+  - uid: phoenix-plcnext-21
+    title: Ensure SSH warning banner is configured
+    impact: 30
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-3
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-17
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-12
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc6-1-5
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      sshd.config.params["Banner"] != empty
+      sshd.config.params["Banner"] != "none"
+    docs:
+      desc: |
+        This check verifies that the controller displays a warning banner before authentication.
+
+        The check reads `Banner` in the SSH configuration and requires that it is set and is not `none`. `sshd` sends the contents of the named file to the client before any credential is accepted.
+
+        **Why this matters**
+
+        The banner is a legal control rather than a technical one, and it is worth being direct about that: it stops nobody. Its purpose is to establish, before access is attempted, that the system is restricted, that use is limited to authorized purposes, and that activity may be monitored and recorded.
+
+        That notice is what makes monitoring and subsequent action defensible. Cases involving unauthorized access have turned on whether the user was warned, and in a number of jurisdictions consent to monitoring is a precondition for using session records as evidence. A controller without a banner can leave an organization unable to act on what it observed.
+
+        Industrial systems add a second reason. Controllers are reached by employees, contractors, integrators, and vendor support under different agreements, and the banner is the one point at which the same terms are presented to all of them regardless of which contract brought them there.
+
+        Keep the text to the authorization and monitoring notice. Do not include the controller's role, the process it runs, the site, or the firmware version, since the banner is shown before authentication and is therefore readable by anyone who can reach the port.
+      audit: |
+        Run `grep -riE '^\s*Banner' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/ 2>/dev/null`, then read the file it points at to confirm the notification text is present.
+
+        A passing controller sets `Banner` to the path of a system use notification file, typically `/opt/plcnext/config/System/Um/SystemUseNotification.txt`. A failing controller leaves the directive unset or sets it to `none`, so a user sees no warning before authenticating.
+      remediation: |-
+        Create a banner file containing your organization's system use notification, then point the SSH daemon at it:
+
+        1. Write the notification text to `/opt/plcnext/config/System/Um/SystemUseNotification.txt`. Do not include details about the device, firmware, or network in the banner, because that information helps an attacker. On PLCnext this notification text may also be managed through the Web-based Management interface, so confirm which source is authoritative before editing the file directly.
+        2. Edit the `/etc/ssh/sshd_config` file to set the `Banner` parameter:
+
+           ```text
+           Banner /opt/plcnext/config/System/Um/SystemUseNotification.txt
+           ```
+
+        3. Validate the configuration with `sshd -t`, then restart the SSH service to apply the change. Restarting SSH ends active shell sessions but does not affect the running PLC program. Keep your current session open until you confirm a new login works.
+    refs:
+      - url: https://www.plcnext.help/te/About/Home.htm
+        title: PLCnext Technology Documentation
+      - url: https://csrc.nist.gov/pubs/sp/800/82/r3/final
+        title: NIST SP 800-82 Rev. 3 - Guide to OT Security
+  - uid: phoenix-plcnext-22
+    title: Ensure SSH password authentication is disabled
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-14
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-j
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      sshd.config.params["PasswordAuthentication"] == "no"
+      sshd.config.params["PubkeyAuthentication"] == "yes"
+    docs:
+      desc: |
+        This check verifies that the controller requires SSH key authentication and does not accept passwords.
+
+        The check reads the SSH configuration and requires `PasswordAuthentication` to be `no` and `PubkeyAuthentication` to be `yes`. Both are needed: disabling passwords without keys enabled would leave no way in, and enabling keys while passwords remain accepted leaves the weaker path open alongside the stronger one.
+
+        **Why this matters**
+
+        A password on a controller is a shared secret in the worst environment for one. It is handed to plant engineers, to the integrator who commissioned the line, and to vendor support during a callout, it is written in the commissioning documentation, and it is frequently identical across every controller in the plant because that is what made installation practical. It is almost never changed afterward, because changing it means coordinating with everyone who holds it.
+
+        That single password is also guessable over the network. Controllers rarely have account lockout, rate limiting, or any monitoring that would notice sustained attempts, so an attacker who reaches the SSH port can work at it indefinitely and quietly.
+
+        Keys remove the shared secret. Each person or system gets their own, access is revoked by deleting one line without affecting anyone else, and there is nothing to guess over the network because the private key never leaves the client.
+
+        Before applying this, confirm the authorized keys are in place and a working key-based login has been tested. Disabling password authentication on a controller you cannot otherwise reach means a trip to the plant floor with a serial cable.
+      audit: |
+        Run `grep -riE '^\s*(Password|Pubkey)Authentication' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/ 2>/dev/null` and review both values together.
+
+        A passing controller sets `PasswordAuthentication no` and `PubkeyAuthentication yes`, so logins require a key. A failing controller allows password authentication, or leaves either directive unset. `PubkeyAuthentication` defaults to `yes`, but this check expects it to be set explicitly, so confirm the directive is present rather than relying on the default.
+      remediation: |-
+        Set up key-based authentication for your administrative account before disabling password authentication. If you disable password authentication without a working key, you lose SSH access to the controller.
+
+        1. Generate an SSH key pair on your engineering workstation and install the public key for the management account on the controller:
+
+           ```bash
+           mkdir -p /home/admin/.ssh
+           chmod 700 /home/admin/.ssh
+           echo 'ssh-ed25519 AAAA...your-public-key... user@workstation' >> /home/admin/.ssh/authorized_keys
+           chmod 600 /home/admin/.ssh/authorized_keys
+           chown -R admin /home/admin/.ssh
+           ```
+
+        2. From a new terminal, confirm that key-based login works while keeping your current session open.
+        3. Edit the `/etc/ssh/sshd_config` file to set the `PasswordAuthentication` and `PubkeyAuthentication` parameters:
+
+           ```text
+           PasswordAuthentication no
+           PubkeyAuthentication yes
+           ```
+
+        4. Validate the configuration with `sshd -t`, restart the SSH service, and verify key-based login again before closing your session.
+
+        > **Warning:** Applying `PasswordAuthentication no` without a tested key locks all users out of SSH on the controller. Keep an active session open until you confirm key-based access works.
+    refs:
+      - url: https://pxc1.esc-eu-central-1.empolisservices.com/service-express/portal/project1_p/document/en-so-30b315c3-3e44-4292-97d4-6883672cd34c?context=%7B%7D
+        title: How to set up key-based SSH authentication to a PLCnext Control device

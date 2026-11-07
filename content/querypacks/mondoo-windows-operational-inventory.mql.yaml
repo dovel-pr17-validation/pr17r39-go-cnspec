@@ -1,0 +1,47 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+
+packs:
+  - uid: mondoo-windows-operational-inventory
+    name: Windows Client/Server Operational Inventory Pack
+    version: 1.1.0
+    license: BUSL-1.1
+    require:
+      - provider: os
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    tags:
+      mondoo.com/platform: windows
+      mondoo.com/category: best-practices
+      mondoo.com/icon: windows
+    summary: Inventory Windows operational and monitoring data
+    docs:
+      desc: |
+        Collects Windows host operational telemetry: memory and CPU utilization sampled from Windows performance counters, and the size and free space of each mounted volume.
+
+        Enable this query pack in [Mondoo Platform](https://mondoo.com/platform) to automatically collect this telemetry from your Windows hosts, or scan a host manually with cnspec:
+
+        ```bash
+        cnspec scan local -f mondoo-windows-operational-inventory.mql.yaml
+        ```
+    filters: asset.family.contains("windows")
+    queries:
+      - uid: mondoo-windows-operational-inventory-memory-usage
+        title: Memory usage in %
+        docs:
+          desc: Committed memory as a percentage of the commit limit.
+        mql: |
+          memory.committed * 100.0 / memory.commitLimit
+      - uid: mondoo-windows-operational-inventory-cpu-usage
+        title: CPU usage in %
+        docs:
+          desc: Processor time used, per CPU core, from perf counters.
+        mql: |
+          parse.json(content: powershell("Get-Counter '\\Processor(*)\\% Processor Time' | ConvertTo-Json -Compress").stdout).params['CounterSamples'] { Path CookedValue }
+      - uid: mondoo-windows-operational-inventory-disk-usage
+        title: Disk usage
+        docs:
+          desc: Size, used, and free bytes for each mounted volume.
+        mql: |
+          mount.list { path fstype size used available }

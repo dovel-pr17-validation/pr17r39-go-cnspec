@@ -1,0 +1,1111 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+policies:
+  - uid: mondoo-mikrotik-security
+    name: Mondoo MikroTik RouterOS Security
+    version: 1.0.3
+    license: BUSL-1.1
+    tags:
+      mondoo.com/category: security
+      mondoo.com/platform: mikrotik,networkdevice
+      mondoo.com/icon: mikrotik
+    require:
+      - provider: mikrotik
+    authors:
+      - name: Mondoo, Inc.
+        email: hello@mondoo.com
+    summary: Secure MikroTik RouterOS routers, switches, and access points
+    docs:
+      desc: |
+        The Mondoo MikroTik RouterOS Security policy identifies critical misconfigurations on MikroTik devices running RouterOS that could leave your network exposed to attackers. This policy helps organizations detect and remediate hardening gaps before they can be exploited, reducing the likelihood of unauthorized device access, credential interception, open-resolver abuse, and disruption of network services.
+
+        This policy provides security checks across key RouterOS areas:
+
+        - Insecure management services (Telnet, FTP, cleartext HTTP and API)
+        - Management plane access control and transport encryption
+        - Local user account hardening
+        - SNMP, time synchronization, and DNS resolver settings
+        - Firewall input filtering
+        - Wireless authentication and Layer 2 hardening
+
+        Learn more about scanning MikroTik in the [cnspec documentation](https://mondoo.com/docs/cnspec/network/mikrotik).
+
+        Have suggestions for new checks in this policy? Visit our [cnspec repository](https://github.com/mondoohq/cnspec).
+    groups:
+      - title: Insecure Management Services
+        filters: asset.platform == "mikrotik"
+        checks:
+          - uid: mondoo-mikrotik-security-telnet-service-disabled
+          - uid: mondoo-mikrotik-security-ftp-service-disabled
+          - uid: mondoo-mikrotik-security-www-service-disabled
+          - uid: mondoo-mikrotik-security-api-service-disabled
+      - title: Management Plane Access Control
+        filters: asset.platform == "mikrotik"
+        checks:
+          - uid: mondoo-mikrotik-security-services-source-restricted
+          - uid: mondoo-mikrotik-security-tls-services-modern-version
+      - title: User Account Security
+        filters: asset.platform == "mikrotik"
+        checks:
+          - uid: mondoo-mikrotik-security-default-admin-disabled
+          - uid: mondoo-mikrotik-security-users-source-restricted
+      - title: SNMP Security
+        filters: asset.platform == "mikrotik" && mikrotik.snmp.enabled
+        checks:
+          - uid: mondoo-mikrotik-security-snmp-no-default-trap-community
+      - title: Time Synchronization
+        filters: asset.platform == "mikrotik"
+        checks:
+          - uid: mondoo-mikrotik-security-ntp-client-enabled
+      - title: DNS Resolver Security
+        filters: asset.platform == "mikrotik"
+        checks:
+          - uid: mondoo-mikrotik-security-dns-doh-cert-verified
+      - title: Firewall Filtering
+        filters: asset.platform == "mikrotik"
+        checks:
+          - uid: mondoo-mikrotik-security-firewall-input-drop-rule
+          - uid: mondoo-mikrotik-security-firewall-drop-invalid
+      - title: Wireless Security
+        filters: asset.platform == "mikrotik" && mikrotik.wifiInterfaces != empty
+        checks:
+          - uid: mondoo-mikrotik-security-wifi-no-open-auth
+          - uid: mondoo-mikrotik-security-wifi-wpa3-enabled
+      - title: Layer 2 Hardening
+        filters: asset.platform == "mikrotik" && mikrotik.bridges != empty
+        checks:
+          - uid: mondoo-mikrotik-security-bridge-stp-enabled
+    scoring_system: average
+queries:
+  # ==========================================
+  # Insecure Management Services
+  # ==========================================
+  - uid: mondoo-mikrotik-security-telnet-service-disabled
+    title: Ensure the Telnet service is disabled
+    impact: 90
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-21
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-2-2-7
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: |
+      mikrotik.services.where(name == "telnet").all(disabled == true)
+    docs:
+      desc: |
+        This check verifies that remote administration over Telnet is turned off.
+
+        Telnet is the original RouterOS remote console, and it carries the login exchange and every subsequent command in clear text. RouterOS enables it by default, so a device that has never been hardened is listening on TCP 23. Operators turn it off with `/ip service disable telnet`, or by disabling the `telnet` row under **IP > Services** in WinBox, leaving SSH as the remote console.
+
+        **Why this matters**
+
+        An attacker positioned anywhere on the path between an administrator and the router reads the password as it is typed. That includes a compromised host on the same LAN running ARP spoofing, an upstream provider, and every hop in between when the device is managed across the internet. Nothing has to be broken for this to work; Telnet simply publishes the credential.
+
+        The credential it publishes is almost always the full-access one. RouterOS administration is rarely privilege-separated on the small deployments these devices serve, so the account an operator logs in with can rewrite the firewall, change the DNS servers handed to every client behind the router, add a new user, or install a hostile firmware image. The Meris botnet and the VPNFilter campaign both grew by collecting MikroTik management credentials at scale and reusing them, and both persisted because these routers are installed once and rarely revisited.
+
+        The same clear-text session can be modified, not only read. An on-path attacker can alter a command in flight or inject one of their own, so an administrator watching a clean-looking terminal has no assurance the router received what was sent.
+
+        If a legacy console server or provisioning tool still requires Telnet, confine it to a serial or dedicated out-of-band path rather than leaving the network service enabled, and confirm SSH access works before disabling Telnet so the device does not become unreachable.
+      audit: |
+        To verify that the Telnet service is disabled from the RouterOS CLI:
+
+        1. Open an SSH session to the device.
+        2. List the management services:
+
+           ```text
+           /ip service print
+           ```
+
+        3. Inspect the `telnet` row in the `FLAGS` / `DISABLED` column.
+
+        If the `telnet` service shows as disabled (`X` flag), the check passes. If it is enabled, the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            To disable the Telnet service using the RouterOS CLI:
+
+            Confirm SSH access works before disabling Telnet so you do not lose remote management. Then disable the service:
+
+            ```text
+            /ip service disable telnet
+            ```
+    refs:
+      - url: https://help.mikrotik.com/docs/spaces/ROS/pages/103841820/Services
+        title: MikroTik RouterOS Services
+
+  - uid: mondoo-mikrotik-security-ftp-service-disabled
+    title: Ensure the FTP service is disabled
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-21
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-2-2-7
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: |
+      mikrotik.services.where(name == "ftp").all(disabled == true)
+    docs:
+      desc: |
+        This check verifies that file transfer to the device over unencrypted FTP is turned off.
+
+        RouterOS runs an FTP server that authenticates with the same local accounts used for administration and exposes the device's file store, which holds configuration exports, backup files, and firmware packages. It is enabled out of the box. Operators turn it off with `/ip service disable ftp` and move transfers onto SCP or SFTP, which ride the existing SSH service and reach the same files.
+
+        **Why this matters**
+
+        FTP authenticates in clear text, so the password that opens the router's console travels the wire in plain view on every transfer. An attacker who captures it does not gain file access alone; the account is a device administrator.
+
+        The files themselves are worth taking. A RouterOS configuration export names the site's IP ranges, VPN peers, firewall exceptions, and SNMP communities, and a backup file can be restored onto attacker-controlled hardware and studied at leisure. In the other direction, an attacker who can write to the file store can stage a script or a firmware package that the device later runs.
+
+        Because FTP provides no integrity protection, a file in transit can be altered rather than merely observed. An operator uploading a firmware package across an untrusted path has no way to tell that what landed differs from what was sent.
+
+        Backup or build systems that only speak FTP are the usual reason this service stays enabled. Point them at SFTP over the SSH service instead; RouterOS serves the same file store through it, so nothing else about the workflow changes.
+      audit: |
+        To verify that the FTP service is disabled from the RouterOS CLI:
+
+        1. Open an SSH session to the device.
+        2. List the management services:
+
+           ```text
+           /ip service print
+           ```
+
+        3. Inspect the `ftp` row.
+
+        If the `ftp` service shows as disabled (`X` flag), the check passes. If it is enabled, the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            To disable the FTP service using the RouterOS CLI:
+
+            ```text
+            /ip service disable ftp
+            ```
+    refs:
+      - url: https://help.mikrotik.com/docs/spaces/ROS/pages/103841820/Services
+        title: MikroTik RouterOS Services
+
+  - uid: mondoo-mikrotik-security-www-service-disabled
+    title: Ensure the cleartext HTTP (www) service is disabled
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-21
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-2-2-7
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: |
+      mikrotik.services.where(name == "www").all(disabled == true)
+    docs:
+      desc: |
+        This check verifies that the web management interface is not served over unencrypted HTTP.
+
+        WebFig is the RouterOS browser interface, and RouterOS publishes it through two separate service entries: `www` over plain HTTP and `www-ssl` over TLS. Both are configured under `/ip service`, and `www` is the one enabled from the factory. Operators disable it with `/ip service disable www` once `www-ssl` has a certificate attached.
+
+        **Why this matters**
+
+        WebFig submits the administrator password to the router as an ordinary form post. Over the `www` service that post is readable by anything on the path, and unlike a console session it is typically issued from a laptop on a shared or wireless network where a hostile neighbor is a realistic assumption rather than a theoretical one.
+
+        After login the session identifier travels the same way. Capturing it lets an attacker resume the administrator's session without ever learning the password, and RouterOS offers no second factor behind the web interface to stop them.
+
+        The unprotected direction matters just as much. Plain HTTP gives the browser no assurance that the page came from the router, so an on-path attacker can rewrite the interface, harvest the credential through a page the administrator already trusts, or quietly change the values a form submits back to the device.
+
+        A router that must be administered from a browser should use `www-ssl` with a certificate the administrators actually verify. Disabling `www` before `www-ssl` works leaves only the console paths, so confirm SSH or WinBox access first.
+      audit: |
+        To verify that the cleartext web service is disabled from the RouterOS CLI:
+
+        1. Open an SSH session to the device.
+        2. List the management services:
+
+           ```text
+           /ip service print
+           ```
+
+        3. Inspect the `www` row.
+
+        If the `www` service shows as disabled (`X` flag), the check passes. If it is enabled, the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            To disable the cleartext web service using the RouterOS CLI:
+
+            Ensure the TLS-protected `www-ssl` service is configured with a certificate before disabling `www`, then disable the cleartext listener:
+
+            ```text
+            /ip service disable www
+            ```
+    refs:
+      - url: https://help.mikrotik.com/docs/spaces/ROS/pages/103841820/Services
+        title: MikroTik RouterOS Services
+
+  - uid: mondoo-mikrotik-security-api-service-disabled
+    title: Ensure the cleartext API service is disabled
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-21
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-2-2-7
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: |
+      mikrotik.services.where(name == "api").all(disabled == true)
+    docs:
+      desc: |
+        This check verifies that programmatic access to the device is not offered over an unencrypted API port.
+
+        RouterOS exposes its configuration API twice: the plain `api` service on TCP 8728 and `api-ssl` on TCP 8729. Provisioning systems, monitoring tools, and hotspot integrations use it to read and rewrite the running configuration. Operators disable the cleartext listener with `/ip service disable api` and repoint automation at `api-ssl`.
+
+        **Why this matters**
+
+        API credentials are worth more than any single administrator's password. Automation accounts are typically shared across an entire fleet, so one capture on one link yields a credential that works on every router the platform manages. They also tend to be granted full access, because narrowing RouterOS group permissions to exactly what a tool needs is fiddly and rarely revisited.
+
+        The cleartext API sends that login and every subsequent call in the clear, so an attacker on the path collects both the credential and a working transcript of how the fleet is configured. The transcript is what turns one capture into a mass compromise: the same calls that add a legitimate firewall rule add an attacker's, and they can be replayed against every device at once.
+
+        An attacker with no credential at all still benefits from the open port. TCP 8728 is a distinctive fingerprint that identifies a device as MikroTik to internet-wide scanners, and RouterOS API parsing has been the subject of past remote vulnerabilities, so an exposed listener is a standing target through the long stretch between a disclosure and a firmware update these devices rarely receive.
+
+        Some older tooling only speaks the plain API. Where it cannot be replaced, keep the service off the internet by binding it to a management network with the service's `address` restriction rather than leaving it open to any source.
+      audit: |
+        To verify that the cleartext API service is disabled from the RouterOS CLI:
+
+        1. Open an SSH session to the device.
+        2. List the management services:
+
+           ```text
+           /ip service print
+           ```
+
+        3. Inspect the `api` row.
+
+        If the `api` service shows as disabled (`X` flag), the check passes. If it is enabled, the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            To disable the cleartext API service using the RouterOS CLI:
+
+            Configure `api-ssl` with a certificate for any automation that needs API access, then disable the cleartext listener:
+
+            ```text
+            /ip service disable api
+            ```
+    refs:
+      - url: https://help.mikrotik.com/docs/spaces/ROS/pages/47579160/API
+        title: MikroTik RouterOS API
+
+  # ==========================================
+  # Management Plane Access Control
+  # ==========================================
+  - uid: mondoo-mikrotik-security-services-source-restricted
+    title: Ensure management services restrict allowed source addresses
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-3
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-5-2-7
+    mql: |
+      mikrotik.services.where(disabled == false).all(address != "")
+    docs:
+      desc: |
+        This check verifies that every management service the device is running accepts connections only from a defined set of administrative addresses.
+
+        Each entry under `/ip service` carries an `address` field holding the IPv4 and IPv6 prefixes allowed to reach that listener. RouterOS leaves it empty, which means any host that can route to the device may open a session on SSH, WinBox, WebFig, or the API. Operators populate it per service with `/ip service set ssh address=192.168.88.0/24`, or through the **IP > Services** dialog in WinBox.
+
+        **Why this matters**
+
+        An empty address list on an internet-facing router puts the login prompt in front of every scanner on the internet. These devices are found in minutes; WinBox on TCP 8291 and the API port are unmistakable, and the installed population is large enough that campaigns scanning specifically for MikroTik hardware run continuously. The password then becomes the only thing standing between an attacker and the device.
+
+        Passwords are not the only thing that fails. When a remote vulnerability in a management service is published, an unrestricted listener is exploitable the moment a proof of concept circulates. That is the pattern behind the mass MikroTik compromises: an unpatched management plane reachable from anywhere, on hardware nobody logs into after the day it was installed. A source restriction keeps the flaw out of reach while the fix goes un-applied, which on these devices can mean permanently.
+
+        Restricting the source also changes what a stolen credential is worth. A password lifted from a technician's laptop or reused from an unrelated breach only works from inside the listed ranges, which usually means the attacker has to establish a foothold on the management network first.
+
+        Where a service must be reachable from changing locations, terminate a VPN on the device and list the VPN pool rather than opening the service to any address. Include the address you are working from before you apply the change; a restriction that omits it ends the session applying it.
+      audit: |
+        To verify that management services restrict source addresses from the RouterOS CLI:
+
+        1. Open an SSH session to the device.
+        2. Display the services with their allowed address ranges:
+
+           ```text
+           /ip service print detail
+           ```
+
+        3. For each service that is not disabled, inspect the `address` field.
+
+        If every enabled service has an `address` value scoped to trusted management networks, the check passes. If any enabled service has an empty `address` (any source allowed), the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            To restrict management services to trusted source addresses using the RouterOS CLI:
+
+            Set the `address` field on every service that `/ip service print` reports as enabled. The field takes a comma-separated list of IPv4 and IPv6 prefixes, so several administrative networks can be permitted at once:
+
+            ```text
+            /ip service set ssh address=192.168.88.0/24,10.10.0.0/24
+            /ip service set winbox address=192.168.88.0/24,10.10.0.0/24
+            /ip service set www-ssl address=192.168.88.0/24,10.10.0.0/24
+            ```
+
+            A service left with an empty `address` still accepts connections from any host, so repeat the command for each remaining enabled service.
+    refs:
+      - url: https://help.mikrotik.com/docs/spaces/ROS/pages/103841820/Services
+        title: MikroTik RouterOS Services
+
+  - uid: mondoo-mikrotik-security-tls-services-modern-version
+    title: Ensure TLS-protected services enforce a modern TLS version
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-2-ii-transmission-security-encryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-2-2-7
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-1
+    mql: |
+      mikrotik.services.where(disabled == false && name == /ssl/).all(tlsVersion != "" && tlsVersion != "any")
+    docs:
+      desc: |
+        This check verifies that the encrypted management services negotiate a pinned, modern TLS version instead of accepting whatever a client offers.
+
+        `www-ssl` and `api-ssl` each carry a `tls-version` setting under `/ip service`. RouterOS ships it as `any`, which lets the service fall back to obsolete protocol versions for the benefit of old clients. Operators pin it with `/ip service set www-ssl tls-version=only-1.2`, and the same for `api-ssl`.
+
+        **Why this matters**
+
+        A service willing to speak an obsolete protocol version can be made to do so. An attacker on the path strips the modern options out of the client's handshake, the router agrees to what is left, and the session runs under a protocol whose weaknesses have public tooling. The administrator sees a padlock and a working session throughout.
+
+        What that downgraded session protects is the router's administrative credential and the configuration it carries. Recovering it does not require breaking the negotiated cipher outright; the older protocol versions have practical attacks against the handshake and the record layer that recover selected plaintext, and selected plaintext is enough when the interesting bytes are a password or a session cookie.
+
+        Leaving the floor at `any` also hides the problem from anyone auditing by inspection. The service reports itself as TLS-protected and an ordinary browser connects over a current version, so the weakness surfaces only when the attacker, rather than the client, chooses the version.
+
+        Pin the highest version every management client supports. If an old provisioning tool cannot reach the router afterwards, update or replace that tool rather than returning the whole service to `any`.
+      audit: |
+        To verify the minimum TLS version of TLS-protected services from the RouterOS CLI:
+
+        1. Open an SSH session to the device.
+        2. Display the services in detail:
+
+           ```text
+           /ip service print detail
+           ```
+
+        3. For each enabled service whose name ends in `-ssl`, inspect the `tls-version` field.
+
+        If every enabled TLS service sets `tls-version` to a specific modern value (for example `only-1.2`), the check passes. If any is set to `any`, the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            To enforce a modern minimum TLS version using the RouterOS CLI:
+
+            ```text
+            /ip service set www-ssl tls-version=only-1.2
+            /ip service set api-ssl tls-version=only-1.2
+            ```
+    refs:
+      - url: https://help.mikrotik.com/docs/spaces/ROS/pages/103841820/Services
+        title: MikroTik RouterOS Services
+
+  # ==========================================
+  # User Account Security
+  # ==========================================
+  - uid: mondoo-mikrotik-security-default-admin-disabled
+    title: Ensure the default admin account is disabled or removed
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-13
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-5-16
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-2-2-2
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      mikrotik.users.where(name == "admin").all(disabled == true)
+    docs:
+      desc: |
+        This check verifies that the factory `admin` account can no longer be used to log in.
+
+        RouterOS creates a single local user named `admin` at the factory, and on older releases it has no password until someone sets one. Administration is meant to move to per-person accounts under `/user`, after which the factory account is disabled with `/user disable admin` or deleted with `/user remove admin`.
+
+        **Why this matters**
+
+        `admin` is the first username every credential-guessing tool tries against a MikroTik device, so leaving it active hands an attacker half the login for free. The password becomes the entire defense, and on this hardware it is frequently the one an installer chose once and reused across every site they built.
+
+        That reuse is the specific mechanism behind the large MikroTik botnets. VPNFilter and Meris did not need a novel exploit on each device; a known account name combined with a default or shared password recruited routers in bulk, and the routers stayed recruited because nobody logs into them again.
+
+        An account nobody owns is also an account nobody watches. A log entry attributing a configuration change to `admin` names no person, so a change made by an intruder reads exactly like routine work by whoever happened to be on shift, and the intrusion is discovered by its effects rather than by its trail.
+
+        Create the replacement account and confirm you can log in with it before disabling `admin`. A device left with no usable full-access account is recovered only by a reset that erases its configuration, and for a router at an unstaffed site that means someone has to drive there.
+      audit: |
+        To verify that the default admin account is disabled from the RouterOS CLI:
+
+        1. Open an SSH session to the device.
+        2. List the local user accounts:
+
+           ```text
+           /user print
+           ```
+
+        3. Look for an account named `admin`.
+
+        If no `admin` account exists, or it is present but disabled, the check passes. If an enabled `admin` account exists, the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            To disable the default admin account using the RouterOS CLI:
+
+            First create a replacement administrator account and confirm you can log in with it, so disabling `admin` does not leave the device without an administrator:
+
+            ```text
+            /user add name=netadmin group=full password=<strong-password>
+            ```
+
+            Then disable (or remove) the default account:
+
+            ```text
+            /user disable admin
+            ```
+    refs:
+      - url: https://help.mikrotik.com/docs/spaces/ROS/pages/8978504/User
+        title: MikroTik RouterOS User Management
+
+  - uid: mondoo-mikrotik-security-users-source-restricted
+    title: Ensure local user accounts restrict allowed source addresses
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-3
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-5-2-7
+    mql: |
+      mikrotik.users.where(disabled == false).all(address != "")
+    docs:
+      desc: |
+        This check verifies that each local account able to log in is bound to the networks it may log in from.
+
+        Alongside the per-service restriction under `/ip service`, RouterOS carries an `address` field on every entry in `/user`. It lists the prefixes from which that specific account may authenticate, on any service, and it is empty by default. Operators set it with `/user set netadmin address=192.168.88.0/24`.
+
+        **Why this matters**
+
+        The service restriction decides which hosts may reach a login prompt; this one decides which hosts a given credential works from. The difference shows up whenever the two should not match: a monitoring account that only one collector should ever use, or a contractor's account that should only work from the site they maintain, can be pinned tightly even though the service itself stays open to the whole management network.
+
+        That turns a stolen password into a much narrower asset. An attacker who lifts an operator's credential from a compromised workstation, recovers it from a configuration backup, or replays one reused from an unrelated breach still has to originate from inside the listed prefixes for it to be worth anything.
+
+        It also limits what a compromised host on the management network can reach. Management segments accumulate jump boxes, monitoring servers, and technician laptops, and any of them is a plausible foothold. Binding accounts individually means a foothold in one corner of that network cannot use the credentials belonging to another.
+
+        Accounts held by people who roam belong pinned to a VPN pool rather than left open. As with any change that can lock you out, confirm the address you are working from falls inside the range before applying it to your own account.
+      audit: |
+        To verify that user accounts restrict source addresses from the RouterOS CLI:
+
+        1. Open an SSH session to the device.
+        2. Display the user accounts in detail:
+
+           ```text
+           /user print detail
+           ```
+
+        3. For each enabled account, inspect the `address` field.
+
+        If every enabled account has an `address` scoped to trusted networks, the check passes. If any enabled account has an empty `address`, the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            To restrict a user account to trusted source addresses using the RouterOS CLI:
+
+            ```text
+            /user set netadmin address=192.168.88.0/24
+            ```
+    refs:
+      - url: https://help.mikrotik.com/docs/spaces/ROS/pages/8978504/User
+        title: MikroTik RouterOS User Management
+
+  # ==========================================
+  # SNMP Security
+  # ==========================================
+  - uid: mondoo-mikrotik-security-snmp-no-default-trap-community
+    title: Ensure the SNMP trap community is not the default 'public'
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-15
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-5-17
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: false
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-2-2-2
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      mikrotik.snmp.trapCommunity != "public"
+    docs:
+      desc: |
+        This check verifies that SNMP traps leaving the device are not tagged with the factory community string `public`.
+
+        The trap community is the shared secret RouterOS presents when it sends unsolicited SNMP notifications to a monitoring host, and it names one of the entries defined under `/snmp community`. RouterOS ships that list with a single entry called `public` and points the trap community at it. Operators define a unique community and select it with `/snmp set trap-community=<unique-community-string>`.
+
+        **Why this matters**
+
+        In SNMP v1 and v2c the community string is the whole of the authentication scheme, and it crosses the network in clear text. A value of `public` means it is not a secret at all: it is the first string every SNMP scanner sends and the default every tool assumes.
+
+        A monitoring host that accepts traps under `public` accepts them from anyone who can reach it. An attacker forging traps can raise alarms that pull operators toward the wrong part of the network while the real activity happens elsewhere, or flood the receiver until a genuine alert about the intrusion is lost among fabricated ones. Trap data is also commonly fed straight into dashboards and ticketing systems that treat it as trustworthy input and act on it automatically.
+
+        The untouched default usually signals that the read community was never changed either, and a readable SNMP agent hands over interface names, addressing, routing neighbors, uptime, and the exact RouterOS version. That is precisely the reconnaissance an attacker needs to decide whether the device is worth an exploit and which one to reach for.
+
+        Where the monitoring platform supports it, move to SNMP v3 with authentication and privacy instead of a shared community, and restrict the agent to the monitoring hosts using the community's own `address` field.
+      audit: |
+        To verify the SNMP trap community from the RouterOS CLI:
+
+        1. Open an SSH session to the device.
+        2. Display the SNMP configuration:
+
+           ```text
+           /snmp print
+           ```
+
+        3. Inspect the `trap-community` field.
+
+        If `trap-community` is set to a unique value, the check passes. If it is `public`, the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            To set a non-default SNMP trap community using the RouterOS CLI:
+
+            The `trap-community` setting selects one of the communities defined under `/snmp community`, so the community has to exist before it can be selected. Create it first, scoped to the hosts allowed to reach the agent:
+
+            ```text
+            /snmp community add name=<unique-community-string> address=<management-subnet> read-access=yes write-access=no
+            /snmp set trap-community=<unique-community-string>
+            ```
+
+            RouterOS ships with a community named `public`. If you would rather not add a second entry, rename the shipped one and select that instead. This also changes the string existing pollers must present, so update them at the same time:
+
+            ```text
+            /snmp community set [find name=public] name=<unique-community-string> address=<management-subnet> write-access=no
+            /snmp set trap-community=<unique-community-string>
+            ```
+
+            Where practical, also migrate to SNMP v3 with authentication and encryption and restrict SNMP access to trusted management hosts.
+    refs:
+      - url: https://help.mikrotik.com/docs/spaces/ROS/pages/8978519/SNMP
+        title: MikroTik RouterOS SNMP
+
+  # ==========================================
+  # Time Synchronization
+  # ==========================================
+  - uid: mondoo-mikrotik-security-ntp-client-enabled
+    title: Ensure the NTP client is enabled
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-06
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-17
+      compliance/nis-2: nis-2-21-2-b
+      compliance/nist-csf-1: false
+      compliance/nist-csf-2: false
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-45
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-6-1
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: false
+    mql: |
+      mikrotik.ntpClient.enabled == true
+    docs:
+      desc: |
+        This check verifies that the device keeps its clock synchronized against a time source.
+
+        Most RouterOS hardware has no battery-backed real-time clock, so a router that is not synchronizing starts from the firmware build date after every reboot and drifts from there. The client lives at `/system ntp client`, and operators turn it on with `/system ntp client set enabled=yes servers=time.cloudflare.com,pool.ntp.org`.
+
+        **Why this matters**
+
+        Without it, the device's log timestamps are fiction. When something does happen on the network, the router's account of it cannot be lined up against the firewall, the switch, or the server logs, and the one device that actually saw the traffic becomes the one device whose evidence is unusable. RouterOS keeps only a small in-memory log by default, so the remote syslog that would have preserved the record inherits the wrong times too.
+
+        A wrong clock also breaks certificate validation. A router whose date sits far in the past accepts certificates that have since expired or been revoked; one wrong in the other direction rejects valid ones, taking down the encrypted resolver, the TLS management services, and certificate-authenticated VPN tunnels at once. Failures of that shape are usually misdiagnosed as network problems and worked around by switching verification off, which is how a clock fault becomes a lasting exposure.
+
+        Anything scheduled stops being dependable as well. Time-based firewall rules, scheduler scripts, DHCP lease expiry, and hotspot session limits all key off a clock that is silently wrong.
+
+        Configure more than one server so a single unreachable source does not leave the device unsynchronized, and prefer sources the router can reach without traversing tunnels whose own certificates depend on the clock.
+      audit: |
+        To verify that the NTP client is enabled from the RouterOS CLI:
+
+        1. Open an SSH session to the device.
+        2. Display the NTP client configuration:
+
+           ```text
+           /system ntp client print
+           ```
+
+        3. Inspect the `enabled` field.
+
+        If `enabled` is `yes`, the check passes. If it is `no`, the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            To enable and configure the NTP client using the RouterOS CLI:
+
+            ```text
+            /system ntp client set enabled=yes servers=time.cloudflare.com,pool.ntp.org
+            ```
+    refs:
+      - url: https://help.mikrotik.com/docs/spaces/ROS/pages/40992869/NTP
+        title: MikroTik RouterOS NTP
+
+  # ==========================================
+  # DNS Resolver Security
+  # ==========================================
+  - uid: mondoo-mikrotik-security-dns-doh-cert-verified
+    title: Ensure DNS over HTTPS verifies the server certificate
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-2-i-transmission-security-integrity-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-23
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-15
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: false
+    mql: |
+      mikrotik.dns.useDohServer == "" || mikrotik.dns.verifyDohCert == true
+    docs:
+      desc: |
+        This check verifies that when the router resolves names over DNS over HTTPS, it authenticates the resolver it is talking to.
+
+        RouterOS can forward DNS queries to a DoH endpoint named in `/ip dns use-doh-server`, and it carries a separate `verify-doh-cert` switch deciding whether that endpoint's TLS certificate is checked against the imported certificate authorities. The switch is off by default, so DoH can be running with no verification behind it. Operators import the trusted roots and set `/ip dns set verify-doh-cert=yes`.
+
+        **Why this matters**
+
+        The router is the resolver for everything behind it. Whatever answer it accepts is the answer every client at the site receives, so control of its DNS is control of where the site's traffic goes: the update server, the VPN concentrator, the payment endpoint, the login page.
+
+        With verification off, seizing that control needs no certificate an attacker could not produce themselves. Anything on the path between the router and the provider can present its own certificate, the router accepts it, and the encrypted channel terminates at the attacker. From the router's side this looks exactly like working DoH, which is the trap: an operator who enabled DoH believing it stopped DNS tampering has only stopped the passive observer while handing the active one a clean interception point.
+
+        The redirection is durable and hard to spot. It changes no configuration on the router, logs no error, and survives until somebody thinks to inspect the answers coming back rather than the setting that says DoH is on.
+
+        Verification depends on the device holding current CA certificates and a correct clock, so import the resolver's root and confirm time synchronization before enabling it, or name resolution stops entirely.
+      audit: |
+        To verify DoH certificate validation from the RouterOS CLI:
+
+        1. Open an SSH session to the device.
+        2. Display the DNS settings:
+
+           ```text
+           /ip dns print
+           ```
+
+        3. Inspect the `use-doh-server` and `verify-doh-cert` fields.
+
+        If no DoH server is configured, or a DoH server is configured with `verify-doh-cert=yes`, the check passes. If a DoH server is configured with `verify-doh-cert=no`, the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            To enable DoH certificate verification using the RouterOS CLI:
+
+            Ensure the appropriate root CA certificates are imported, then enable verification:
+
+            ```text
+            /ip dns set verify-doh-cert=yes
+            ```
+    refs:
+      - url: https://help.mikrotik.com/docs/spaces/ROS/pages/37748767/DNS
+        title: MikroTik RouterOS DNS
+
+  # ==========================================
+  # Firewall Filtering
+  # ==========================================
+  - uid: mondoo-mikrotik-security-firewall-input-drop-rule
+    title: Ensure the firewall input chain drops unmatched traffic
+    impact: 90
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-09
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: false
+      compliance/nist-csf-1: nist-csf-1-pr-pt-4
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-4-2
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-7
+    mql: |
+      mikrotik.firewallRules.where(chain == "input").any(action == "drop" || action == "reject")
+    docs:
+      desc: |
+        This check verifies that traffic addressed to the router itself is denied unless a rule explicitly permits it.
+
+        The `input` chain in `/ip firewall filter` governs packets destined for the router rather than passing through it, and RouterOS accepts anything no rule matches. A default-deny posture therefore has to be written out: accept rules for established connections and for trusted management sources, then a closing `/ip firewall filter add chain=input action=drop` at the end of the chain.
+
+        **Why this matters**
+
+        Everything the device listens on sits behind that chain. Without the closing drop, SSH, WinBox, WebFig, the API, DNS, SNMP, and any VPN responder are reachable from every network the router can be routed from, which on a WAN interface means the whole internet. Disabling the services nobody uses narrows the list, but whatever remains is still exposed to the world rather than to the operators.
+
+        That exposure is what the large MikroTik compromises fed on. Scanners sweep for the distinctive WinBox and API ports continuously, so a device answering from a public address is inventoried long before anyone attacks it. When the next management-plane vulnerability is published, the attacker already holds the target list, and these routers are seldom patched in the window that follows.
+
+        An open input chain also makes the device itself a resource to abuse. Its DNS resolver can be enlisted as an amplifier in reflection attacks against third parties, and connection tracking and CPU on small hardware can be consumed by unsolicited traffic until legitimate forwarding suffers.
+
+        The drop rule takes effect the instant it is added, so place the accept rules for established traffic and for your own source address above it and work in Safe Mode. A lockout on a router at an unstaffed site is resolved by a site visit.
+      audit: |
+        To verify the firewall input chain from the RouterOS CLI:
+
+        1. Open an SSH session to the device.
+        2. List the firewall filter rules for the input chain:
+
+           ```text
+           /ip firewall filter print where chain=input
+           ```
+
+        3. Confirm that, after the accept rules for trusted traffic, a rule drops or rejects the remaining input traffic.
+
+        If the input chain contains a `drop` or `reject` rule, the check passes. If it contains none, the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            To add a default-deny rule to the input chain using the RouterOS CLI:
+
+            **Warning**: the drop rule takes effect the moment it is added and ends any management session whose source address is not covered by an accept rule above it. Enter Safe Mode first by pressing `[CTRL]+[X]` in the terminal or clicking **Safe Mode** in WinBox. RouterOS undoes every change made during a Safe Mode session if that session ends abnormally, so a rule that locks you out is rolled back once the connection drops.
+
+            Add the accept rules **before** the drop. The router has to accept established and related connections so replies to its own traffic are not discarded, and management access from your trusted sources so administration keeps working. Append the drop last:
+
+            ```text
+            /ip firewall filter add chain=input connection-state=established,related action=accept
+            /ip firewall filter add chain=input src-address=192.168.88.0/24 action=accept
+            /ip firewall filter add chain=input action=drop
+            ```
+    refs:
+      - url: https://help.mikrotik.com/docs/spaces/ROS/pages/48660574/Filter
+        title: MikroTik RouterOS Firewall Filter
+
+  - uid: mondoo-mikrotik-security-firewall-drop-invalid
+    title: Ensure the firewall drops invalid connection-state packets
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-09
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: false
+      compliance/nist-csf-1: nist-csf-1-pr-pt-4
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-4-2
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-7
+    mql: |
+      mikrotik.firewallRules.where(action == "drop").any(connectionState == /invalid/)
+    docs:
+      desc: |
+        This check verifies that packets connection tracking cannot associate with any known session are discarded.
+
+        RouterOS marks a packet `invalid` when its connection tracker holds no state matching it: a mid-stream segment for a session the router never saw open, a response with no request, or a packet whose flags contradict the state it claims. The recommended ruleset discards them early with `/ip firewall filter add chain=input connection-state=invalid action=drop`, repeated for the `forward` chain.
+
+        **Why this matters**
+
+        Invalid packets are the raw material of firewall evasion. Scanners send crafted segments belonging to no session precisely because rules written around normal traffic often let them slip past, and whatever comes back reveals which ports are open and what sits behind them. Dropping the class outright ends that line of probing instead of answering it.
+
+        Passing invalid packets along also produces outcomes nobody intended. Later rules evaluate them without state context, so a packet that would be denied on its merits can match an accept rule written for the established traffic it is imitating, and a source-spoofed segment can be forwarded into an internal network on the strength of that match.
+
+        There is a resource dimension on the small hardware this software usually runs on. Every unsolicited packet costs tracker lookups and CPU, and a sustained stream of them is a cheap way to degrade forwarding for real traffic on a device with little headroom to spare.
+
+        Asymmetric routing is the one arrangement where this rule legitimately causes trouble, because the router genuinely sees only one direction of a flow and marks the other half invalid. Correct the routing or scope the rule to the paths it does not affect, rather than dropping it from the ruleset.
+      audit: |
+        To verify that invalid packets are dropped from the RouterOS CLI:
+
+        1. Open an SSH session to the device.
+        2. List the firewall filter rules:
+
+           ```text
+           /ip firewall filter print
+           ```
+
+        3. Look for a rule with `connection-state=invalid` and `action=drop`.
+
+        If such a rule exists, the check passes. If none does, the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            To drop invalid connection-state packets using the RouterOS CLI:
+
+            ```text
+            /ip firewall filter add chain=input connection-state=invalid action=drop
+            /ip firewall filter add chain=forward connection-state=invalid action=drop
+            ```
+    refs:
+      - url: https://help.mikrotik.com/docs/spaces/ROS/pages/130220087/Connection+tracking
+        title: MikroTik RouterOS Connection Tracking
+
+  # ==========================================
+  # Wireless Security
+  # ==========================================
+  - uid: mondoo-mikrotik-security-wifi-no-open-auth
+    title: Ensure WiFi access points require authentication
+    impact: 90
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: false
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-18
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-16
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-4-2-1-2
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-2
+    mql: |
+      mikrotik.wifiInterfaces.where(disabled == false && mode == "ap").all(authenticationTypes != empty)
+    docs:
+      desc: |
+        This check verifies that no wireless network the device broadcasts lets clients associate without credentials.
+
+        A RouterOS access-point interface carries a list of authentication types in its security settings, and an empty list means an open network: any device in range associates and lands on the LAN. Operators populate it with `/interface/wifi/set [find name=wifi1] security.authentication-types=wpa2-psk,wpa3-psk` alongside a passphrase.
+
+        **Why this matters**
+
+        An open SSID puts the internal network within reach of anyone in the parking lot. There is no credential to steal or guess; association is the whole of it, and from there the attacker is an ordinary host on the segment, able to reach the router's own management services, the printers, the point-of-sale terminals, and whatever else shares the VLAN.
+
+        Open networks carry no link-layer encryption either, so every client's traffic is readable out of the air by anyone with a radio, whether or not they associate at all. That includes the credentials clients send to internal systems and the DNS queries that map out what those systems are.
+
+        Because the access point is usually also the gateway, a foothold gained this way is a foothold on the device that carries the entire site. From an associated position an attacker can work directly against the management plane, and the small sites where these units are deployed rarely have anything watching the wireless segment to notice the attempt.
+
+        A deliberately public network is a legitimate case, but it belongs on its own VLAN and bridge, denied any path to the management addresses or the internal ranges, rather than on an open SSID bridged straight to the LAN.
+      audit: |
+        To verify WiFi authentication from the RouterOS CLI:
+
+        1. Open an SSH session to the device.
+        2. List the WiFi interfaces and their security settings:
+
+           ```text
+           /interface/wifi/print detail
+           ```
+
+        3. For each enabled access-point interface, inspect the `security.authentication-types` value.
+
+        If every enabled access-point interface has at least one authentication type configured, the check passes. If any has none (open network), the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            To require authentication on a WiFi access point using the RouterOS CLI:
+
+            Configure a passphrase and authentication types on the interface (or its security profile):
+
+            ```text
+            /interface/wifi/set [find name=wifi1] security.authentication-types=wpa2-psk,wpa3-psk security.passphrase=<strong-passphrase>
+            ```
+    refs:
+      - url: https://help.mikrotik.com/docs/spaces/ROS/pages/224559120/WiFi
+        title: MikroTik RouterOS WiFi
+
+  - uid: mondoo-mikrotik-security-wifi-wpa3-enabled
+    title: Ensure WiFi access points support WPA3
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-2-ii-transmission-security-encryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-16
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-4-2-1-2
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: vda-isa-5-5-1-1
+    mql: |
+      mikrotik.wifiInterfaces.where(disabled == false && mode == "ap").all(authenticationTypes.any(_ == /wpa3/))
+    docs:
+      desc: |
+        This check verifies that the wireless networks the device broadcasts offer WPA3 rather than only the older WPA2 pre-shared key.
+
+        WPA3 replaces WPA2's four-way handshake with Simultaneous Authentication of Equals, which exposes nothing an eavesdropper can attack away from the network. RouterOS lists it as an authentication type beside WPA2, so operators enable it with `/interface/wifi/set [find name=wifi1] security.authentication-types=wpa2-psk,wpa3-psk` and can run both while older clients migrate.
+
+        **Why this matters**
+
+        Against WPA2-PSK an attacker does not need to linger near the network. Capturing one client's association, or forcing one by deauthenticating a client that is already connected, yields material that can be carried away and guessed offline at whatever rate the attacker's hardware allows. Site passphrases are commonly the business name, the street address, or something printed on a card by the door, and those fall in seconds.
+
+        Recovering the passphrase yields more than a way in. Every WPA2 client on that SSID derives its session keys from the same shared secret, so an attacker holding it can decrypt traffic recorded earlier from other clients as well. WPA3 breaks both halves of that: guessing has to happen online against the access point, where it is rate-limited and visible, and each session gets forward secrecy, so a passphrase recovered next year does not open traffic captured today.
+
+        The exposure lasts as long as the deployment does. A wireless passphrase at a small site is changed almost never, so a capture taken now stays useful for years, and the access point that would have to be reconfigured is the one nobody visits.
+
+        Mixed WPA2 and WPA3 mode keeps legacy clients working, but it leaves the WPA2 path fully available to attack, so treat it as a migration state and retire WPA2 once the client inventory allows.
+      audit: |
+        To verify WPA3 support from the RouterOS CLI:
+
+        1. Open an SSH session to the device.
+        2. List the WiFi interfaces and their security settings:
+
+           ```text
+           /interface/wifi/print detail
+           ```
+
+        3. For each enabled access-point interface, inspect `security.authentication-types`.
+
+        If every enabled access-point interface includes a WPA3 authentication type (for example `wpa3-psk`), the check passes. If any offers only WPA2 or weaker, the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            To enable WPA3 on a WiFi access point using the RouterOS CLI:
+
+            Add a WPA3 authentication type (mixed WPA2/WPA3 mode shown for client compatibility):
+
+            ```text
+            /interface/wifi/set [find name=wifi1] security.authentication-types=wpa2-psk,wpa3-psk
+            ```
+    refs:
+      - url: https://help.mikrotik.com/docs/spaces/ROS/pages/224559120/WiFi
+        title: MikroTik RouterOS WiFi
+
+  # ==========================================
+  # Layer 2 Hardening
+  # ==========================================
+  - uid: mondoo-mikrotik-security-bridge-stp-enabled
+    title: Ensure bridges run a spanning-tree protocol
+    impact: 50
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: false
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: false
+      compliance/nis-2: false
+      compliance/nist-csf-1: nist-csf-1-pr-pt-4
+      compliance/nist-csf-2: false
+      compliance/nist-sp-800-53-rev5: false
+      compliance/nist-sp-800-171: false
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: false
+    mql: |
+      mikrotik.bridges.where(disabled == false).all(protocolMode != "none")
+    docs:
+      desc: |
+        This check verifies that each bridge on the device runs a spanning-tree protocol rather than forwarding with no loop protection.
+
+        A RouterOS bridge joins ports into a single Layer 2 domain, and its `protocol-mode` selects `stp`, `rstp`, `mstp`, or `none`. Set to `none`, the bridge forwards frames without exchanging topology information and with no mechanism to block a redundant path. Operators enable it with `/interface bridge set [find name=bridge1] protocol-mode=rstp`.
+
+        **Why this matters**
+
+        A loop on a bridge with no spanning tree does not degrade the network, it stops it. Broadcast frames circulate with no hop count to retire them, multiply at every pass, and saturate the segment within seconds. The router loses the capacity to answer its own management traffic, so the device an operator would use to fix the problem goes unreachable at the same moment the problem starts.
+
+        Creating that loop takes one patch cable in the wrong pair of ports, and at the small unstaffed sites these devices serve it is as likely to come from a tidy-minded person plugging in a spare lead as from anyone hostile. It is also trivially reproducible by an attacker with a moment of physical access, and it leaves nothing behind afterwards to explain what happened.
+
+        Recovery is the expensive part. There is no remote fix for a saturated segment; somebody has to reach the site and unplug something, and until they do the site is off the network entirely. For infrastructure whose whole appeal is that it can be installed and left alone, an outage that requires a visit is the worst failure mode on offer.
+
+        A bridge with a single uplink and no physical possibility of a second path is the case where `none` is defensible, and even there RSTP costs nothing to leave running. Where the bridge faces user ports, pair it with edge-port and BPDU controls so a device plugged into an access port cannot influence the topology.
+      audit: |
+        To verify the bridge spanning-tree configuration from the RouterOS CLI:
+
+        1. Open an SSH session to the device.
+        2. List the bridges and their protocol modes:
+
+           ```text
+           /interface bridge print
+           ```
+
+        3. For each enabled bridge, inspect the `protocol-mode` field.
+
+        If every enabled bridge uses `stp`, `rstp`, or `mstp`, the check passes. If any uses `none`, the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            To enable a spanning-tree protocol on a bridge using the RouterOS CLI:
+
+            ```text
+            /interface bridge set [find name=bridge1] protocol-mode=rstp
+            ```
+    refs:
+      - url: https://help.mikrotik.com/docs/spaces/ROS/pages/328068/Bridging+and+Switching
+        title: MikroTik RouterOS Bridging and Switching

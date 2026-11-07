@@ -1,0 +1,371 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+
+packs:
+  - uid: mondoo-kubernetes-inventory
+    name: Kubernetes Inventory Pack
+    version: 1.7.0
+    license: BUSL-1.1
+    require:
+      - provider: k8s
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    tags:
+      mondoo.com/platform: kubernetes
+      mondoo.com/category: best-practices
+      mondoo.com/icon: kubernetes
+    summary: Inventory Kubernetes cluster resources and workloads
+    docs:
+      desc: |
+        Inventories a Kubernetes cluster: server version, namespaces, nodes, RBAC roles and bindings, quotas, limit ranges, storage, autoscalers, and workload resources such as pods, deployments, jobs, and ingresses.
+
+        Enable this query pack in [Mondoo Platform](https://mondoo.com/platform) to automatically inventory your clusters, or scan a cluster manually with cnspec:
+
+        ```bash
+        cnspec scan k8s -f mondoo-kubernetes-inventory.mql.yaml
+        ```
+    groups:
+      - title: Cluster inventory
+        filters: asset.platform == "k8s-cluster"
+        queries:
+          - uid: k8s-cluster-version
+            title: Kubernetes cluster version
+            docs:
+              desc: Kubernetes API server version for the cluster.
+            mql: |
+              k8s.serverVersion
+          - uid: k8s-cluster-namespaces
+            title: Kubernetes cluster namespaces
+            docs:
+              desc: Lists all namespaces in the Kubernetes cluster.
+            mql: |
+              k8s.namespaces
+          - uid: k8s-cluster-nodes
+            title: Cluster nodes
+            docs:
+              desc: Lists all nodes in the Kubernetes cluster with their status.
+            mql: |
+              k8s.nodes
+          - uid: k8s-cluster-node-instances
+            title: Cluster node cloud provider IDs
+            docs:
+              desc: Each node name mapped to its cloud provider instance ID.
+            mql: |
+              k8s.nodes { name providerID }
+          - uid: k8s-cluster-pod-nodes
+            title: Pod-to-node placement
+            docs:
+              desc: |
+                Each pod mapped to the node it runs on, and its pod IP.
+
+                The pod IP is included so that the registered targets of an
+                ip-type cloud load balancer target group (see the AWS inventory
+                pack's `ipTargets`) resolve to a pod, and from there to a node
+                and its cloud instance, without relying on Service or Ingress
+                relations.
+            mql: |
+              k8s.pods { namespace name nodeName podIP }
+          - uid: k8s-cluster-pod-count
+            title: Pod count
+            docs:
+              desc: |
+                Total pods in the cluster across all namespaces.
+
+                Pods in every phase are counted, so completed Job and CronJob
+                pods that the cluster still retains are included.
+            mql: |
+              k8s.pods.length
+          - uid: k8s-cluster-internet-exposed-pod-nodes
+            title: Nodes hosting internet-exposed workloads
+            docs:
+              desc: |
+                Pods reachable from the internet and the nodes hosting them.
+
+                This is the load-balancer half of host internet exposure. A node
+                can have no public IP, sit in a private subnet, and carry no
+                security group that admits `0.0.0.0/0`, yet still serve internet
+                traffic because an internet-facing load balancer forwards to a pod
+                scheduled on it. Cloud-side instance exposure analysis cannot see
+                that path: with `ip`-type target groups the registered targets are
+                pod IPs, so the instance is never a load balancer target. Each
+                entry names the exposing object and the reason, so a reviewer can
+                tell deliberate exposure from accidental.
+
+                Join `nodeName` to the `Cluster node cloud provider IDs` query in
+                this group to reach the cloud instance. The pod's own `node`
+                relation is deliberately not used here: nodes are cluster-scoped,
+                so it resolves to null on namespace-scoped assets and manifest
+                scans, whereas `nodeName` is always set for a scheduled pod.
+
+                Join the `containerStatuses` image IDs to container image assets
+                to reach the images an exposed pod is actually serving traffic
+                with. The IDs are kubelet-resolved, so they carry the running
+                image's digest even when the pod spec references a mutable tag,
+                and they cover only the pod's serving containers: init and
+                ephemeral containers ran or debug on the pod but do not serve,
+                so they are deliberately not part of the exposure surface. The
+                platform folds these digests into the "runs an internet-exposed
+                workload" risk factor on the matching container image assets,
+                which prioritizes the CVEs found in those images.
+            mql: |
+              k8s.pods.where(exposures.any(internetExposed == true)) {
+                namespace
+                name
+                nodeName
+                podIP
+                containerStatuses {
+                  imageId
+                }
+                exposures {
+                  sourceKind
+                  sourceRef
+                  namespace
+                  name
+                  internetExposed
+                  exposureReason
+                  addresses
+                  ports
+                  protocols
+                }
+              }
+          - uid: k8s-cluster-internet-exposed-image-digests
+            title: Serving-container images of internet-exposed pods
+            docs:
+              desc: Image IDs of the containers that serve exposed traffic.
+            mql: |
+              k8s.pods.where(exposures.any(internetExposed == true)) {
+                containerStatuses {
+                  imageId
+                }
+              }
+          - uid: k8s-cluster-serviceaccounts
+            title: Service accounts and workload identity bindings
+            docs:
+              desc: |
+                Service accounts, their annotations, and RBAC capabilities.
+
+                Join `namespace` and `name` to the `Pod owners and service
+                accounts` query in this group to reach the pods running under
+                each service account, and join the role ARN to the AWS inventory
+                pack's `IAM roles with attached policy permissions` query to
+                reach the permissions an internet-exposed pod can exercise.
+            mql: |
+              k8s.serviceaccounts {
+                namespace
+                name
+                annotations
+                automountServiceAccountToken
+                isClusterAdmin
+                canEscalatePrivileges
+                canReadSecrets
+                hasWildcardPermissions
+              }
+          - uid: k8s-cluster-pod-owners
+            title: Pod owners and service accounts
+            docs:
+              desc: |
+                Each pod mapped to its owner workload and service account.
+
+                The service account name joins to the `Service accounts and
+                workload identity bindings` query, which is where a pod's cloud
+                permissions come from when the cluster uses IAM roles for
+                service accounts or EKS Pod Identity.
+            mql: |
+              k8s.pods {
+                namespace
+                name
+                nodeName
+                serviceAccountName
+                automountServiceAccountToken
+                hostNetwork
+                ownerReferences { kind name controller }
+              }
+          - uid: k8s-cluster-replicaset-owners
+            title: ReplicaSet owners
+            docs:
+              desc: Each ReplicaSet mapped to the Deployment that owns it.
+            mql: |
+              k8s.replicasets {
+                namespace
+                name
+                ownerReferences { kind name controller }
+              }
+          - uid: k8s-cluster-clusterroles
+            title: Cluster RBAC ClusterRoles
+            docs:
+              desc: Cluster-wide RBAC ClusterRoles, for permission auditing.
+            mql: |
+              k8s.clusterroles
+          - uid: k8s-cluster-roles
+            title: RBAC Roles
+            docs:
+              desc: Namespace-scoped RBAC Roles, for permission auditing.
+            mql: |
+              k8s.roles
+          - uid: k8s-cluster-clusterrolebindings
+            title: RBAC cluster-rolebindings
+            docs:
+              desc: ClusterRoleBindings granting cluster-wide permissions.
+            mql: |
+              k8s.clusterrolebindings
+          - uid: k8s-cluster-rolebindings
+            title: RBAC rolebindings
+            docs:
+              desc: Namespace-scoped RoleBindings, for permission auditing.
+            mql: |
+              k8s.rolebindings
+          - uid: k8s-cluster-resource-quotas
+            title: Resource quotas
+            docs:
+              desc: ResourceQuotas across all namespaces.
+            mql: |
+              k8s.resourceQuotas
+          - uid: k8s-cluster-limit-ranges
+            title: Limit ranges
+            docs:
+              desc: LimitRanges across all namespaces.
+            mql: |
+              k8s.limitRanges
+          - uid: k8s-cluster-persistent-volumes
+            title: Persistent volumes
+            docs:
+              desc: PersistentVolumes in the cluster, for storage auditing.
+            mql: |
+              k8s.persistentVolumes
+          - uid: k8s-cluster-hpas
+            title: Horizontal pod autoscalers
+            docs:
+              desc: HorizontalPodAutoscalers and their scaling configuration.
+            mql: |
+              k8s.horizontalPodAutoscalers
+      - title: Pods inventory
+        filters: asset.platform == "k8s-pod"
+        queries:
+          - uid: k8s-pod
+            title: Pod information
+            docs:
+              desc: Returns the pod's full spec and status.
+            mql: |
+              k8s.pod
+          - uid: k8s-pod-container
+            title: Container information
+            docs:
+              desc: Lists all containers in the pod with their configuration.
+            mql: |
+              k8s.pod.containers
+      - title: Deployments inventory
+        filters: asset.platform == "k8s-deployment"
+        queries:
+          - uid: k8s-deployment
+            title: Deployment information
+            docs:
+              desc: Returns each deployment's spec and status.
+            mql: |
+              k8s.deployments
+          - uid: k8s-deployment-container
+            title: Container information
+            docs:
+              desc: Containers defined in the deployment, with configuration.
+            mql: |
+              k8s.deployment.containers { * }
+      - title: CronJobs inventory
+        filters: asset.platform == "k8s-cronjob"
+        queries:
+          - uid: k8s-cronjob
+            title: CronJob information
+            docs:
+              desc: CronJob schedule, job template, spec, and status.
+            mql: |
+              k8s.cronjob { * }
+          - uid: k8s-cronjob-container
+            title: Container information
+            docs:
+              desc: Containers defined in the CronJob, with configuration.
+            mql: |
+              k8s.cronjob.containers { * }
+      - title: Jobs inventory
+        filters: asset.platform == "k8s-job"
+        queries:
+          - uid: k8s-job
+            title: Job information
+            docs:
+              desc: Returns the Job's spec and status.
+            mql: |
+              k8s.job { * }
+          - uid: k8s-job-container
+            title: Container information
+            docs:
+              desc: Containers defined in the Job, with configuration.
+            mql: |
+              k8s.job.containers { * }
+      - title: DaemonSets inventory
+        filters: asset.platform == "k8s-daemonset"
+        queries:
+          - uid: k8s-daemonset
+            title: DaemonSet information
+            docs:
+              desc: Returns the DaemonSet's spec and status.
+            mql: |
+              k8s.daemonset { * }
+          - uid: k8s-daemonset-container
+            title: Container information
+            docs:
+              desc: Containers defined in the DaemonSet, with configuration.
+            mql: |
+              k8s.daemonset.containers { * }
+      - title: StatefulSets inventory
+        filters: asset.platform == "k8s-statefulset"
+        queries:
+          - uid: k8s-statefulset
+            title: StatefulSet information
+            docs:
+              desc: Returns the StatefulSet's spec and status.
+            mql: |
+              k8s.statefulset { * }
+          - uid: k8s-statefulset-container
+            title: Container information
+            docs:
+              desc: Containers defined in the StatefulSet, with configuration.
+            mql: |
+              k8s.statefulset.containers { * }
+      - title: ReplicaSets inventory
+        filters: asset.platform == "k8s-replicaset"
+        queries:
+          - uid: k8s-replicaset
+            title: ReplicaSet information
+            docs:
+              desc: Returns the ReplicaSet's spec and status.
+            mql: |
+              k8s.replicaset { * }
+          - uid: k8s-replicaset-container
+            title: Container information
+            docs:
+              desc: Containers defined in the ReplicaSet, with configuration.
+            mql: |
+              k8s.replicaset.containers { * }
+      - title: Ingresses inventory
+        filters: asset.platform == "k8s-ingress"
+        queries:
+          - uid: k8s-ingress
+            title: Ingress information
+            docs:
+              desc: Returns the Ingress rules and backend service configuration.
+            mql: |
+              k8s.ingress { * }
+      - title: Services inventory
+        filters: asset.platform == "k8s-service"
+        queries:
+          - uid: k8s-service
+            title: Service information
+            docs:
+              desc: |
+                Service type, ports, load balancer addresses, and exposures.
+
+                Ingress alone does not describe the full public surface of a
+                cluster. A `type: LoadBalancer` Service provisions its own cloud
+                load balancer with no Ingress object involved, so without this
+                query those workloads, and the nodes they run on, cannot be tied
+                back to the load balancer that publishes them.
+            mql: |
+              k8s.service { * }

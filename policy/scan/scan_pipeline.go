@@ -1,0 +1,489 @@
+// Copyright Mondoo, Inc. 2024, 2026
+// SPDX-License-Identifier: BUSL-1.1
+
+package scan
+
+import (
+	"context"
+	"fmt"
+	"maps"
+	"os"
+	goruntime "runtime"
+	"runtime/debug"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+
+	"github.com/rs/zerolog/log"
+	"go.mondoo.com/cnspec"
+	"go.mondoo.com/cnspec/cli/progress"
+	"go.mondoo.com/cnspec/policy"
+	"go.mondoo.com/cnspec/policy/scanstats"
+	"go.mondoo.com/cnspec/policy/scanwarnings"
+	"go.mondoo.com/mql/cli/config"
+	"go.mondoo.com/mql/discovery"
+	"go.mondoo.com/mql/llx"
+	"go.mondoo.com/mql/providers-sdk/v1/inventory"
+	"go.mondoo.com/mql/providers-sdk/v1/upstream"
+	"go.mondoo.com/mql/providers-sdk/v1/upstream/health"
+)
+
+const (
+	defaultMaxConnections = 50
+	syncBatchSize         = 5 // how many assets to batch for upstream sync calls
+)
+
+func getMaxConnections() int {
+	if v := os.Getenv("MONDOO_MAX_PROVIDER_CONNECTIONS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return defaultMaxConnections
+}
+
+// ---------------------------------------------------------------------------
+// syncBatcher: accumulates connected assets and syncs them with upstream
+// in batches.
+// ---------------------------------------------------------------------------
+
+// syncBatcher collects connected assets and calls syncBatchWithUpstream once
+// the batch reaches syncBatchSize. The caller can force a flush at any time
+// (e.g. before recursing into a branch or draining at end-of-subtree).
+// After syncing, assets are forwarded to a scanDispatcher for execution.
+type syncBatcher struct {
+	dispatcher    *scanDispatcher
+	services      *policy.Services
+	spaceMrn      string
+	recording     llx.Recording
+	multiprogress progress.MultiProgress
+
+	buf []*discovery.TrackedAsset
+
+	trigger policy.AssetActivityTrigger
+}
+
+func newSyncBatcher(dispatcher *scanDispatcher, services *policy.Services, spaceMrn string, rec llx.Recording, mp progress.MultiProgress, trigger policy.AssetActivityTrigger) *syncBatcher {
+	return &syncBatcher{
+		dispatcher:    dispatcher,
+		services:      services,
+		spaceMrn:      spaceMrn,
+		recording:     rec,
+		multiprogress: mp,
+		trigger:       trigger,
+	}
+}
+
+// Add appends an asset to the batch. If the batch is full, it is
+// automatically flushed (synced and dispatched).
+func (sb *syncBatcher) Add(ctx context.Context, tracked *discovery.TrackedAsset) error {
+	sb.buf = append(sb.buf, tracked)
+	if len(sb.buf) >= syncBatchSize {
+		return sb.Flush(ctx)
+	}
+	return nil
+}
+
+// Flush syncs all buffered assets with upstream and dispatches them for
+// scanning. It is a no-op if the buffer is empty.
+func (sb *syncBatcher) Flush(ctx context.Context) error {
+	if len(sb.buf) == 0 {
+		return nil
+	}
+	batch := sb.buf
+	sb.buf = nil
+
+	// Split delayed-discovery assets — they can't be synced until the scan
+	// goroutine resolves them via HandleDelayedDiscovery.
+	var readyToSync []*discovery.TrackedAsset
+	for _, tracked := range batch {
+		asset := tracked.Asset
+		isDelayed := len(asset.Connections) > 0 && asset.Connections[0].DelayDiscovery
+		if !isDelayed {
+			if len(asset.PlatformIds) > 0 {
+				sb.multiprogress.AddTask(asset.PlatformIds[0], asset)
+			}
+			readyToSync = append(readyToSync, tracked)
+		}
+	}
+
+	if len(readyToSync) > 0 {
+		if err := syncBatchWithUpstream(ctx, readyToSync, sb.services, sb.spaceMrn, sb.recording, sb.trigger); err != nil {
+			for _, tracked := range batch {
+				assetName := ""
+				if tracked.Asset != nil {
+					assetName = tracked.Asset.Name
+				}
+				if closeErr := sb.dispatcher.explorer.CloseAsset(tracked); closeErr != nil {
+					log.Error().Err(closeErr).Str("asset", assetName).Msg("failed to close asset")
+				}
+				tracked.Asset = nil
+				<-sb.dispatcher.connSem
+			}
+			return err
+		}
+	}
+
+	// Hand each synced asset to the dispatcher for scanning.
+	for _, tracked := range batch {
+		sb.dispatcher.Submit(ctx, tracked)
+	}
+
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// scanDispatcher: manages a pool of scan workers.
+// ---------------------------------------------------------------------------
+
+// scanDispatcher owns a bounded pool of scan workers. Assets are submitted
+// via Submit and executed concurrently up to the configured parallelism.
+// The caller uses Wait to block until all submitted scans have completed.
+type scanDispatcher struct {
+	scanSem chan struct{}
+	connSem chan struct{}
+	wg      sync.WaitGroup
+
+	// Dependencies for scanning a single asset.
+	scanner         *LocalScanner
+	explorer        *discovery.AssetExplorer
+	job             *Job
+	upstream        *upstream.UpstreamConfig
+	reporter        Reporter
+	multiprogress   progress.MultiProgress
+	services        *policy.Services
+	spaceMrn        string
+	scannedAssets   *atomic.Int64
+	resourceTracker *scanstats.ResourceTracker
+}
+
+func newScanDispatcher(
+	parallelism int,
+	connSem chan struct{},
+	scanner *LocalScanner,
+	explorer *discovery.AssetExplorer,
+	job *Job,
+	up *upstream.UpstreamConfig,
+	reporter Reporter,
+	mp progress.MultiProgress,
+	services *policy.Services,
+	spaceMrn string,
+	scannedAssets *atomic.Int64,
+	resourceTracker *scanstats.ResourceTracker,
+) *scanDispatcher {
+	return &scanDispatcher{
+		scanSem:         make(chan struct{}, parallelism),
+		connSem:         connSem,
+		scanner:         scanner,
+		explorer:        explorer,
+		job:             job,
+		upstream:        up,
+		reporter:        reporter,
+		multiprogress:   mp,
+		services:        services,
+		spaceMrn:        spaceMrn,
+		scannedAssets:   scannedAssets,
+		resourceTracker: resourceTracker,
+	}
+}
+
+// Submit queues an asset for scanning. It returns immediately — the
+// goroutine waits for a worker slot (scanSem) internally. This lets
+// the batcher and tree walker continue without blocking on worker
+// availability. The asset's connSem slot is released after the scan
+// completes and the asset is closed.
+func (d *scanDispatcher) Submit(ctx context.Context, tracked *discovery.TrackedAsset) {
+	d.wg.Go(func() {
+		defer func() { <-d.connSem }()
+		defer d.reportPanic(tracked)
+
+		// Acquire worker slot, respecting context cancellation.
+		select {
+		case d.scanSem <- struct{}{}:
+			defer func() { <-d.scanSem }()
+		case <-ctx.Done():
+			assetName := ""
+			if tracked.Asset != nil {
+				assetName = tracked.Asset.Name
+			}
+			if err := d.explorer.CloseAsset(tracked); err != nil {
+				log.Error().Err(err).Str("asset", assetName).Msg("failed to close asset")
+			}
+			tracked.Asset = nil
+			return
+		}
+
+		// Mark asset as in-progress as soon as we pick it up, not when
+		// the first query result comes back.
+		if tracked.Asset != nil && len(tracked.Asset.PlatformIds) > 0 {
+			d.multiprogress.OnProgress(tracked.Asset.PlatformIds[0], 0)
+		}
+
+		d.scanSingleAsset(ctx, tracked)
+	})
+}
+
+// Wait blocks until all submitted scans have completed.
+func (d *scanDispatcher) Wait() {
+	d.wg.Wait()
+}
+
+// scanSingleAsset handles the full lifecycle of scanning one asset: delayed
+// discovery, validation, scanning, error reporting, and closing.
+func (d *scanDispatcher) scanSingleAsset(ctx context.Context, tracked *discovery.TrackedAsset) {
+	asset := tracked.Asset
+	runtime := tracked.Runtime
+
+	if err := runtime.EnsureProvidersConnected(); err != nil {
+		log.Error().Err(err).Msg("could not connect to providers")
+	}
+
+	log.Debug().Interface("platform", asset.Platform).Str("name", asset.Name).Msg("start scan")
+
+	// Handle delayed discovery (e.g. container registry images).
+	if len(asset.Connections) > 0 && asset.Connections[0].DelayDiscovery {
+		updatedAsset, err := discovery.HandleDelayedDiscovery(ctx, asset, runtime)
+		if err != nil {
+			d.reporter.AddScanError(asset, err)
+			if err := d.explorer.CloseAsset(tracked); err != nil {
+				log.Error().Err(err).Str("asset", asset.Name).Msg("failed to close asset")
+			}
+			tracked.Asset = nil
+			return
+		}
+		asset = updatedAsset
+		tracked.Asset = asset
+
+		if len(asset.PlatformIds) > 0 {
+			d.multiprogress.AddTask(asset.PlatformIds[0], asset)
+		}
+		if syncErr := syncBatchWithUpstream(ctx, []*discovery.TrackedAsset{tracked}, d.services, d.spaceMrn, d.scanner.recording, d.scanner.activityTrigger); syncErr != nil {
+			d.reporter.AddScanError(asset, syncErr)
+			if len(asset.PlatformIds) > 0 {
+				d.multiprogress.Errored(asset.PlatformIds[0])
+			}
+			if err := d.explorer.CloseAsset(tracked); err != nil {
+				log.Error().Err(err).Str("asset", asset.Name).Msg("failed to close asset")
+			}
+			tracked.Asset = nil
+			return
+		}
+	}
+
+	if len(asset.PlatformIds) == 0 {
+		log.Warn().Str("name", asset.Name).Msg("asset has no platform IDs after discovery, skipping")
+		if err := d.explorer.CloseAsset(tracked); err != nil {
+			log.Error().Err(err).Str("asset", asset.Name).Msg("failed to close asset")
+		}
+		tracked.Asset = nil
+		return
+	}
+
+	d.scannedAssets.Add(1)
+	p := &progress.MultiProgressAdapter{Key: asset.PlatformIds[0], Multi: d.multiprogress}
+	d.scanner.RunAssetJob(&AssetJob{
+		DoRecord:         d.job.DoRecord,
+		UpstreamConfig:   d.upstream,
+		Asset:            asset,
+		Bundle:           d.job.Bundle,
+		Props:            d.job.Props,
+		PolicyFilters:    preprocessPolicyFilters(d.job.PolicyFilters),
+		Ctx:              ctx,
+		Reporter:         d.reporter,
+		ProgressReporter: p,
+		runtime:          runtime,
+	})
+
+	// Surface any recovered provider panics/crashes without treating the
+	// asset as failed.
+	reportCriticalErrors(asset, runtime.CriticalErrors())
+
+	// Close asset after scanning to free the gRPC connection.
+	if err := d.explorer.CloseAsset(tracked); err != nil {
+		log.Error().Err(err).Str("asset", asset.Name).Msg("failed to close asset")
+	}
+
+	// Break the allAssets → Asset reference so the proto data (connections,
+	// platform, labels, etc.) becomes GC-eligible immediately. The local
+	// `asset` variable still holds a reference for logResourceStats below;
+	// reporters that need the data (AggregateReporter) already captured
+	// their own reference via AddReport.
+	tracked.Asset = nil
+
+	debug.FreeOSMemory()
+
+	if os.Getenv("DEBUG_PROVIDER_MEMORY") != "" {
+		d.logResourceStats(asset)
+	}
+}
+
+// reportErrorFn is a seam over health.ReportError so tests can observe what
+// this package reports to the Mondoo Platform without a configured service
+// account or a live network call. health.ReportError is a package-level
+// function, not a method, so it cannot be swapped via an interface; this
+// package-level func var is the minimal seam. It takes tags as a plain map
+// rather than a health.ReportOption, since health.ReportOption closes over
+// an unexported type that a test in another package can neither construct
+// nor inspect.
+var reportErrorFn = func(product, version, build, errMsg string, tags map[string]string) {
+	health.ReportError(product, version, build, errMsg, health.WithTags(tags))
+}
+
+// reportCriticalErrors surfaces recovered provider panics/crashes (mql's
+// runtime.CriticalErrors(), e.g. a provider subprocess dying mid-scan) for
+// one asset: it reports each distinct error to the Mondoo Platform via
+// health.ReportError (the ErrorReporting.SendError RPC; the platform turns a
+// message of the form "the '<provider>' provider crashed (resource=...,
+// field=...)" into a dedicated provider.crashed record) and logs one warning
+// line per distinct message, all without treating the asset as failed. CriticalErrors()
+// fires while execution continued, so the asset commonly still has a real
+// (if incomplete) report from AddReport.
+//
+// AddScanError is deliberately not used here: AggregateReporter keeps
+// assetReports and assetErrors in separate maps, so the report is not
+// dropped, but Reports().Result.Full.Errors would gain an entry for this
+// asset and apps/cnspec/cmd/scan.go exits non-zero whenever that map is
+// non-empty (`if len(report.Errors) > 0 { os.Exit(1) }`) -- flipping the
+// run's exit code for what is otherwise a successful scan.
+//
+// Deduped and capped via the shared policy/scanwarnings package (Max 20,
+// MaxLen 1 KiB): mql already collapses repeated failures on one crashed
+// provider into a single CriticalErrors() entry, but a scan can hit more
+// than one crashed provider, and an older mql build may not dedup at all
+// (cnspec pins mql versions independently, so this cannot assume the dedup
+// landed). Without this cap, one crash storm on a single asset could send
+// one health.ReportError call per field instead of one per distinct crash
+// message.
+func reportCriticalErrors(asset *inventory.Asset, errs []error) {
+	if len(errs) == 0 {
+		return
+	}
+
+	warnings := scanwarnings.DedupeAndCap(errs)
+	if len(warnings) == 0 {
+		return
+	}
+
+	tags := map[string]string{
+		"assetMrn":  asset.Mrn,
+		"assetName": asset.Name,
+	}
+	if asset.Platform != nil {
+		tags["platformIDs"] = strings.Join(asset.PlatformIds, ",")
+		tags["assetPlatform"] = asset.Platform.Name
+		tags["assetPlatformVersion"] = asset.Platform.Version
+	}
+	for _, msg := range warnings {
+		// Each report gets its own copy, so a reporter that keeps or mutates
+		// the map can't affect the next one.
+		reportErrorFn("cnspec", cnspec.Version, cnspec.Build, msg, maps.Clone(tags))
+		log.Warn().Str("asset", asset.Name).Str("assetMrn", asset.Mrn).Msg(msg)
+	}
+}
+
+// logResourceStats emits memory diagnostics after an asset scan completes.
+// Only called when DEBUG_PROVIDER_MEMORY is set.
+//
+// Reads the run's ResourceTracker rather than sampling independently, so the
+// logged numbers and the numbers reported upstream cannot disagree.
+func (d *scanDispatcher) logResourceStats(asset *inventory.Asset) {
+	peakBytes, peakGoroutines, inFlightAtPeak := d.resourceTracker.Peaks()
+	snap := d.resourceTracker.Snapshot()
+
+	ev := log.Info().
+		Str("asset", asset.Name).
+		Int64("scanned_assets", d.scannedAssets.Load()).
+		Int("goroutines", goruntime.NumGoroutine()).
+		Uint64("runtime_peak_mb", peakBytes/1024/1024).
+		Int("goroutines_peak", peakGoroutines).
+		Int("in_flight_at_peak", inFlightAtPeak)
+
+	// Current footprint and cgroup readings, best-effort: absent rather
+	// than zero when they could not be measured, matching the upstream
+	// metrics this diagnostic is read alongside.
+	if snap.HasRuntime {
+		ev = ev.Uint64("runtime_mb", snap.RuntimeBytes/1024/1024)
+	}
+	if snap.HasCgroupCurrent {
+		ev = ev.Uint64("cgroup_current_mb", snap.CgroupCurrent/1024/1024)
+	}
+	if snap.HasCgroupMax {
+		ev = ev.Uint64("cgroup_max_mb", snap.CgroupMax/1024/1024)
+	}
+	if snap.HasCPU {
+		ev = ev.Float64("cpu_busy_seconds", snap.CPUBusySeconds)
+	}
+
+	ev.Msg("resource usage after asset scan")
+
+	if ar, ok := d.reporter.(*AggregateReporter); ok {
+		rptBytes, rpBytes, vrBytes, aBytes := ar.AccumulatedBytes()
+		log.Info().
+			Int("reports", rptBytes).
+			Int("resolved_policies", rpBytes).
+			Int("vuln_reports", vrBytes).
+			Int("assets", aBytes).
+			Int("total", rptBytes+rpBytes+vrBytes+aBytes).
+			Msg("reporter accumulated bytes")
+	}
+}
+
+// reportPanic captures panics from scan goroutines and reports them.
+func (d *scanDispatcher) reportPanic(tracked *discovery.TrackedAsset) {
+	health.ReportPanic("cnspec", cnspec.Version, cnspec.Build, func(product, version, build string, r any, stacktrace []byte) {
+		opts, err := config.Read()
+		if err != nil {
+			log.Error().Err(err).Msg("failed to read config")
+			return
+		}
+
+		serviceAccount := opts.GetServiceCredential()
+		if serviceAccount == nil {
+			log.Error().Msg("no service account configured")
+			return
+		}
+
+		tags := map[string]string{
+			"spaceMrn": d.spaceMrn,
+		}
+		if tracked != nil && tracked.Asset != nil {
+			tags["assetMrn"] = tracked.Asset.Mrn
+			tags["assetName"] = tracked.Asset.Name
+			tags["platformIDs"] = strings.Join(tracked.Asset.PlatformIds, ",")
+			if tracked.Asset.Platform != nil {
+				tags["assetPlatform"] = tracked.Asset.Platform.Name
+				tags["assetPlatformVersion"] = tracked.Asset.Platform.Version
+			}
+		}
+
+		event := &health.SendErrorReq{
+			ServiceAccountMrn: opts.ServiceAccountMrn,
+			AgentMrn:          opts.AgentMrn,
+			Product: &health.ProductInfo{
+				Name:    product,
+				Version: version,
+				Build:   build,
+			},
+			Error: &health.ErrorInfo{
+				Message:    "panic: " + fmt.Sprintf("%v", r),
+				Stacktrace: string(stacktrace),
+			},
+			// Send asset identification as structured tags so the platform
+			// can attribute the panic to a specific asset, rather than
+			// burying the map in the message string.
+			Tags: tags,
+		}
+
+		sendErrorToMondooPlatform(serviceAccount, event)
+		log.Info().Msg("reported panic to Mondoo Platform")
+	})
+}
+
+// inFlight reports how many assets are currently scanning. scanSem is a
+// buffered channel used as a semaphore, so its length is the number of
+// held slots. Read by the memory sampler to record the concurrency a peak
+// occurred at — a peak without its denominator cannot be compared.
+func (d *scanDispatcher) inFlight() int {
+	return len(d.scanSem)
+}

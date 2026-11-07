@@ -1,0 +1,588 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+policies:
+  - uid: mondoo-atlassian-security
+    name: Mondoo Atlassian Security
+    version: 1.0.3
+    license: BUSL-1.1
+    tags:
+      mondoo.com/category: security
+      mondoo.com/platform: atlassian,saas
+      mondoo.com/icon: atlassian
+    require:
+      - provider: atlassian
+    authors:
+      - name: Mondoo, Inc.
+        email: hello@mondoo.com
+    summary: Detect high and critical security issues in Atlassian Cloud organizations, Jira projects, and Confluence spaces
+    docs:
+      desc: |
+        The Mondoo Atlassian Security policy identifies high and critical misconfigurations across Atlassian Cloud — the organization-level administrative surface, Jira project permissions, and Confluence space access — that could expose data to the public internet, hand long-lived credentials to attackers, or leave dormant accounts available for takeover.
+
+        This policy focuses on findings with realistic exploit chains rather than best-practice hardening, so each check maps to a tangible compromise scenario such as anonymous read access to a wiki, unauthenticated permission grants on a project, or an API token that has been valid and unused for months.
+
+        Checks are organized by Atlassian connection type:
+
+        - **Atlassian Admin** — organization-wide controls including IP allowlists, verified domains, dormant managed users, and stale API tokens.
+        - **Atlassian Jira** — project permission schemes that grant access to unauthenticated callers.
+        - **Atlassian Confluence** — spaces that expose content to anonymous or unlicensed users.
+
+        Two configurable properties, `mondooAtlassianSecurityMaxApiTokenInactivityDays` and `mondooAtlassianSecurityMaxManagedUserInactivityDays`, set the inactivity thresholds for API tokens and managed users so the policy can match your organization's access-review cadence.
+
+        Learn more about scanning Atlassian in the [cnspec Atlassian documentation](https://mondoo.com/docs/cnspec/saas/atlassian).
+
+        Have suggestions for new checks in this policy? Visit our [cnspec repository](https://github.com/mondoohq/cnspec).
+    groups:
+      - title: Atlassian Admin
+        filters: asset.platform == "atlassian-admin"
+        checks:
+          - uid: mondoo-atlassian-security-admin-ip-allowlist-enabled
+          - uid: mondoo-atlassian-security-admin-verified-domains-configured
+          - uid: mondoo-atlassian-security-admin-no-stale-api-tokens
+          - uid: mondoo-atlassian-security-admin-no-dormant-managed-users
+      - title: Atlassian Jira
+        filters: asset.platform == "atlassian-jira"
+        checks:
+          - uid: mondoo-atlassian-security-jira-no-anonymous-permission-grants
+      - title: Atlassian Confluence
+        filters: asset.platform == "atlassian-confluence"
+        checks:
+          - uid: mondoo-atlassian-security-confluence-no-anonymous-space-access
+          - uid: mondoo-atlassian-security-confluence-no-unlicensed-space-access
+    scoring_system: highest impact
+queries:
+  - uid: mondoo-atlassian-security-admin-ip-allowlist-enabled
+    title: Ensure an IP allowlist policy is enabled on the Atlassian organization
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: false
+      compliance/dora: false
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: false
+      compliance/nist-csf-1: false
+      compliance/nist-csf-2: false
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-3
+      compliance/nist-sp-800-171: false
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-1-6
+      compliance/vda-isa-5: false
+    mql: |
+      atlassian.admin.organization.policies.any(policyType == "ip-allowlist" && status == "enabled")
+    docs:
+      desc: |
+        This check verifies that the Atlassian organization restricts product access to a list of approved source addresses.
+
+        An IP allowlist names the network ranges from which Atlassian Cloud products accept traffic, and it is evaluated before any credential is examined. You create one at admin.atlassian.com under **Security > IP allowlists**, name it, add the ranges of corporate offices, VPN exit nodes, and approved cloud egress points, then apply it to the products you want to protect. This check requires at least one allowlist on the organization whose status is enabled. Jira, Jira Service Management, Confluence, and Compass need a Premium plan for the feature, and Atlassian Analytics needs Enterprise.
+
+        **Why this matters**
+
+        With no allowlist, every Atlassian Cloud product answers requests from any address on the public internet. An attacker who phishes an employee password or lifts an API token out of a CI job log signs in from their own machine, opens Jira, and reads the issue history of every project that account can see. Nothing about the request looks unusual, because there is no location the product considers wrong.
+
+        An allowlist removes the entire pool of internet-based attackers before authentication runs. A password-spray campaign against your organization never reaches the credential check, so the stolen password stays useless outside your networks and the token found in a public repository cannot be replayed from a hosting provider.
+
+        Sign-ins also become predictable. When every successful authentication originates from a small set of known ranges, a source address outside them stands out in the audit log instead of blending into ordinary traffic.
+
+        Activation takes effect immediately and denies every source outside the listed ranges, so confirm your own egress address falls inside a range before you enable it, and list VPN exit ranges rather than individual home addresses. An organization with no stable egress, such as a fully remote workforce on residential connections, should reach the same goal through identity and device conditions instead.
+      audit: |
+        ### Audit via Atlassian Admin
+
+        1. Sign in to [admin.atlassian.com](https://admin.atlassian.com) as an organization administrator.
+        2. Select your organization.
+        3. Open **Security > IP allowlists**.
+        4. Confirm that at least one allowlist is configured and that its status is enabled.
+
+        A passing result shows at least one IP allowlist with an enabled status; a failing result shows no IP allowlist or every configured allowlist disabled.
+
+        ### Audit via API
+
+        Query the Atlassian Admin API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $ATLASSIAN_ADMIN_TOKEN" \
+          "https://api.atlassian.com/admin/v1/orgs/$ORG_ID/policies?type=ip-allowlist"
+        ```
+
+        A passing response includes at least one policy where `attributes.type` is `ip-allowlist` and `attributes.status` is `enabled`; a failing response returns no such policy or only policies whose status is `disabled`.
+      remediation:
+        - id: console
+          desc: |
+            To enable an IP allowlist on your Atlassian organization:
+
+            1. Confirm the products you want to protect are on a plan that supports IP allowlists. Jira, Jira Service Management, Confluence, and Compass require a Premium plan, and Atlassian Analytics requires an Enterprise plan.
+            2. Sign in to [admin.atlassian.com](https://admin.atlassian.com) as an organization administrator.
+            3. Select your organization.
+            4. Open **Security > IP allowlists**.
+            5. Select **IP allowlist**, name the allowlist, and add the IP ranges of corporate offices, VPN exit nodes, and approved cloud egress points.
+            6. Apply the allowlist to the products you want to protect and select **Create allowlist**.
+            7. Before activating, confirm your own egress IP is covered. Activation takes effect immediately and denies every source outside the listed ranges, so an allowlist that omits the address you are currently connecting from will lock you out the moment it becomes enabled. From the network you administer from, check your public egress address and verify it falls inside one of the ranges you added. If you connect through a corporate VPN, list the VPN exit ranges rather than your local address, because your apparent source IP is the VPN exit. Account for every administrator's network so no one is stranded.
+            8. Select **Activate IP allowlist** so the policy status changes to enabled. An allowlist that is created but never activated does not restrict access.
+
+            If you do lock yourself out, an organization administrator on a still-allowed network can sign in and correct the ranges. If no administrator can reach the console, open a case with Atlassian Support to restore access, because the allowlist cannot be edited from a blocked address.
+    refs:
+      - url: https://support.atlassian.com/security-and-access-policies/docs/specify-ip-addresses-for-product-access/
+        title: Specify IP addresses for product access
+      - url: https://developer.atlassian.com/cloud/admin/organization/rest/intro/
+        title: Atlassian organization REST API
+  - uid: mondoo-atlassian-security-admin-verified-domains-configured
+    title: Ensure the Atlassian organization has at least one verified domain
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: false
+      compliance/dora: false
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-5-16
+      compliance/nis-2: false
+      compliance/nist-csf-1: false
+      compliance/nist-csf-2: false
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-12
+      compliance/nist-sp-800-171: false
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: false
+    mql: |
+      atlassian.admin.organization.domains.any(type == "verified")
+    docs:
+      desc: |
+        This check verifies that the Atlassian organization has proven ownership of at least one email domain.
+
+        Domain verification is how Atlassian confirms that your organization controls an email namespace before it will let you assert policy over the accounts inside it. You add the domain at admin.atlassian.com under **Directory > Domains** and prove control with a DNS TXT record, an HTML file in the root folder of the domain's website, or a connected identity provider such as Google Workspace or Microsoft Entra ID. This check requires at least one domain whose claim status is verified.
+
+        **Why this matters**
+
+        Verification is the gate on managed accounts, and managed accounts are the only ones your organization governs. Without a verified domain, single sign-on, password policy, session length, and account deactivation apply to nobody. Every employee holding an Atlassian account at your domain holds a personal account that happens to have your logo on it.
+
+        That gap is what an attacker uses. An unmanaged account signs in with an email address and password directly, bypassing whatever multi-factor requirement your identity provider enforces, so a password recovered from an unrelated breach is enough to read the Jira projects and Confluence spaces the person belongs to. When that person leaves the company, the organization has no button that turns their access off, so the account and its session keep working long after the badge is returned.
+
+        Verification also closes the offboarding gap in the other direction. Once the domain is claimed you can see every account at it, including accounts an employee created without telling anyone.
+
+        After the domain shows as verified, claim the accounts at it from the same page. Claiming is disruptive, because it converts existing personal accounts at the domain into managed accounts your organization governs and may be billed for, so review the account list and communicate the change before you proceed.
+      audit: |
+        ### Audit via Atlassian Admin
+
+        1. Sign in to [admin.atlassian.com](https://admin.atlassian.com) as an organization administrator.
+        2. Select your organization.
+        3. Open **Directory > Domains**.
+        4. Review the domain list and the verification status next to each entry.
+
+        A passing result shows at least one domain marked as verified; a failing result shows no verified domains or only domains in a pending or failed state.
+
+        ### Audit via API
+
+        Query the Atlassian Admin API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $ATLASSIAN_ADMIN_TOKEN" \
+          "https://api.atlassian.com/admin/v1/orgs/$ORG_ID/domains"
+        ```
+
+        A passing response includes at least one entry whose `attributes.claim.status` is `verified`; a failing response shows no entry whose claim status is `verified`.
+      remediation:
+        - id: console
+          desc: |
+            To verify a domain on your Atlassian organization:
+
+            1. Sign in to [admin.atlassian.com](https://admin.atlassian.com) as an organization administrator.
+            2. Select your organization.
+            3. Open **Directory > Domains** and select **Add domain**.
+            4. Enter the domain name and choose a verification method: copy a TXT record to your DNS, upload an HTML file to the root folder of the domain's website, or verify through a connected identity provider such as Google Workspace or Microsoft Entra ID.
+            5. Publish the verification record or file, then return to the page and complete verification.
+            6. After the domain shows as verified, stay on **Directory > Domains** and select **Claim accounts** to bring existing and future accounts at the domain under organization control. Claiming accounts is disruptive: every existing Atlassian account at the domain, including personal accounts an employee may have created for non-work use, is converted into a managed account that your organization governs and may be billed for. Review the list of accounts that will be claimed first, communicate the change to affected users, and confirm the billing impact before you proceed, because claiming converts accounts in bulk and there is no per-account undo.
+    refs:
+      - url: https://support.atlassian.com/user-management/docs/verify-a-domain-to-manage-accounts/
+        title: Verify a domain to manage accounts
+      - url: https://support.atlassian.com/organization-administration/docs/get-started-with-an-atlassian-organization/
+        title: Create an Atlassian organization
+  - uid: mondoo-atlassian-security-admin-no-stale-api-tokens
+    title: Ensure no managed-account API tokens are stale
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: false
+      compliance/dora: false
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-5-17
+      compliance/nis-2: false
+      compliance/nist-csf-1: false
+      compliance/nist-csf-2: false
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/nist-sp-800-171: false
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-1-9
+      compliance/vda-isa-5: false
+    props:
+      - uid: mondooAtlassianSecurityMaxApiTokenInactivityDays
+        title: Maximum number of days a managed-account API token may go unused before it is considered stale
+        mql: |
+          return 90
+    mql: |
+      atlassian.admin.organization.managedUsers
+        .where(type == "atlassian" && status == "active")
+        .all(
+          apiTokens.all(
+            lastAccess != null &&
+            time.now - lastAccess < props.mondooAtlassianSecurityMaxApiTokenInactivityDays * time.day
+          )
+        )
+    docs:
+      desc: |
+        This check verifies that every API token belonging to an active managed Atlassian account has been used recently.
+
+        API tokens authenticate REST calls with the full access of the account that created them. Atlassian records the last use of each one, and **Insights > API token activity** at admin.atlassian.com lists every token a managed account holds together with its creation date, expiry, and last-used date. This check compares that last-used timestamp against an inactivity threshold you set as a policy property in days, and fails a token that has never been used or has gone unused for longer than the threshold.
+
+        **Why this matters**
+
+        A token nobody has used in months is almost never a token somebody is carefully looking after. It is the one pasted into a shell script on a laptop that was replaced, committed to a repository before the team started scanning history, or left in the environment of a build agent that was decommissioned without anyone revoking its credentials.
+
+        An attacker who finds one gets the same reach as the person it belongs to, with none of the friction. The token is presented with basic authentication and is never challenged for a second factor, so multi-factor enrollment on the account does not slow the attacker down. They page through the Jira and Confluence REST APIs and pull every issue, comment, attachment, and page the owner can read. Because there is no interactive sign-in, none of it produces the sign-in event that an anomalous login would.
+
+        Atlassian tokens do not expire on their own, so this state persists indefinitely until someone revokes the token.
+
+        Revocation is permanent and immediately breaks any integration still using the token, so contact the owner of any token whose purpose is unclear before revoking it, and issue a replacement only where there is a documented active use case.
+      audit: |
+        ### Audit via Atlassian Admin
+
+        1. Sign in to [admin.atlassian.com](https://admin.atlassian.com) as an organization administrator.
+        2. Select your organization.
+        3. Open **Insights > API token activity** to list every API token created by managed accounts, including when each token was created, when it expires, and when it was last used.
+        4. Review the last-used date for every token.
+
+        A passing result shows every API token with a last-used date inside your configured threshold; a failing result shows a token whose last activity falls outside the threshold or has never been recorded.
+
+        ### Audit via API
+
+        Query the Atlassian Admin API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $ATLASSIAN_ADMIN_TOKEN" \
+          "https://api.atlassian.com/users/$ACCOUNT_ID/manage/api-tokens"
+        ```
+
+        A passing response shows every token with a `lastAccess` timestamp inside your configured inactivity threshold; a failing response shows a token whose `lastAccess` is older than the threshold or absent.
+      remediation:
+        - id: console
+          desc: |
+            To revoke stale API tokens:
+
+            1. Sign in to [admin.atlassian.com](https://admin.atlassian.com) as an organization administrator.
+            2. Select your organization.
+            3. Open **Insights > API token activity** to list every API token created by managed accounts, including when each token was created, when it expires, and when it was last used.
+            4. For each token whose last activity falls outside your threshold, select **Revoke**.
+            5. Revocation is permanent and immediately breaks any integration still using the token, so notify the owner of any token whose purpose is unclear before revoking, and issue a replacement token only when there is a documented active use case.
+        - id: api
+          desc: |
+            To revoke a managed-account API token via the Atlassian Admin API:
+
+            ```bash
+            curl -s -X DELETE -H "Authorization: Bearer $ATLASSIAN_ADMIN_TOKEN" \
+              "https://api.atlassian.com/users/$ACCOUNT_ID/manage/api-tokens/$TOKEN_ID"
+            ```
+
+            Repeat for each stale `tokenId` returned by the audit query above.
+    refs:
+      - url: https://support.atlassian.com/atlassian-account/docs/manage-api-tokens-for-your-atlassian-account/
+        title: Manage API tokens for your Atlassian account
+      - url: https://developer.atlassian.com/cloud/admin/user-management/rest/api-group-api-tokens/
+        title: Atlassian Admin API tokens REST API
+  - uid: mondoo-atlassian-security-admin-no-dormant-managed-users
+    title: Ensure no active managed accounts are dormant
+    impact: 75
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: false
+      compliance/dora: false
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-5-18
+      compliance/nis-2: false
+      compliance/nist-csf-1: false
+      compliance/nist-csf-2: false
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-2
+      compliance/nist-sp-800-171: false
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-1-9
+      compliance/vda-isa-5: false
+    props:
+      - uid: mondooAtlassianSecurityMaxManagedUserInactivityDays
+        title: Maximum number of days an active managed account may go unused before it is considered dormant
+        mql: |
+          return 90
+    mql: |
+      atlassian.admin.organization.managedUsers
+        .where(type == "atlassian" && status == "active")
+        .all(
+          lastActive != null &&
+          time.now - lastActive < props.mondooAtlassianSecurityMaxManagedUserInactivityDays * time.day
+        )
+    docs:
+      desc: |
+        This check verifies that every managed Atlassian account still marked active has actually been used recently.
+
+        Atlassian records a last active date for each managed account, and the CSV export from **Directory > Managed accounts** at admin.atlassian.com carries that date for every account in the organization. This check reads it for accounts of type Atlassian whose status is active, compares it against an inactivity threshold you set as a policy property in days, and fails any account that has been idle longer than the threshold or has no recorded activity at all.
+
+        **Why this matters**
+
+        Deactivating an account removes its access. Leaving it active and unused does not. A dormant account keeps its group memberships, its Jira project roles, its Confluence space permissions, and any API tokens it issued, so the access is exactly what it was on the person's last working day.
+
+        What is missing is the owner. Nobody signs in to the account, so nobody notices when someone else does. An attacker who lands the account's password from a credential-stuffing list gets no complaint from a real user about a strange login prompt, no report of a session appearing on an unfamiliar device, and no colleague wondering why that person is suddenly reading a project they left two years ago. They browse the same issues and pages the account always could, at whatever pace avoids attention.
+
+        Dormancy usually points at an offboarding that stopped halfway, where the identity provider entry was removed but the Atlassian account was never deactivated. It also inflates the license count and buries genuinely risky access in a long list of accounts nobody uses.
+
+        Some accounts legitimately transact rarely, such as a break-glass administrator or a seasonal contractor. Confirm with the owning team, then either deactivate the account or record the justification and schedule a follow-up review.
+      audit: |
+        ### Audit via Atlassian Admin
+
+        1. Sign in to [admin.atlassian.com](https://admin.atlassian.com) as an organization administrator.
+        2. Select your organization.
+        3. Open **Directory > Managed accounts** and export the account list to CSV. The export includes each account's last active date.
+        4. In the export, review every account whose type is Atlassian and whose status is active.
+
+        A passing result shows every active managed account with a last active date inside the configured threshold; a failing result shows an active account whose last activity falls outside the threshold or has never been recorded.
+
+        ### Audit via API
+
+        Query the Atlassian Admin API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $ATLASSIAN_ADMIN_TOKEN" \
+          "https://api.atlassian.com/admin/v1/orgs/$ORG_ID/users"
+        ```
+
+        A passing response shows every entry with `account_type` `atlassian` and `account_status` `active` whose `last_active` timestamp is inside the configured inactivity threshold; a failing response shows such an account whose `last_active` is older than the threshold or null.
+      remediation:
+        - id: console
+          desc: |
+            To deactivate dormant managed accounts:
+
+            1. Sign in to [admin.atlassian.com](https://admin.atlassian.com) as an organization administrator.
+            2. Select your organization.
+            3. Open **Directory > Managed accounts**.
+            4. For each flagged account, confirm with the account owner or owning team whether the account is still required.
+            5. For accounts that are no longer needed, open the account, choose **Deactivate account**, and confirm.
+            6. For accounts that must remain, document the business justification and schedule a follow-up review.
+    refs:
+      - url: https://support.atlassian.com/user-management/docs/deactivate-a-managed-account/
+        title: Deactivate a managed account
+      - url: https://support.atlassian.com/organization-administration/docs/get-started-with-an-atlassian-organization/
+        title: Create an Atlassian organization
+  - uid: mondoo-atlassian-security-jira-no-anonymous-permission-grants
+    title: Ensure no Jira project permission scheme grants permission to anyone
+    impact: 90
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: false
+      compliance/dora: false
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-3
+      compliance/nis-2: false
+      compliance/nist-csf-1: false
+      compliance/nist-csf-2: false
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-22
+      compliance/nist-sp-800-171: false
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: false
+    mql: |
+      atlassian.jira.projects.all(
+        permissionScheme.grants.none(holderType == "anyone")
+      )
+    docs:
+      desc: |
+        This check verifies that no Jira project grants a permission to unauthenticated visitors.
+
+        Every permission in a Jira permission scheme is granted to a holder, and Jira offers one holder type, anyone, that means exactly what it says: the permission applies to callers with no Atlassian account at all. You review the holders under **Settings > Issues > Permission schemes** in your Jira site. This check requires every grant in every project's scheme to name an authenticated holder instead, such as a user, group, project role, application role, assignee, reporter, or project lead.
+
+        **Why this matters**
+
+        A Browse Projects permission granted to anyone turns the project into a public archive. Someone who has your site URL and guesses a project key reads every issue in it without signing in, and issue trackers are where teams paste the things they would never put in a document: stack traces with internal hostnames, customer names attached to bug reports, screenshots of admin consoles, and the occasional token dropped into a comment while debugging. The attacker does not need to break anything, because nothing is asking who they are.
+
+        Grants that carry write access are worse still. Create Issues held by anyone hands the open internet a way to inject content into a workspace employees trust, which is a serviceable delivery route for a link that staff will open because it arrived in a familiar tool.
+
+        Anonymous actions also carry no identity, so the audit log records that something happened without recording who did it. After the fact you cannot tell which issues were read or by whom.
+
+        If content genuinely needs to be reachable without a login, expose it through a service desk portal that still identifies the requester, rather than opening a project permission to anyone.
+      audit: |
+        ### Audit via Jira Admin
+
+        1. Sign in to your Jira site as a Jira administrator.
+        2. Open **Settings (cog) > Issues > Permission schemes**.
+        3. Open each permission scheme attached to a project.
+        4. Review the holders for each permission and confirm none of them are set to anyone.
+
+        A passing result shows every permission scheme using named holders such as groups, project roles, or application roles; a failing result shows at least one permission whose holder is anyone.
+
+        ### Audit via API
+
+        Query the Jira REST API and inspect the result:
+
+        ```bash
+        curl -s -u "$ATLASSIAN_USER:$ATLASSIAN_USER_TOKEN" \
+          "https://$ATLASSIAN_HOST/rest/api/3/permissionscheme?expand=permissions"
+        ```
+
+        A passing response shows every entry under `permissions[].holder.type` set to a named holder type (`user`, `group`, `projectRole`, `applicationRole`, `assignee`, `reporter`, `projectLead`); a failing response shows at least one entry where `holder.type` is `anyone`.
+      remediation:
+        - id: console
+          desc: |
+            To remove anonymous grants from a Jira permission scheme:
+
+            1. Sign in to your Jira site as a Jira administrator.
+            2. Open **Settings > Issues > Permission schemes**.
+            3. Open the permission scheme flagged by the audit.
+            4. For each permission whose grant is set to anyone, select **Remove** to delete the grant.
+            5. Select **Grant permission** and re-grant the same permission to an authenticated audience such as **Any logged in user**, a specific group, or a project role.
+            6. Confirm the change and re-run the audit to verify no anonymous grants remain.
+    refs:
+      - url: https://support.atlassian.com/jira-cloud-administration/docs/what-are-permission-schemes-in-jira/
+        title: What are permission schemes in Jira?
+      - url: https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-permission-schemes/
+        title: Jira Cloud permission schemes REST API
+  - uid: mondoo-atlassian-security-confluence-no-anonymous-space-access
+    title: Ensure no Confluence space allows anonymous access
+    impact: 95
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: false
+      compliance/dora: false
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-5-15
+      compliance/nis-2: false
+      compliance/nist-csf-1: false
+      compliance/nist-csf-2: false
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-22
+      compliance/nist-sp-800-171: false
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: false
+    mql: |
+      atlassian.confluence.spaces.none(anonymousAccess == true)
+    docs:
+      desc: |
+        This check verifies that no Confluence space is readable without signing in.
+
+        Anonymous access is a per-space setting that grants permissions to visitors with no account. A space administrator finds it under **Space settings > Space access > Anonymous access**, and a Confluence administrator can additionally turn off the global setting that allows spaces to enable it at all. This check reads the per-space configuration, so the permissions granted to the anonymous principal must be cleared on each affected space even when the site-wide setting is already off.
+
+        **Why this matters**
+
+        A space with anonymous access is a public website, and the people writing in it do not know that. Confluence is where the runbook with the recovery procedure lives, where the architecture page names the internal hostnames, where onboarding docs walk a new hire through bootstrapping their credentials, and where a postmortem describes exactly how a control failed.
+
+        Reaching that content takes no attack. A page URL leaks in a support ticket, a partner email, or a search engine index, and the attacker follows it, then walks the space tree from there. They learn your internal topology and your escalation paths before touching anything you would recognize as an intrusion, and that reading is the reconnaissance phase of the intrusion that follows.
+
+        Anonymous reads produce no attributable audit entry, so after the exposure is found you cannot say which pages were taken or when. Search engines compound this: once a page has been crawled it may stay reachable from cached results long after the permission is corrected.
+
+        If a space genuinely must be public, that is a publishing decision rather than a permission tweak. Move the content to a dedicated documentation site where it is reviewed as external material, and leave the internal instance closed.
+      audit: |
+        ### Audit via Confluence Admin
+
+        1. Sign in to your Confluence site as a Confluence administrator.
+        2. Open **Settings (cog) > Space permissions** (or open a space and select **Space settings > Permissions**).
+        3. For each space, review the **Anonymous Access** section.
+        4. Confirm no permission is granted to the anonymous principal.
+
+        A passing result shows every space with anonymous access disabled and no permission entries for the anonymous principal; a failing result shows at least one space where the anonymous principal holds any permission.
+
+        ### Audit via API
+
+        Query the Confluence REST API and inspect the result:
+
+        ```bash
+        curl -s -u "$ATLASSIAN_USER:$ATLASSIAN_USER_TOKEN" \
+          "https://$ATLASSIAN_HOST/wiki/rest/api/space?expand=permissions"
+        ```
+
+        A passing response shows every space with no permission entry whose `anonymousAccess` flag is true; a failing response shows at least one space granting any operation to the anonymous subject.
+      remediation:
+        - id: console
+          desc: |
+            To remove anonymous access from a Confluence space:
+
+            1. Sign in to your Confluence site as an administrator of the flagged space.
+            2. In the sidebar next to the space name, select **More actions**, then **Space settings**.
+            3. Open **Space access > Anonymous access**.
+            4. Select **Edit**, clear every permission granted to anonymous users, and save.
+            5. Re-run the audit to confirm no permissions remain for the anonymous principal. The space-level permissions must be cleared even if site-wide anonymous access is turned off, because the space configuration is what this check inspects.
+            6. To stop space administrators from re-enabling public access, sign in as a Confluence administrator and turn off the global setting that allows spaces to turn on anonymous access.
+            7. If the space must remain publicly readable, document the business justification and move the content to a dedicated public documentation site instead of leaving it inside an internal Confluence instance.
+    refs:
+      - url: https://support.atlassian.com/confluence-cloud/docs/add-change-or-remove-peoples-access-from-your-space/
+        title: Add, change, or remove people's access from your space
+      - url: https://developer.atlassian.com/cloud/confluence/rest/v1/api-group-space/
+        title: Confluence Cloud spaces REST API
+  - uid: mondoo-atlassian-security-confluence-no-unlicensed-space-access
+    title: Ensure no Confluence space grants access to unlicensed users
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: false
+      compliance/dora: false
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-3
+      compliance/nis-2: false
+      compliance/nist-csf-1: false
+      compliance/nist-csf-2: false
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-3
+      compliance/nist-sp-800-171: false
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: false
+    mql: |
+      atlassian.confluence.spaces.none(unlicensedAccess == true)
+    docs:
+      desc: |
+        This check verifies that no Confluence space is exposed to users who hold no Confluence license.
+
+        Unlicensed access is how Jira Service Management shows Confluence pages to portal customers through a linked knowledge base. It is configured per service project under **Project settings > Knowledge base**, where the **Who can view** option decides whether reading requires access to the linked space or is open to portal users without a Confluence license, and it can be turned off site-wide from the **JSM Access** tab in Confluence settings. This check requires no space to report unlicensed access.
+
+        **Why this matters**
+
+        Portal customers are outside your organization, but this route does not look like external sharing to anyone involved. The person who wrote the escalation runbook assumed licensed colleagues were reading it. The service desk administrator who linked the knowledge base was trying to reduce ticket volume. Neither decision, on its own, reads as publishing internal documentation to customers.
+
+        An attacker takes the shortest path in. Many service desks accept self-signup or accept any address at a partner domain, so obtaining a portal account is a form submission rather than a compromise. From there the linked space opens, and its pages give up internal escalation contacts, vendor account details, and writeups of known weaknesses that have not been fixed yet. That is targeting material for the social-engineering call that follows.
+
+        These reads scope through the portal rather than through space membership, so they do not surface in the usual access review of who belongs to a space. The exposure stays invisible to the review that was supposed to catch it.
+
+        Where portal customers genuinely need documentation, link a dedicated customer-facing space whose pages are written and reviewed as external collateral, instead of relaxing access on a space the internal teams treat as private.
+      audit: |
+        ### Audit via Confluence Admin
+
+        1. Sign in to your Confluence site as a Confluence administrator.
+        2. Open the flagged space and select **Space settings > Permissions**.
+        3. Review the section that lists access for **Unlicensed users** (for example, the JSM customer subject type).
+        4. Confirm no permission is granted to unlicensed users.
+
+        A passing result shows every internal space with unlicensed access disabled; a failing result shows at least one space granting any permission to an unlicensed-user subject.
+
+        ### Audit via API
+
+        Query the Confluence REST API and inspect the result:
+
+        ```bash
+        curl -s -u "$ATLASSIAN_USER:$ATLASSIAN_USER_TOKEN" \
+          "https://$ATLASSIAN_HOST/wiki/rest/api/space?expand=permissions"
+        ```
+
+        A passing response shows every space with no permission whose subject corresponds to an unlicensed user audience; a failing response shows at least one space granting any operation to such a subject.
+      remediation:
+        - id: console
+          desc: |
+            To remove unlicensed-user access from a Confluence space:
+
+            1. Identify each Jira Service Management project whose knowledge base links to the flagged space.
+            2. Sign in to Jira as a project administrator and open **Project settings > Knowledge base** in each of those service projects.
+            3. Next to the linked space, change **Who can view** so that viewing requires access to the linked Confluence space rather than allowing all logged-in users without a Confluence license.
+            4. Repeat for every service project linked to the flagged space, then re-run the audit to confirm the space no longer reports unlicensed access.
+            5. If no service project on the site should expose Confluence content to unlicensed users, a Confluence administrator can additionally open **Confluence settings**, select the **JSM Access** tab, and clear **Use Confluence**. This disables the knowledge base integration for the whole site, so confirm no team depends on it first.
+            6. If portal customers genuinely need documentation, link a dedicated customer-facing space whose content is reviewed and published as external collateral rather than relaxing access on internal spaces.
+    refs:
+      - url: https://support.atlassian.com/confluence-cloud/docs/add-change-or-remove-peoples-access-from-your-space/
+        title: Add, change, or remove people's access from your space
+      - url: https://support.atlassian.com/confluence-cloud/docs/give-access-to-unlicensed-users-from-jira-service-management/
+        title: Give access to unlicensed users from Jira Service Management

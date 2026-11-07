@@ -1,0 +1,683 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+policies:
+  - uid: mondoo-slack-security
+    name: Mondoo Slack Team Security
+    version: 1.6.3
+    license: BUSL-1.1
+    tags:
+      mondoo.com/category: security
+      mondoo.com/platform: slack-team,saas
+      mondoo.com/icon: slack
+    require:
+      - provider: slack
+    authors:
+      - name: Mondoo, Inc.
+        email: hello@mondoo.com
+    summary: Secure Slack workspace access and app permissions
+    docs:
+      desc: |
+        The Mondoo Slack Team Security policy identifies critical misconfigurations in Slack workspaces that could expose sensitive communications to unauthorized access. This policy helps organizations detect and remediate weaknesses before attackers can exploit them to leak data through external sharing, harvest credentials through phishing, or pivot from a compromised account into channels containing secrets, customer data, and operational details.
+
+        This policy provides security checks across key Slack workspace areas:
+
+        - Two-factor authentication requirements
+        - Session settings and idle timeouts
+        - External sharing and guest access policies
+        - App installation and OAuth permissions
+        - Channel naming patterns and external channel governance
+
+        This policy uses two configurable properties, `mondooSlackSecurityExternalChannelName` and `mondooSlackSecurityAllowListedDomains`, so you can match the naming and domain conventions in your workspace.
+
+        Learn more about scanning Slack in the [cnspec Slack documentation](https://mondoo.com/docs/cnspec/saas/slack).
+
+        Have suggestions for new checks in this policy? Visit our [cnspec repository](https://github.com/mondoohq/cnspec).
+    groups:
+      - title: Slack
+        filters: asset.family.contains('slack')
+        checks:
+          - uid: mondoo-slack-security-limit-admin-accounts
+          - uid: mondoo-slack-security-admins-secure-2fa-methods
+          - uid: mondoo-slack-security-use-strong-factors
+          - uid: mondoo-slack-security-name-external-channels
+          - uid: mondoo-slack-security-at-least-one-workspace-internal-channel
+          - uid: mondoo-slack-security-at-least-one-workspace-internal-channel-no-ext-members
+          - uid: mondoo-slack-domain-allowlisting-enforced-on-internal-channels
+          - uid: mondoo-slack-security-users-email-confirmed
+queries:
+  # No Terraform variants: workspace admin role assignment is not exposed by the
+  # pablovarela/slack Terraform provider (v1.2.x has only slack_conversation and
+  # slack_usergroup resources). The is_admin / is_owner state on a Slack user is managed
+  # via the UI or the Slack admin API, not as a Terraform-declared attribute, so HCL/plan/state
+  # cannot count or assert privileged accounts.
+  - uid: mondoo-slack-security-limit-admin-accounts
+    title: Ensure that between 2 and 4 users have admin permissions
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-05
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-2
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-5
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-2
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: |
+      slack.users.admins.length < 5 && slack.users.admins.length > 1
+    docs:
+      desc: |
+        This check verifies that the privileged group in the Slack workspace stays small without shrinking to a single person, between 2 and 4 accounts.
+
+        Slack account types are set from **Tools & settings > Manage members**, where filtering the member list by account type shows the Workspace Admins and Workspace Owners. Slack applies no upper or lower bound of its own, so the count drifts as people are promoted for a project and never moved back. This check counts the accounts holding those roles and requires the total to land between 2 and 4.
+
+        **Why this matters**
+
+        A workspace admin adds and removes members, installs and approves apps, invites guests, changes the workspace security settings, and on the plans that support it requests an export of workspace data. Every one of those accounts is therefore a full path to the workspace, and an attacker only needs the weakest of them. With a dozen admins there are a dozen people to phish, and the one who reused a password on a breached site decides the outcome for everyone.
+
+        What the attacker does next is the reason the count matters. Holding an admin account they turn off the workspace two-factor requirement, invite a single-channel guest they control, and install an app with broad scopes whose token keeps working after the compromised password is reset. Cutting the group to a handful of named people does not stop that, but it shrinks the target set to accounts you can watch closely.
+
+        One admin is a different failure. When that account is locked out or the person leaves, nobody can remove a compromised member, revoke a rogue app, or pull an export during an incident, and Slack's recovery path for a sole owner is measured in days.
+
+        On Enterprise Grid, org owners and org admins are managed separately from workspace roles, so review the org-level assignments alongside this count.
+      audit: |
+        ### Audit via Admin Settings
+
+        1. Sign in to your Slack workspace as an owner or admin.
+        2. Open **Tools & settings > Manage members**.
+        3. Filter the member list by **Account type** and select **Workspace Admins** and **Workspace Owners**.
+        4. Count the members shown.
+
+        A passing result shows between 2 and 4 members with the admin or owner role; a failing result shows 1 member or 5 or more members holding those roles.
+
+        ### Audit via API
+
+        Query the Slack Web API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $SLACK_TOKEN" \
+          "https://slack.com/api/users.list"
+        ```
+
+        A passing response lists between 2 and 4 members where `is_admin` or `is_owner` is `true`; a failing response shows fewer than 2 or more than 4 such members.
+      remediation: |
+        Adjust the number of members holding the admin or owner role so that between 2 and 4 accounts are privileged:
+
+        1. Sign in to your Slack workspace as a workspace owner.
+        2. Click your workspace name and open **Tools & settings > Manage members**.
+        3. Filter the member list by account type to show workspace admins and owners.
+        4. For each admin who no longer needs privileged access, click the three dots icon next to their name, select **Change account type**, and choose **Member**.
+        5. If only one account holds the admin or owner role, promote a trusted second member to admin using the same menu.
+
+        To learn more, read [Change a member's role](https://slack.com/help/articles/218124397-Change-a-members-role) in the Slack documentation.
+    refs:
+      - url: https://slack.com/help/articles/360004635551-Manage-channel-posting-permissions
+        title: Manage channel posting permissions
+      - url: https://slack.com/trust/security
+        title: 'Slack Security: Enterprise-grade Encryption'
+  # No Terraform variants: per-user 2FA configuration (has_2fa, two_factor_type) is runtime
+  # account state held by Slack — users enable 2FA from their own account settings. The
+  # pablovarela/slack provider exposes no user resource and no 2FA enforcement argument,
+  # so HCL/plan/state cannot evaluate this.
+  - uid: mondoo-slack-security-admins-secure-2fa-methods
+    title: Ensure that admins use the most secure 2FA method
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-14
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-j
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-3
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-4-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-2
+    mql: |
+      slack.users.admins.all(has2FA == true && twoFactorType == "app")
+    docs:
+      desc: |
+        This check verifies that every Slack administrator's second factor is an authentication app rather than a text message.
+
+        Slack accepts both SMS codes and authenticator apps as a second factor for email sign-in, and SMS stays available to members unless an owner removes it. A workspace owner restricts the method under **Admin > Workspace settings > Security**, where **Two-factor authentication for email sign-in** offers an authenticator apps only option. This check requires every admin and owner to have two-factor authentication enabled with the method recorded as an authentication app.
+
+        **Why this matters**
+
+        SMS is a second factor delivered by a third party you do not control. An attacker who already has an administrator's password calls the carrier, passes a knowledge check built from information that is largely public, and has the number ported to a device they hold. The next code Slack sends arrives on their phone. There is no malware, no phishing page after the first one, and nothing on the workspace side that looks different from a normal sign-in.
+
+        The same number is also reachable without touching the carrier's front desk, because the signaling network that routes messages between operators has long-standing weaknesses that allow interception outright.
+
+        An administrator is worth that effort. Once signed in, the attacker turns off the workspace two-factor requirement, invites a guest account they control into private channels, installs an app whose OAuth token survives the eventual password reset, and reads the conversation history in which teams paste credentials, customer records, and incident detail.
+
+        Restricting the method at the workspace level does not convert accounts that are already enrolled with SMS, so pair the setting with a pass over the current administrators. The 2FA column in **Manage members** is not shown on every plan and may be absent on Enterprise Grid, in which case identify affected administrators through the Slack API instead.
+      audit: |
+        ### Audit via Admin Settings
+
+        1. Sign in to your Slack workspace as an owner or admin.
+        2. Open **Tools & settings > Manage members**.
+        3. Filter the list to show **Workspace Admins** and **Workspace Owners**.
+        4. Review the **2FA** column for each administrator and confirm the method shown is an authentication app rather than SMS. On Enterprise Grid the **2FA** column may be absent, in which case use the API audit below.
+
+        A passing result shows every administrator using an authentication app for two-factor authentication; a failing result shows an administrator with two-factor authentication disabled or set to SMS.
+
+        ### Audit via API
+
+        Query the Slack Web API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $SLACK_TOKEN" \
+          "https://slack.com/api/users.list"
+        ```
+
+        A passing response shows every member with `is_admin` or `is_owner` set to `true` also having `has_2fa` set to `true` and `two_factor_type` set to `app`; a failing response shows an administrator with `has_2fa` false or `two_factor_type` set to `sms`.
+      remediation: |
+        Slack lets a workspace owner bar SMS as a second factor for the whole workspace, which is the durable fix. Enrolled accounts that already use SMS are not converted automatically, so pair the workspace setting with a pass over the existing administrators:
+
+        1. Sign in to your Slack workspace as a workspace owner.
+        2. Click **Admin** in the sidebar and select **Workspace settings**, then open the **Security** tab.
+        3. Next to **Two-factor authentication for email sign-in**, click **Edit**.
+        4. Select **Authenticator apps only** so members cannot use SMS for two-factor authentication, then click **Save**.
+        5. Open **Tools & settings > Manage members** and review the **2FA** column to identify administrators still using SMS or no second factor. The **2FA** column is not shown on every plan and may be absent on Enterprise Grid; when it is missing, use the API audit above to identify affected administrators.
+        6. Ask each affected administrator to open their [account settings](https://slack.com/account/settings), expand **Two-Factor Authentication**, and switch to an authentication app such as Google Authenticator or 1Password.
+        7. Confirm in **Manage members** that every admin and owner now shows an authentication app as their 2FA method.
+
+        If your workspace or organization signs in through single sign-on, this control still applies to administrators. Slack requires two-factor authentication from the owners and admins who can sign in with an email address and password and bypass single sign-on, which is exactly the population this check evaluates. Enforce multi-factor authentication in your identity provider as well, and require an authenticator app or a phishing-resistant method for administrator accounts there.
+
+        To learn more, read [Set up two-factor authentication](https://slack.com/help/articles/204509068-Set-up-two-factor-authentication) in the Slack documentation.
+    refs:
+      - url: https://slack.com/help/articles/204509068-Set-up-two-factor-authentication
+        title: Set up two-factor authentication
+      - url: https://slack.com/trust/security
+        title: 'Slack Security: Enterprise-grade Encryption'
+  # No Terraform variants: per-user 2FA state is set by each user in their Slack account
+  # settings. The pablovarela/slack provider has no user resource and no workspace-level
+  # 2FA-required setting, so HCL/plan/state cannot assert whether every user has 2FA
+  # enabled.
+  - uid: mondoo-slack-security-use-strong-factors
+    title: Ensure all users use 2FA
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-14
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-j
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-3
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-4-2
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-2
+    mql: |
+      slack.users.members.where(deleted == false).all( has2FA == true || enterpriseUser != empty || id == "USLACKBOT" )
+    docs:
+      desc: |
+        This check verifies that every active member of the Slack workspace has a second factor on their account.
+
+        Slack leaves two-factor authentication to individual members unless an owner requires it. The requirement lives under **Admin > Workspace settings > Security**, where **Two-factor authentication for email sign-in** carries a **Require members to have 2FA set up** option. This check reads the enrollment state of each member who has not been deactivated, and treats members who reach Slack through Enterprise Grid single sign-on as covered by the identity provider instead.
+
+        **Why this matters**
+
+        Slack is where an organization's least guarded material accumulates. Deployment credentials pasted for a colleague, customer names discussed in support threads, unannounced product plans, the salary conversation somebody had in a direct message. All of it is searchable, and a single password is the only thing standing in front of it.
+
+        That password is rarely secret for long. It appears in a credential dump from an unrelated service the employee used with the same password, or it is typed into a page that looks like the Slack sign-in and is not. Without a second factor, the attacker's next step is to sign in as that person and search. They read history that predates the account they took, download the files attached to it, and message colleagues from a name those colleagues trust, which is how the second and third accounts fall.
+
+        Requiring the factor for everyone rather than for the security-minded few is the whole point, because an attacker picks the account that opted out.
+
+        Members who do not enroll within 24 hours of the setting being saved are signed out until they complete enrollment, so announce the change first. If your workspace signs in through single sign-on, the setting still matters for the owners and admins who can sign in with an email address and password and bypass it.
+      audit: |
+        ### Audit via Admin Settings
+
+        1. Sign in to your Slack workspace as an owner or admin.
+        2. Open **Tools & settings > Manage members** and review the **2FA** column for each active member.
+        3. To confirm enforcement, click **Admin** in the sidebar, select **Workspace settings**, open the **Security** tab, and verify that **Require members to have 2FA set up** is checked under **Two-factor authentication for email sign-in**.
+
+        A passing result shows two-factor authentication required for the workspace and enabled for every active member; a failing result shows an active member without two-factor authentication or workspace enforcement turned off.
+
+        ### Audit via API
+
+        Query the Slack Web API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $SLACK_TOKEN" \
+          "https://slack.com/api/users.list"
+        ```
+
+        A passing response shows every active member, where `deleted` is `false` and `is_bot` is `false`, with `has_2fa` set to `true`; a failing response shows an active human member with `has_2fa` set to `false`.
+      remediation: |
+        Require two-factor authentication for the whole workspace so every member must enroll:
+
+        1. Sign in to your Slack workspace as a workspace owner.
+        2. Click **Admin** in the sidebar and select **Workspace settings**, then open the **Security** tab.
+        3. Next to **Two-factor authentication for email sign-in**, click **Edit**.
+        4. Check **Require members to have 2FA set up**. To also bar SMS as a second factor, select **Authenticator apps only**.
+        5. Click **Save**. Slack emails and notifies members to help them enroll, and new members must set up two-factor authentication before they can sign in at all.
+
+        **Warning:** Members who do not enroll within 24 hours of the setting being saved are signed out and cannot sign in again until they complete enrollment. Notify members in advance so the deadline does not strand anyone mid-task.
+
+        If your workspace signs in through single sign-on, this setting still applies to the owners and admins who can sign in with an email address and password and bypass single sign-on. Enforce multi-factor authentication in your identity provider for the members who reach Slack through single sign-on.
+
+        To learn more, read [Set up two-factor authentication](https://slack.com/help/articles/204509068-Set-up-two-factor-authentication) in the Slack documentation.
+    refs:
+      - url: https://slack.com/help/articles/204509068-Set-up-two-factor-authentication
+        title: Set up two-factor authentication
+      - url: https://slack.com/help/articles/360004635551-Manage-channel-posting-permissions
+        title: Manage channel posting permissions
+  # No Terraform variants: the runtime check filters channels by isExtShared (a runtime
+  # Slack Connect property reflecting whether the channel is currently shared with an
+  # external workspace) and then asserts a naming pattern. The pablovarela/slack provider
+  # exposes is_shared / is_ext_shared / is_org_shared on slack_conversation only as
+  # read-only exported attributes, not as configurable arguments — sharing is initiated
+  # via the Slack UI or Slack Connect API, not through Terraform — so HCL/plan/state cannot
+  # identify which declared channels are externally shared.
+  - uid: mondoo-slack-security-name-external-channels
+    title: Use clear naming for external channels
+    impact: 30
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: false
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-3
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ds-5
+      compliance/nist-csf-2: nist-csf-2-id-am-03
+      compliance/nist-sp-800-53-rev5: false
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-20
+      compliance/owasp-top-10-2025: false
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-1-6
+      compliance/vda-isa-5: false
+    props:
+      - uid: mondooSlackSecurityExternalChannelName
+        title: Enter your naming pattern for externally shared Slack channels in the mql below
+        mql: |
+          return /^(ext|extern|ex)[-_]/
+    mql: |
+      slack.conversations.where(isExtShared && isChannel ).all(name == props.mondooSlackSecurityExternalChannelName )
+    docs:
+      desc: |
+        This check verifies that Slack channels shared outside the organization are named so that everyone in them can tell.
+
+        A Slack Connect channel looks exactly like an internal one. The sidebar entry, the message composer, and the channel header are the same, and the only difference is a small badge and a member list that people do not read before typing. Slack does not enforce a naming convention, so this check compares the name of every externally shared channel against a pattern you set as a policy property. The supplied default accepts an `ext-`, `extern-`, or `ex-` prefix, with a hyphen or an underscore, and you can replace it with whatever convention your workspace already uses.
+
+        **Why this matters**
+
+        The failure here is a person, not a system. An engineer is asked for the staging credentials, finds the channel where the conversation was happening, and pastes them. A support lead drops the full customer export into a thread to move a discussion along. Neither of them checked the member list, because in every other channel that day they did not need to. The vendor, contractor, or customer on the other side of the Slack Connect link now has the material, and nothing was breached to get it.
+
+        A visible marker in the channel name is what interrupts that. It arrives before the message is typed, in the one place the person is already looking.
+
+        Consistent naming also makes external exposure reviewable. Security can enumerate every channel that reaches outside the organization from the channel list, rather than opening each one to inspect its membership, and monitoring can alert on activity in those channels as a class.
+
+        Naming is a prompt rather than a control, so pair it with the sharing approvals your plan offers, and communicate the convention to channel creators so new external channels follow it from the start.
+      audit: |
+        ### Audit via Admin Settings
+
+        1. Sign in to your Slack workspace as an owner or admin.
+        2. Open **Tools & settings > Manage channels**.
+        3. Filter the channel list by **Channel type** and select externally shared channels, including Slack Connect channels.
+        4. Review the name of each external channel against your documented naming pattern.
+
+        A passing result shows every externally shared channel using the agreed naming pattern; a failing result shows an externally shared channel whose name does not match the pattern.
+
+        ### Audit via API
+
+        Query the Slack Web API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $SLACK_TOKEN" \
+          "https://slack.com/api/conversations.list?types=public_channel,private_channel"
+        ```
+
+        A passing response shows every channel with `is_ext_shared` set to `true` having a `name` that matches your external naming pattern; a failing response shows an externally shared channel with a non-conforming `name`.
+      remediation: |
+        Rename every externally shared channel so its name matches your documented naming pattern for external channels:
+
+        1. Document a naming standard for externally shared channels, such as an `ext-` prefix, and set the policy's external channel name property to match it.
+        2. In Slack, open each externally shared channel and click the channel name in the conversation header.
+        3. Select the **Settings** tab, click **Edit** next to the channel name, and rename the channel to match the pattern.
+        4. Share the naming guideline with channel creators so new external channels follow it from the start.
+
+        To learn more, read [Rename a channel](https://slack.com/help/articles/201654073-Rename-a-channel) and [Create guidelines for channel names](https://slack.com/help/articles/217626408-Create-guidelines-for-channel-names) in the Slack documentation.
+    refs:
+      - url: https://slack.com/help/articles/360004635551-Manage-channel-posting-permissions
+        title: Manage channel posting permissions
+      - url: https://slack.com/trust/security
+        title: 'Slack Security: Enterprise-grade Encryption'
+  # No Terraform variants: this is a workspace-posture existence check (the workspace has
+  # at least one purely-internal channel). The relevant predicates (is_shared,
+  # is_ext_shared, is_org_shared, is_pending_ext_shared) are read-only attributes on
+  # slack_conversation, not configurable arguments. A per-module variant gated on
+  # slack_conversation being declared would also be vacuous and false-positive on modules
+  # that manage channels elsewhere — same pattern as the GCP VPC-SC existence checks.
+  - uid: mondoo-slack-security-at-least-one-workspace-internal-channel
+    title: Ensure there is at least one internal channel per workspace
+    impact: 20
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-3
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-20
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-1-5
+      compliance/vda-isa-5: false
+    mql: |
+      slack.conversations.where(isChannel == true)
+        .any(
+          _.isShared == false &&
+          _.isOrgShared == false &&
+          _.isExtShared == false &&
+          _.isPendingExtShared == false
+        )
+    docs:
+      desc: |
+        This check verifies that the workspace still has at least one channel that is not shared with anybody outside it.
+
+        Slack channels can be shared with another workspace in the same organization, shared across an Enterprise Grid org, or shared with an external organization through Slack Connect, and a channel can also sit pending an external share that has been offered and not yet accepted. This check looks at the channel list in **Tools & settings > Manage channels** and requires at least one channel where none of those four conditions applies.
+
+        **Why this matters**
+
+        Some conversations have to happen where no outside party is present. A security incident is the clearest case: the response has to be coordinated somewhere the attacker's likely entry point, which is often a connected vendor, cannot observe. Personnel discussions, unannounced organizational changes, and legal matters have the same requirement for different reasons.
+
+        A workspace in which every channel is shared in some form leaves no such room. The practical result is that those conversations still happen, but in a channel that carries an audience nobody enumerated, or in a scatter of direct messages that no one can review afterwards. When the incident is the vendor you share a channel with, coordinating in front of them is worse than the inconvenience of finding somewhere else.
+
+        Failing this check is also a signal about how the workspace is being used. A workspace with no internal channel at all is usually one that was created for a single external collaboration and then quietly adopted for internal work, which means the sharing model nobody chose is now the default for everything.
+
+        A workspace that genuinely exists only to host an external collaboration is a legitimate exception, provided the internal side of that work lives in a different workspace.
+      audit: |
+        ### Audit via Admin Settings
+
+        1. Sign in to your Slack workspace as an owner or admin.
+        2. Open **Tools & settings > Manage channels**.
+        3. Review the channel list and identify channels that are not shared with external users, other organizations, or other workspaces.
+
+        A passing result shows at least one channel that is fully internal with no external or cross-workspace sharing; a failing result shows that every channel is shared in some form.
+
+        ### Audit via API
+
+        Query the Slack Web API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $SLACK_TOKEN" \
+          "https://slack.com/api/conversations.list?types=public_channel,private_channel"
+        ```
+
+        A passing response includes at least one channel where `is_shared`, `is_ext_shared`, `is_org_shared`, and `is_pending_ext_shared` are all `false`; a failing response shows no such channel.
+      remediation: |
+        Create at least one channel that is reserved for internal use and is never shared outside the workspace:
+
+        1. In Slack, click the plus icon next to **Channels** in the sidebar and select **Create channel**.
+        2. Name the channel, choose its visibility, and finish the setup.
+        3. Do not share the channel with another organization through Slack Connect and do not invite guest accounts, so the channel remains fully internal.
+        4. Communicate the channel's internal-only purpose to your team so confidential discussions happen there.
+
+        To learn more, read [Create a channel](https://slack.com/help/articles/201402297-Create-a-channel) in the Slack documentation.
+    refs:
+      - url: https://slack.com/help/articles/360004635551-Manage-channel-posting-permissions
+        title: Manage channel posting permissions
+      - url: https://slack.com/help/articles/360000281563-Manage-apps-in-an-Enterprise-organization
+        title: Manage apps in an Enterprise organization
+  # No Terraform variants: even though slack_conversation.permanent_members lists member
+  # user IDs, the runtime check filters those members on per-user runtime properties
+  # (is_stranger, is_restricted, is_ultra_restricted) that are not Terraform-managed —
+  # there is no slack_user resource in the provider. Combined with the is_ext_shared
+  # filtering this becomes a cross-state correlation that HCL/plan/state cannot express.
+  - uid: mondoo-slack-security-at-least-one-workspace-internal-channel-no-ext-members
+    title: Ensure at least one internal channel exists with no external members
+    impact: 50
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-3
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ds-5
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-20
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: |
+      slack.conversations.where(isChannel == true)
+        .where(
+          _.isShared == false &&
+          _.isOrgShared == false &&
+          _.isExtShared == false &&
+          _.isPendingExtShared == false
+        )
+        .any(
+          members.none(
+            isStranger == true ||
+            isRestricted == true ||
+            isUltraRestricted == true
+          )
+        )
+    docs:
+      desc: |
+        This check verifies that at least one unshared Slack channel also has no guest or external accounts in its membership.
+
+        A channel that has never been shared through Slack Connect can still carry outside people, because guests are invited individually. Slack distinguishes multi-channel guests, single-channel guests, and users who belong to a connected organization, and all three can appear in the member list of a channel the team thinks of as internal. This check takes the channels that are not shared, org-shared, externally shared, or pending an external share, and requires at least one of them whose members are all full members of your workspace.
+
+        **Why this matters**
+
+        The channel-level sharing flag is the thing people check, and it is not the whole answer. A contractor is added to one channel for a project in March, the project ends in May, and nobody removes them. The channel keeps its internal appearance and its internal habits, so the incident retrospective, the customer escalation, and the credentials pasted during a late deploy all land in front of an account that belongs to a company you no longer work with.
+
+        That account is also outside your control in the way that matters after a breach. You do not manage its password, its second factor, or its offboarding, so when the contractor's own employer is compromised, the attacker inherits a seat in your internal channel and reads the history from the day the guest was added.
+
+        Reading history is the whole prize. Slack keeps the scrollback, so a guest added yesterday can search everything the channel said last year.
+
+        Review the member list of each channel meant to be internal and remove the guest, single-channel guest, and external accounts you find. If none of your unshared channels is clean, create one and invite only full members.
+      audit: |
+        ### Audit via Admin Settings
+
+        1. Sign in to your Slack workspace as an owner or admin.
+        2. Open **Tools & settings > Manage channels** and select a channel that should be internal only.
+        3. Open the channel's member list and review each member's account type.
+        4. Confirm that no member is a guest, single-channel guest, or external user.
+
+        A passing result shows at least one internal channel whose members are all full members of your organization; a failing result shows an internal channel that includes a guest, restricted, or external member.
+
+        ### Audit via API
+
+        Query the Slack Web API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $SLACK_TOKEN" \
+          "https://slack.com/api/conversations.members?channel=$CHANNEL_ID"
+        ```
+
+        Cross-reference each returned member ID against `users.list`. A passing response shows an internal channel where no member has `is_restricted`, `is_ultra_restricted`, or `is_stranger` set to `true`; a failing response shows such a member present.
+      remediation: |
+        Keep internal channels free of guest and external accounts:
+
+        1. Open each channel that is meant for internal use and click the channel name in the conversation header.
+        2. Select the **Members** tab and review each member's account type.
+        3. Remove any guest, single-channel guest, or external member from the channel.
+        4. If no fully internal channel exists, create one and invite only full members of your workspace.
+
+        To learn more, read [Remove someone from a channel](https://slack.com/help/articles/201898668-Remove-someone-from-a-channel) in the Slack documentation.
+    refs:
+      - url: https://slack.com/help/articles/360004635551-Manage-channel-posting-permissions
+        title: Manage channel posting permissions
+      - url: https://slack.com/trust/security
+        title: 'Slack Security: Enterprise-grade Encryption'
+  # No Terraform variants: this check asserts each channel member's profile.email matches
+  # an allowlisted domain. User profiles (including email addresses) are not Terraform-
+  # managed in the pablovarela/slack provider — there is no slack_user resource. The
+  # workspace-level email-domain allowlist setting (Manage members > Domain allowlisting)
+  # is also not exposed by the provider.
+  - uid: mondoo-slack-domain-allowlisting-enforced-on-internal-channels
+    title: Ensure domain is enforced on internal channels
+    impact: 75
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-16
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-3
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ds-5
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-20
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    props:
+      - uid: mondooSlackSecurityAllowListedDomains
+        title: Enter your domains in the mql below
+        mql: |
+          return /@(mondoo\.com|example\.com)$/
+    mql: slack.conversations.where(isChannel == true && isExtShared == false).all( members.where(isBot == false && id != "USLACKBOT").all(profile['email'] == props.mondooSlackSecurityAllowListedDomains) )
+    docs:
+      desc: |
+        This check verifies that everyone in an internal Slack channel signs in with an email address at a domain you recognize.
+
+        Every Slack account carries the email address it was registered with, visible on the member profile and in the channel member list. This check reads that address for each human member of every channel that is not externally shared, and matches it against a pattern you set as a policy property. The supplied default accepts addresses ending in one of two example corporate domains, and you replace it with the domains your organization actually uses.
+
+        **Why this matters**
+
+        An unexpected domain is the artifact a mistake leaves behind. It is the invitation typed to a personal address instead of a work one, the account a departing employee kept by changing their email before their last day, the vendor added during an integration that finished a year ago, and occasionally the address an attacker registered at a domain that reads like yours at a glance.
+
+        Each of those accounts sits in the channel with full read access to its history, and Slack history is long. The former employee follows the roadmap discussion at their new employer. The vendor account, still authenticating with a password their own security team no longer tracks, becomes an attacker's foothold in your internal conversation the moment that vendor is breached. Neither shows up as an external share, because neither one is.
+
+        Matching membership against your domains turns that into something you can find. It surfaces the accounts that do not belong to your identity lifecycle at all, which are exactly the ones no offboarding process will ever remove.
+
+        Investigate how each unrecognized account was added before removing it, since the answer often points at an invitation path that will admit the next one, and deactivate accounts that do not belong to your organization rather than only removing them from the channel.
+      audit: |
+        ### Audit via Admin Settings
+
+        1. Sign in to your Slack workspace as an owner or admin.
+        2. Open **Tools & settings > Manage channels** and select an internal channel.
+        3. Open the channel's member list and review the email address associated with each member.
+        4. Confirm that every email domain appears on your organization's approved domain list.
+
+        A passing result shows every internal channel member with an email address from an approved domain; a failing result shows a member whose email domain is not on the allowlist.
+
+        ### Audit via API
+
+        Query the Slack Web API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $SLACK_TOKEN" \
+          "https://slack.com/api/conversations.members?channel=$CHANNEL_ID"
+        ```
+
+        Resolve each member ID with `users.list` and read the `profile.email` field. A passing response shows every member of an internal channel with an email domain on your allowlist; a failing response shows a member with an email domain that is not approved.
+      remediation: |
+        Remove members whose email domain is not on your allowlist from internal channels:
+
+        1. Open each internal channel and click the channel name in the conversation header.
+        2. Select the **Members** tab and review the email address associated with each member.
+        3. Remove any member whose email domain is not on your approved list. Read [Remove someone from a channel](https://slack.com/help/articles/201898668-Remove-someone-from-a-channel) in the Slack documentation.
+        4. Investigate how each unauthorized account gained access. Deactivate accounts that do not belong to your organization from **Tools & settings > Manage members**. Read [Deactivate a member](https://slack.com/help/articles/204475027-Deactivate-a-members-account) in the Slack documentation.
+    refs:
+      - url: https://slack.com/help/articles/360004635551-Manage-channel-posting-permissions
+        title: Manage channel posting permissions
+      - url: https://slack.com/help/articles/203772216
+        title: Slack Single Sign-On
+  # No Terraform variants: per-user email-confirmation state (is_email_confirmed) is
+  # runtime account state set when a user completes their Slack signup. It is not a
+  # configurable attribute — there is no slack_user resource in the pablovarela/slack
+  # provider, and the workspace has no Terraform-managed setting that toggles confirmation.
+  - uid: mondoo-slack-security-users-email-confirmed
+    title: Ensure all active users have confirmed their email address
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-13
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-5-16
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-6
+      compliance/nist-csf-2: nist-csf-2-pr-aa-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-12
+      compliance/nist-sp-800-171: false
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      slack.users.members
+        .where(
+          deleted == false &&
+          isInvitedUser == false &&
+          isBot == false &&
+          isConnectorBot == false &&
+          isWorkflowBot == false &&
+          id != "USLACKBOT"
+        )
+        .all(isEmailConfirmed == true)
+    docs:
+      desc: |
+        This check verifies that every active human member of the workspace has confirmed the email address their Slack account was registered with.
+
+        Slack sends a confirmation link when an address is added or changed, and until the recipient follows it the account exists with an address nobody has proven control of. This check reads the confirmation state of each member, skipping deactivated accounts, pending invitations, and the various bot identities, and requires the remainder to be confirmed. Members can request a new confirmation link from their Slack account settings, and the workspace sign-in options decide whether new accounts can be created this way at all.
+
+        **Why this matters**
+
+        An unconfirmed address breaks the assumption every other control in the workspace rests on. Domain allowlisting checks a string that was never verified, so an attacker who registers with an address at a domain that reads like yours passes the allowlist while controlling no mailbox at it. From inside the workspace they post as a plausible colleague, ask for a credential in a direct message, and get it, because the name in the sidebar is the whole authentication most people apply to an internal message.
+
+        Account recovery is the second problem. A password reset for an unconfirmed account sends its link to an address that may belong to someone else entirely, which turns the recovery flow into a takeover path that leaves no failed sign-in behind.
+
+        The audit trail degrades in the same way. Messages, uploads, and channel joins are attributed to an account that maps to no verified person, so an investigation cannot say who was actually there.
+
+        Have legitimate users complete the confirmation flow, deactivate accounts you cannot attribute to a known person, and require single sign-on or a verified corporate domain at sign-up so new accounts cannot be created with unverified addresses.
+      audit: |
+        ### Audit via Admin Settings
+
+        1. Sign in to your Slack workspace as an owner or admin.
+        2. Open **Tools & settings > Manage members**.
+        3. Review the member list for accounts flagged as having an unconfirmed or pending email address.
+        4. Open **Tools & settings > Workspace settings** to confirm that sign-in options require SSO or a verified corporate domain.
+
+        A passing result shows every active human member with a confirmed email address; a failing result shows an active member whose email address is still unconfirmed.
+
+        ### Audit via API
+
+        Query the Slack Web API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $SLACK_TOKEN" \
+          "https://slack.com/api/users.list"
+        ```
+
+        A passing response shows every active human member, where `deleted` and `is_bot` are `false`, with `is_email_confirmed` set to `true`; a failing response shows such a member with `is_email_confirmed` set to `false`.
+      remediation: |
+        Investigate each flagged user:
+
+        1. Confirm whether the account belongs to a real, current member of your organization.
+        2. For legitimate users, have them complete the email confirmation flow. Slack sends a confirmation link when the email is added or changed, and users can request a new link from their [account settings](https://slack.com/account/settings).
+        3. For accounts you cannot attribute to a known person, deactivate them immediately. Read [Deactivate a member](https://slack.com/help/articles/204475027-Deactivate-a-members-account) in the Slack documentation.
+        4. Review your workspace invitation and sign-up settings to require SSO or a verified corporate domain so new accounts cannot be created with unverified addresses. Read [Manage sign-in options](https://slack.com/help/articles/220403548-Manage-single-sign-on-settings) in the Slack documentation.
+    refs:
+      - url: https://slack.com/help/articles/360004635551-Manage-channel-posting-permissions
+        title: Manage channel posting permissions
+      - url: https://slack.com/help/articles/204475027-Deactivate-a-members-account
+        title: Deactivate a member's account
+      - url: https://slack.com/help/articles/220403548-Manage-single-sign-on-settings
+        title: Manage single sign-on settings

@@ -1,0 +1,62 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+
+packs:
+  - uid: mondoo-vmware-incident-response
+    name: VMware vCenter Incident Response Pack
+    version: 1.1.1
+    license: BUSL-1.1
+    require:
+      - provider: vsphere
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    tags:
+      mondoo.com/platform: vmware,cloud
+      mondoo.com/category: security
+      mondoo.com/icon: vmware
+    summary: Gather VMware vCenter evidence for incident response
+    docs:
+      desc: |
+        Gathers ESXi host evidence for a vCenter incident investigation: kernel modules, installed packages, services, host acceptance level, and NTP configuration.
+
+        Enable this query pack in [Mondoo Platform](https://mondoo.com/platform) to automatically gather this evidence from your vCenter, or scan it manually with cnspec:
+
+        ```bash
+        cnspec scan vsphere <user>@<vcenter_host> --ask-pass -f mondoo-vmware-incident-response.mql.yaml
+        ```
+    filters: asset.platform == "vmware-esxi"
+    queries:
+      - uid: mondoo-vmware-incident-response-kernel-modules
+        title: Kernel modules
+        docs:
+          desc: ESXi kernel modules, to spot unauthorized extensions.
+        mql: vsphere.host.kernelModules
+      - uid: mondoo-vmware-incident-response-installed-packages
+        title: Installed packages
+        docs:
+          desc: Installed VIBs, to spot vulnerable or rogue software.
+        mql: vsphere.host.packages
+      - uid: mondoo-vmware-incident-response-running-services
+        title: All services
+        docs:
+          desc: ESXi services, to spot risky ones such as SLP.
+        mql: vsphere.host.services
+        refs:
+          - title: VMSA-2021-0002
+            url: https://support.broadcom.com/web/ecx/support-content-notification/-/external/content/SecurityAdvisories/0/23599
+          - title: How to Disable/Enable the SLP Service on VMware ESXi (76372)
+            url: https://knowledge.broadcom.com/external/article?legacyId=76372
+      - uid: mondoo-vmware-incident-response-acceptance-level
+        title: Host acceptance level
+        docs:
+          desc: Host acceptance level, the VIB signing level allowed.
+        mql: vsphere.host.acceptanceLevel
+        refs:
+          - title:
+            url: https://techdocs.broadcom.com/us/en/vmware-cis/vsphere/vsphere/8-0/vsphere-security/securing-esxi-hosts.html
+      - uid: mondoo-vmware-incident-response-ntp-servers
+        title: Configured NTP servers
+        docs:
+          desc: Configured NTP servers, to detect time tampering.
+        mql: vsphere.host.ntp.server

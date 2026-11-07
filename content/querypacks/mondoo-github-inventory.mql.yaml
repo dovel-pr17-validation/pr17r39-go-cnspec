@@ -1,0 +1,340 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+
+packs:
+  - uid: mondoo-github-inventory-org
+    name: GitHub Organization Inventory Pack
+    version: 1.1.1
+    license: BUSL-1.1
+    require:
+      - provider: github
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    tags:
+      mondoo.com/platform: github,scm
+      mondoo.com/category: best-practices
+      mondoo.com/icon: github
+    summary: Inventory GitHub organizations and repositories
+    docs:
+      desc: |
+        Inventories a GitHub organization: profile identity, contact and social links, repository count, and creation and update timestamps.
+
+        Enable this query pack in [Mondoo Platform](https://mondoo.com/platform) to automatically inventory your GitHub organizations, or scan one manually with cnspec. Manual scans need a [GitHub personal access token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) with read access:
+
+        ```bash
+        export GITHUB_TOKEN=<your personal access token>
+        cnspec scan github org <org_name> -f mondoo-github-inventory.mql.yaml
+        ```
+    filters: asset.platform == "github-org"
+    queries:
+      - uid: mondoo-github-inventory-org-login
+        title: GitHub organization login
+        docs:
+          desc: The organization login handle, the slug in its URL.
+        mql: github.organization.login
+      - uid: mondoo-github-inventory-org-id
+        title: GitHub organization ID
+        docs:
+          desc: Returns the organization's unique numeric ID.
+        mql: github.organization.id
+      - uid: mondoo-github-inventory-org-profile-photo
+        title: GitHub organization profile photo
+        docs:
+          desc: Returns the URL of the organization's avatar image.
+        mql: github.organization.avatarUrl
+      - uid: mondoo-github-inventory-org-email
+        title: GitHub organization email
+        docs:
+          desc: Returns the public contact email set for the organization.
+        mql: github.organization.email
+      - uid: mondoo-github-inventory-org-desc
+        title: GitHub organization description
+        docs:
+          desc: Returns the organization's profile description.
+        mql: github.organization.description
+      - uid: mondoo-github-inventory-org-blog
+        title: GitHub organization blog
+        docs:
+          desc: Website or blog URL set on the organization profile.
+        mql: github.organization.blog
+      - uid: mondoo-github-inventory-org-location
+        title: GitHub organization location
+        docs:
+          desc: Returns the location listed on the organization profile.
+        mql: github.organization.location
+      - uid: mondoo-github-inventory-org-followers
+        title: GitHub organization followers
+        docs:
+          desc: Returns the count of users following the organization.
+        mql: github.organization.followers
+      - uid: mondoo-github-inventory-org-following
+        title: GitHub organization following
+        docs:
+          desc: Returns the count of users the organization follows.
+        mql: github.organization.following
+      - uid: mondoo-github-inventory-org-twitter
+        title: GitHub organization twitter handle
+        docs:
+          desc: X handle set on the organization profile.
+        mql: github.organization.twitterUsername
+      - uid: mondoo-github-inventory-org-number-repositories
+        title: GitHub organization repositories
+        docs:
+          desc: Counts the repositories in the organization.
+        mql: github.organization.repositories.length
+      - uid: mondoo-github-inventory-org-created
+        title: GitHub organization created
+        docs:
+          desc: Returns the organization's creation timestamp.
+        mql: github.organization.createdAt
+      - uid: mondoo-github-inventory-org-updated
+        title: GitHub organization updated
+        docs:
+          desc: Returns the timestamp of the organization's last update.
+        mql: github.organization.updatedAt
+  - uid: mondoo-github-inventory-user
+    name: GitHub User Inventory Pack
+    version: 1.0.1
+    require:
+      - provider: github
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    tags:
+      mondoo.com/platform: github,scm
+      mondoo.com/category: best-practices
+      mondoo.com/icon: github
+    summary: Inventory GitHub user profiles and settings
+    docs:
+      desc: |
+        Inventories a GitHub user: profile identity, contact and social links, repository count, and account timestamps.
+
+        Enable this query pack in [Mondoo Platform](https://mondoo.com/platform) to automatically inventory GitHub users, or scan one manually with cnspec. Manual scans need a [GitHub personal access token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) with read access:
+
+        ```bash
+        export GITHUB_TOKEN=<your personal access token>
+        cnspec scan github user <user_name> -f mondoo-github-inventory.mql.yaml
+        ```
+    filters: asset.platform == "github-user"
+    queries:
+      - uid: mondoo-github-inventory-user-login
+        title: GitHub user login
+        docs:
+          desc: Returns the user's login name.
+        mql: github.user.login
+      - uid: mondoo-github-inventory-user-id
+        title: GitHub user ID
+        docs:
+          desc: Returns the user's unique numeric ID.
+        mql: github.user.id
+      - uid: mondoo-github-inventory-user-profile-photo
+        title: GitHub user profile photo
+        docs:
+          desc: Returns the URL of the user's avatar image.
+        mql: github.user.avatarUrl
+      - uid: mondoo-github-inventory-user-email
+        title: GitHub user email
+        docs:
+          desc: Returns the user's public email address.
+        mql: github.user.email
+      - uid: mondoo-github-inventory-user-bio
+        title: GitHub user bio
+        docs:
+          desc: Returns the bio text from the user's profile.
+        mql: github.user.bio
+      - uid: mondoo-github-inventory-user-blog
+        title: GitHub user blog
+        docs:
+          desc: Returns the website or blog URL from the user's profile.
+        mql: github.user.blog
+      - uid: mondoo-github-inventory-user-location
+        title: GitHub user location
+        docs:
+          desc: Returns the location listed on the user's profile.
+        mql: github.user.location
+      - uid: mondoo-github-inventory-user-followers
+        title: GitHub user followers
+        docs:
+          desc: Returns the count of users following this user.
+        mql: github.user.followers
+      - uid: mondoo-github-inventory-user-following
+        title: GitHub user following
+        docs:
+          desc: Returns the count of users this user follows.
+        mql: github.user.following
+      - uid: mondoo-github-inventory-user-twitter
+        title: GitHub user twitter handle
+        docs:
+          desc: Returns the X (Twitter) handle from the user's profile.
+        mql: github.user.twitterUsername
+      - uid: mondoo-github-inventory-user-number-repositories
+        title: GitHub user repositories
+        docs:
+          desc: Counts the repositories owned by the user.
+        mql: github.user.repositories.length
+      - uid: mondoo-github-inventory-user-created
+        title: GitHub user created
+        docs:
+          desc: Returns the account creation timestamp.
+        mql: github.user.createdAt
+      - uid: mondoo-github-inventory-user-updated
+        title: GitHub user updated
+        docs:
+          desc: Returns the timestamp of the profile's last update.
+        mql: github.user.updatedAt
+  - uid: mondoo-github-inventory-repo
+    name: GitHub Repository Inventory Pack
+    version: 1.0.1
+    require:
+      - provider: github
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    tags:
+      mondoo.com/platform: github,scm
+      mondoo.com/category: best-practices
+      mondoo.com/icon: github
+    summary: Inventory GitHub repository configurations
+    docs:
+      desc: |
+        Inventories a GitHub repository: identity and description, popularity metrics, license and language, enabled features, clone URLs, visibility, and lifecycle timestamps.
+
+        Enable this query pack in [Mondoo Platform](https://mondoo.com/platform) to automatically inventory your GitHub repositories, or scan one manually with cnspec. Manual scans need a [GitHub personal access token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) with read access:
+
+        ```bash
+        export GITHUB_TOKEN=<your personal access token>
+        cnspec scan github repo <owner>/<repo> -f mondoo-github-inventory.mql.yaml
+        ```
+    filters: asset.platform == "github-repo"
+    queries:
+      - uid: mondoo-github-inventory-repo-id
+        title: GitHub repository ID
+        docs:
+          desc: Returns the repository's unique numeric ID.
+        mql: github.repository.id
+      - uid: mondoo-github-inventory-repo-description
+        title: GitHub repository description
+        docs:
+          desc: Returns the repository's description text.
+        mql: github.repository.description
+      - uid: mondoo-github-inventory-repo-forks
+        title: Number GitHub repository forks
+        docs:
+          desc: Counts how many times the repository has been forked.
+        mql: github.repository.forksCount
+      - uid: mondoo-github-inventory-repo-stargazers
+        title: Number GitHub repository stargazers
+        docs:
+          desc: Counts the users who have starred the repository.
+        mql: github.repository.stargazersCount
+      - uid: mondoo-github-inventory-repo-watchers
+        title: Number GitHub repository watchers
+        docs:
+          desc: Counts the users watching the repository for notifications.
+        mql: github.repository.watchersCount
+      - uid: mondoo-github-inventory-repo-license
+        title: GitHub repository license
+        docs:
+          desc: SPDX identifier of the repository's declared license.
+        mql: github.repository.license.spdxId
+      - uid: mondoo-github-inventory-repo-default-branch
+        title: GitHub repo default branch
+        docs:
+          desc: Name of the repository's default branch.
+        mql: github.repository.defaultBranchName
+      - uid: mondoo-github-inventory-repo-visibility
+        title: GitHub repository visibility
+        docs:
+          desc: Whether the repo is public, private, or internal.
+        mql: github.repository.visibility
+      - uid: mondoo-github-inventory-repo-languages
+        title: GitHub repository languages
+        docs:
+          desc: Returns the repository's primary programming language.
+        mql: github.repository.language
+      - uid: mondoo-github-inventory-repo-open-issues
+        title: GitHub repository open issues
+        docs:
+          desc: Counts open issues and pull requests in the repository.
+        mql: github.repository.openIssuesCount
+      - uid: mondoo-github-inventory-repo-topics
+        title: GitHub repository topics
+        docs:
+          desc: Lists the topic tags applied to the repository.
+        mql: github.repository.topics
+      - uid: mondoo-github-inventory-repo-homepage
+        title: GitHub repository homepage
+        docs:
+          desc: Returns the homepage URL set for the repository.
+        mql: github.repository.homepage
+      - uid: mondoo-github-inventory-repo-clone-url
+        title: GitHub repository Clone URL
+        docs:
+          desc: Returns the HTTPS clone URL for the repository.
+        mql: github.repository.cloneUrl
+      - uid: mondoo-github-inventory-repo-ssl-url
+        title: GitHub repository SSH URL
+        docs:
+          desc: Returns the SSH clone URL for the repository.
+        mql: github.repository.sshUrl
+      - uid: mondoo-github-inventory-repo-is-fork
+        title: Is fork
+        docs:
+          desc: Whether the repository is a fork of another repo.
+        mql: github.repository.isFork
+      - uid: mondoo-github-inventory-repo-is-forkable
+        title: Is forkable
+        docs:
+          desc: Reports whether forking is allowed for the repository.
+        mql: github.repository.allowForking
+      - uid: mondoo-github-inventory-repo-is-private
+        title: Is private
+        docs:
+          desc: Reports whether the repository is private.
+        mql: github.repository.private
+      - uid: mondoo-github-inventory-repo-is-archived
+        title: Is archived
+        docs:
+          desc: Reports whether the repository is archived.
+        mql: github.repository.archived
+      - uid: mondoo-github-inventory-repo-has-downloads
+        title: Has downloads
+        docs:
+          desc: Reports whether downloads are enabled for the repository.
+        mql: github.repository.hasDownloads
+      - uid: mondoo-github-inventory-repo-has-issues
+        title: Has issues
+        docs:
+          desc: Whether the issues feature is enabled.
+        mql: github.repository.hasIssues
+      - uid: mondoo-github-inventory-repo-has-pages
+        title: Has pages
+        docs:
+          desc: Reports whether GitHub Pages is enabled for the repository.
+        mql: github.repository.hasPages
+      - uid: mondoo-github-inventory-repo-has-projects
+        title: Has projects
+        docs:
+          desc: Whether the projects feature is enabled.
+        mql: github.repository.hasProjects
+      - uid: mondoo-github-inventory-repo-has-wiki
+        title: Has wiki
+        docs:
+          desc: Whether the wiki feature is enabled.
+        mql: github.repository.hasWiki
+      - uid: mondoo-github-inventory-repo-pushed-at
+        title: Pushed at
+        docs:
+          desc: Timestamp of the most recent push to the repo.
+        mql: github.repository.pushedAt
+      - uid: mondoo-github-inventory-repo-created-at
+        title: Created at
+        docs:
+          desc: Returns the repository's creation timestamp.
+        mql: github.repository.createdAt
+      - uid: mondoo-github-inventory-repo-updated-at
+        title: Updated at
+        docs:
+          desc: Returns the timestamp of the repository's last update.
+        mql: github.repository.updatedAt

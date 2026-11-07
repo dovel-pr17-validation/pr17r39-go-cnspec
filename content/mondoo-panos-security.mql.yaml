@@ -1,0 +1,3221 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+policies:
+  - uid: mondoo-panos-security
+    name: Mondoo Palo Alto Networks PAN-OS Security
+    version: 2.0.5
+    license: BUSL-1.1
+    tags:
+      mondoo.com/category: security
+      mondoo.com/platform: panos,networkdevice
+      mondoo.com/icon: palo-alto-networks
+    require:
+      - provider: panos
+    authors:
+      - name: Mondoo, Inc.
+        email: hello@mondoo.com
+    summary: Secure PAN-OS firewalls and Panorama configurations
+    docs:
+      desc: |
+        The Mondoo Palo Alto Networks PAN-OS Security policy identifies critical misconfigurations on PAN-OS firewalls and Panorama management platforms that could leave your network security infrastructure vulnerable to attackers. This policy helps organizations detect and remediate hardening gaps before they can be exploited, reducing the likelihood of unauthorized device access, policy bypass, encrypted threat blindness, and disruption of protected zones.
+
+        This policy provides security checks across key PAN-OS areas:
+
+        - **License management**: Active and unexpired security subscriptions
+        - **System configuration**: Operational mode and system parameters
+        - **Zone security**: Protection profiles, packet buffer protection, and logging
+        - **Security rule hygiene**: App-ID enforcement, threat profiles, and traffic logging
+        - **Network interfaces**: Zone assignment, management profiles, and addressing
+        - **VPN and IPsec**: IKE and IPsec tunnel configuration
+        - **Decryption policy**: Proper profiles and logging
+        - **Routing security**: Virtual router and static route configuration
+
+        Learn more about scanning Palo Alto PAN-OS in the [cnspec Palo Alto PAN-OS documentation](https://mondoo.com/docs/cnspec/network/panos).
+
+        Have suggestions for new checks in this policy? Visit our [cnspec repository](https://github.com/mondoohq/cnspec).
+
+    groups:
+      - title: System Configuration
+        filters: asset.platform == "pan-os"
+        checks:
+          - uid: mondoo-panos-security-operational-mode-normal
+      - title: Software and Content Versions
+        filters: asset.platform == "pan-os"
+        checks:
+          - uid: mondoo-panos-security-threat-content-installed
+          - uid: mondoo-panos-security-antivirus-content-installed
+          - uid: mondoo-panos-security-wildfire-content-installed
+          - uid: mondoo-panos-security-app-content-installed
+      - title: License Management
+        filters: asset.platform == "pan-os"
+        checks:
+          - uid: mondoo-panos-security-no-expired-licenses
+          - uid: mondoo-panos-security-threat-prevention-license
+          - uid: mondoo-panos-security-wildfire-license
+          - uid: mondoo-panos-security-url-filtering-license
+          - uid: mondoo-panos-security-dns-security-license
+      - title: Zone Security
+        filters: asset.platform == "pan-os"
+        checks:
+          - uid: mondoo-panos-security-zone-protection-profile
+          - uid: mondoo-panos-security-zone-packet-buffer-protection
+          - uid: mondoo-panos-security-zone-log-forwarding
+      - title: Security Rule Hygiene
+        filters: asset.platform == "pan-os"
+        checks:
+          - uid: mondoo-panos-security-no-allow-any-rules
+          - uid: mondoo-panos-security-rules-use-app-id
+          - uid: mondoo-panos-security-rules-have-security-profiles
+          - uid: mondoo-panos-security-rules-url-filtering
+          - uid: mondoo-panos-security-rules-logging-enabled
+          - uid: mondoo-panos-security-no-disabled-rules
+          - uid: mondoo-panos-security-rules-wildfire-profile
+      - title: Network Interface Hardening
+        filters: asset.platform == "pan-os"
+        checks:
+          - uid: mondoo-panos-security-interface-management-profile
+          - uid: mondoo-panos-security-no-dhcp-interfaces
+          - uid: mondoo-panos-security-interfaces-assigned-to-zone
+      - title: VPN/IPsec Security
+        filters: asset.platform == "pan-os"
+        checks:
+          - uid: mondoo-panos-security-ike-version-v2
+          - uid: mondoo-panos-security-ike-certificate-auth
+          - uid: mondoo-panos-security-ike-dead-peer-detection
+          - uid: mondoo-panos-security-ike-no-aggressive-mode
+          - uid: mondoo-panos-security-ipsec-anti-replay
+          - uid: mondoo-panos-security-ipsec-tunnel-monitoring
+      - title: Decryption Policy
+        filters: asset.platform == "pan-os"
+        checks:
+          - uid: mondoo-panos-security-decryption-profile
+          - uid: mondoo-panos-security-decryption-log-failures
+      - title: Routing Security
+        filters: asset.platform == "pan-os"
+        checks:
+          - uid: mondoo-panos-security-default-route-exists
+          - uid: mondoo-panos-security-ospf-interface-authentication
+          - uid: mondoo-panos-security-ospf-virtual-link-authentication
+          - uid: mondoo-panos-security-ospf-no-rfc1583
+          - uid: mondoo-panos-security-ospf-reject-default-route
+queries:
+  - uid: mondoo-panos-security-antivirus-content-installed
+    title: Ensure antivirus content version is installed
+    impact: 85
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-id-ra-1
+      compliance/nist-csf-2: nist-csf-2-id-ra-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a03
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: soc2-control-cc7-1-2
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: panos.system.avVersion != ""
+    docs:
+      desc: |
+        This check verifies that the firewall has antivirus content installed.
+
+        Antivirus content is a separate update stream from the Applications and Threats package. It carries the malware signatures the antivirus profile uses to inspect files moving over HTTP, SMTP, IMAP, POP3, FTP, and SMB, and it is released on a much faster cadence than threat content. The installed version is listed as the Antivirus package under Device > Dynamic Updates, and this check requires it to be present rather than blank.
+
+        **Why this matters**
+
+        File inspection sits between a user clicking a link and a payload landing on their disk. Without antivirus content, an attacker delivering a commodity loader over a web download or a mail attachment needs no evasion at all; the sample can be years old and widely detected everywhere else and it still crosses the perimeter, because the appliance has nothing to match it against.
+
+        Because the antivirus package updates on its own schedule and under its own entitlement, it can be missing while threat content is perfectly current. Administrators who confirm the Applications and Threats version looks recent frequently never notice that the antivirus slot is empty.
+
+        The failure is also asymmetric in the direction that matters least for alerting. No signatures means no antivirus log entries, so the absence of detections reads as the absence of malware.
+
+        Devices deployed purely as internal segmentation firewalls that never carry file transfers gain less from this content, though the download costs nothing and leaves the option open. Note that these signatures only inspect traffic on rules that actually reference an antivirus profile or a profile group, so pair this check with the rule-level profile checks in this policy.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Device → Dynamic Updates**.
+        3. Locate the **Antivirus** section and review the **Currently Installed** version.
+
+        If the Antivirus section shows an installed version, the check passes. If no version is installed, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show system info | match av-version
+           ```
+
+        If the command returns a non-empty `av-version` value, the check passes. If the value is empty, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Device → Dynamic Updates**
+            2. Click **Check Now** to retrieve the latest available content versions
+            3. Locate the **Antivirus** entry and click **Download**, then **Install**
+
+            To configure automatic updates so content stays current:
+
+            1. Navigate to **Device → Dynamic Updates**
+            2. Click the schedule link next to **Antivirus**
+            3. Set the recurrence to hourly and enable **Install**
+            4. Click **OK** and commit the configuration
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Download and install the latest antivirus content:
+
+            ```text
+            request anti-virus upgrade download latest
+            request anti-virus upgrade install version latest
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/ngfw/administration/firewall-administration
+        title: Firewall Administration
+      - url: https://docs.paloaltonetworks.com/best-practices
+        title: Palo Alto Networks Best Practices
+  - uid: mondoo-panos-security-app-content-installed
+    title: Ensure application content version is installed
+    impact: 75
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-id-ra-1
+      compliance/nist-csf-2: nist-csf-2-id-ra-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a03
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: soc2-control-cc7-1-2
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: panos.system.appVersion != ""
+    docs:
+      desc: |
+        This check verifies that the firewall has application identification content installed.
+
+        Application content is the decoder and signature set that lets the firewall name the application behind a session instead of inferring it from the port number. It ships in the same Applications and Threats package as threat content, and the installed version is shown under Device > Dynamic Updates. This check requires an application content version to be present.
+
+        **Why this matters**
+
+        Without this content, every rule that names an application stops matching what its author intended. Traffic falls through to whatever rule matches next, and in most rulebases that is either a broad allow near the bottom or the interzone default deny. The first outcome silently widens access; the second causes an outage. Neither is what the rule says.
+
+        The decoders are also what makes threat inspection work. Security profiles operate on the decoded application stream, so an unidentified application means files inside it are not extracted, URLs inside it are not categorized, and the session is inspected far more shallowly than the attached profiles imply.
+
+        For an attacker, a firewall without application content has been reduced to port matching. Tunneling a command-and-control channel over 443 or 53 stops requiring any real effort, because nothing left on the device distinguishes it from the legitimate traffic sharing that port.
+
+        Newly staged appliances report no content until their first update completes. Because application and threat content ride the same package, this check failing alongside the threat content check almost always points at update connectivity rather than at two separate problems.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Device → Dynamic Updates**.
+        3. Locate the **Applications and Threats** section and review the **Currently Installed** version.
+
+        If the Applications and Threats section shows an installed version, the check passes. If no version is installed, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show system info | match app-version
+           ```
+
+        If the command returns a non-empty `app-version` value, the check passes. If the value is empty, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Device → Dynamic Updates**
+            2. Click **Check Now** to retrieve the latest available content versions
+            3. Locate the **Applications and Threats** entry and click **Download**, then **Install**
+
+            To configure automatic updates:
+
+            1. Navigate to **Device → Dynamic Updates**
+            2. Click the schedule link next to **Applications and Threats**
+            3. Set the recurrence (daily recommended) and enable **Install**
+            4. Enable **Threshold**, which delays installation until the content has been available for a set number of hours, reducing the risk of deploying a faulty update
+            5. Click **OK** and commit the configuration
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Download and install the latest application and threat content:
+
+            ```text
+            request content upgrade download latest
+            request content upgrade install version latest
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/ngfw/administration/firewall-administration
+        title: Firewall Administration
+      - url: https://docs.paloaltonetworks.com/best-practices
+        title: Palo Alto Networks Best Practices
+  - uid: mondoo-panos-security-dns-security-license
+    title: Ensure DNS Security license is active
+    impact: 75
+    filters: panos.licenses != empty
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      panos.licenses.
+        where(feature.downcase.contains("dns") && expired == "no").
+        length > 0
+    docs:
+      desc: |
+        This check verifies that the firewall carries an active DNS Security subscription.
+
+        DNS Security adds a real-time cloud lookup on the domains the firewall observes in DNS queries, classifying them against categories such as command and control, malware, dynamic DNS, newly registered domains, and algorithmically generated names. It is switched on through the DNS policies of an Anti-Spyware profile, and its entitlement is listed under Device > Licenses, where this check requires an entry for the DNS feature that is not expired.
+
+        **Why this matters**
+
+        DNS is the one protocol allowed out of nearly every network, which is precisely why malware uses it for rendezvous and for exfiltration. A beacon resolving a fresh domain every few minutes produces no unusual pattern at the transport layer; the only distinguishing feature is the domain itself.
+
+        Domain generation algorithms exist to defeat blocklists, cycling through thousands of candidate names so no static list keeps up. Cloud-side analysis is what makes them tractable, because classification happens against a live feed rather than against content downloaded hours ago.
+
+        DNS tunneling is the exfiltration case. Data encoded into query labels leaves as a stream of ordinary lookups to a nameserver the attacker controls, and without query-level analysis nothing in the session log looks wrong.
+
+        This control only sees queries that traverse the firewall, so environments where endpoints reach an external resolver over encrypted DNS or use a third-party service directly need those paths blocked or redirected first. Configure sinkholing in the Anti-Spyware profile as well, so a matched domain resolves somewhere the infected host can actually be identified.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Device → Licenses**.
+        3. Locate the **DNS Security** entry and review its **Expires** date and status.
+
+        If a DNS Security license is present and not expired, the check passes. If the license is missing or expired, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           request license info
+           ```
+
+        If the output lists a DNS Security feature with an expiry date in the future, the check passes. If no DNS Security feature is listed or it is expired, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Contact your Palo Alto Networks sales representative or authorized reseller to purchase a DNS Security subscription
+            2. Log into the [Customer Support Portal](https://support.paloaltonetworks.com) and retrieve the license activation code
+            3. Navigate to **Device → Licenses**
+            4. Click **Retrieve license keys from license server** to activate the subscription
+            5. Navigate to **Objects → Security Profiles → Anti-Spyware** and enable DNS Security in the relevant profiles
+            6. Ensure the Anti-Spyware profile with DNS Security is applied to your security policy rules
+            7. Commit the configuration
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Retrieve the license key after purchase and verify activation:
+
+            ```text
+            request license fetch
+            request license info
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/best-practices
+        title: Palo Alto Networks Best Practices
+  - uid: mondoo-panos-security-no-expired-licenses
+    title: Ensure no licenses are expired
+    impact: 90
+    filters: panos.licenses != empty
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-id-ra-1
+      compliance/nist-csf-2: nist-csf-2-id-ra-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: soc2-control-cc7-1-2
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: panos.licenses.where(expired == "yes") == []
+    docs:
+      desc: |
+        This check verifies that no subscription on the firewall has expired.
+
+        PAN-OS keeps a license entry for every subscription and capability on the device, each with its own expiry date, and marks entries past that date as expired. The full list is visible under Device > Licenses, and this check requires that none of those entries carry an expired status.
+
+        **Why this matters**
+
+        Subscriptions do not fail loudly when they lapse. The feature usually keeps running on whatever content it last downloaded, so the device continues to inspect traffic, continues to write logs, and continues to look healthy while its view of the threat landscape is frozen on the day the subscription ended. Every vulnerability disclosed after that date is invisible to it.
+
+        That gap is valuable to an attacker precisely because it is quiet. Exploitation of newly disclosed edge-device vulnerabilities is now measured in days, and a firewall running content from three months ago will not recognize any of it.
+
+        Expiry is also rarely limited to one feature. Subscriptions are commonly bought as a bundle with a shared renewal date, so a missed renewal takes threat prevention, URL filtering, WildFire, and DNS Security out together, removing several independent layers at once rather than one.
+
+        Some entries cover perpetual capabilities or evaluation features that were never meant to be renewed, and those will fail this check without representing a real gap. Review the list and remove licenses the organization has deliberately let go, rather than leaving expired entries in place where they mask a renewal that genuinely was missed.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Device → Licenses**.
+        3. Review the **Expires** date and status of every listed subscription.
+
+        If no subscription shows an expired status, the check passes. If any subscription is expired, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           request license info
+           ```
+
+        If every feature listed shows an expiry date in the future, the check passes. If any feature is expired, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Device → Licenses** to review the status and expiration date of each subscription
+            2. Log into the [Customer Support Portal](https://support.paloaltonetworks.com)
+            3. Navigate to **Assets → Devices** and select the device with expired licenses
+            4. Renew the required subscriptions through your Palo Alto Networks sales representative or authorized reseller
+            5. After renewal, return to **Device → Licenses** in the PAN-OS web interface
+            6. Click **Retrieve license keys from license server** to activate the renewed subscriptions
+            7. Verify all licenses now show as active with updated expiration dates
+
+            Set up license expiration alerts to avoid future lapses by configuring email notifications in the Customer Support Portal.
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Fetch renewed license keys and verify their status:
+
+            ```text
+            request license fetch
+            request license info
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/ngfw/administration/firewall-administration
+        title: Firewall Administration
+  - uid: mondoo-panos-security-operational-mode-normal
+    title: Ensure device operational mode is normal
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-1
+      compliance/owasp-top-10-2025: false
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: panos.system.operationalMode.downcase == "normal"
+    docs:
+      desc: |
+        This check verifies that the firewall is running in normal operational mode.
+
+        PAN-OS reports an operational mode describing which runtime the system booted into. Normal mode is the state in which the dataplane forwards traffic and the security policy is enforced; other states, such as maintenance mode or a partially initialized boot, mean the system is not doing that work. The mode appears in the General Information section of the Dashboard and in the output of `show system info`, and this check requires it to be normal.
+
+        **Why this matters**
+
+        A firewall that is not in normal mode is not a firewall. Depending on the platform and the deployment, traffic either stops at the device, which blacks out every site behind it, or passes without inspection, which quietly removes the perimeter while every upstream dashboard still shows the appliance as present. The second failure is worse than the outage nobody misses.
+
+        Maintenance mode in particular is a recovery state reached after a failed content install, a corrupted configuration, or a disk problem. It offers console access and image recovery, and it does not run the security policy. A device sitting in maintenance mode since an unattended reboot has been out of the enforcement path for however long that reboot went unnoticed.
+
+        The mode is also a signal about hardware. Appliances that fail power-on diagnostics or lose a dataplane processor often come up degraded rather than refusing to boot, so an unexpected operational mode is frequently the first visible symptom of a failing device.
+
+        Firewalls deliberately placed in FIPS-CC mode, or being rebuilt during a maintenance window, will fail this check by design; confirm the mode against the change record before treating it as an incident. Pair the check with out-of-band console access, because a device found in maintenance mode cannot be recovered over the network.
+      audit: |
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show system info | match oper
+           ```
+
+        If `operational-mode` reports `normal`, the check passes. If it reports any other value, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Review **Monitor → System Logs** for errors or warnings that indicate why the device entered a non-normal state
+
+            If the device is in maintenance mode:
+
+            1. Connect to the device via console cable
+            2. Review the maintenance mode menu for options to reboot into normal mode or restore the configuration
+            3. If prompted, select **Continue with normal boot** or **Reboot to normal mode**
+
+            If the device entered maintenance mode after a failed software upgrade:
+
+            1. From the maintenance mode menu, select **Reboot** to attempt a normal boot
+            2. If the device re-enters maintenance mode, use the option to restore the previous software version
+
+            If the device cannot return to normal mode, contact [Palo Alto Networks Support](https://support.paloaltonetworks.com) for assistance.
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Check the current operational mode:
+
+            ```text
+            show system info | match oper
+            ```
+
+            If the mode is not normal, investigate the system logs and the maintenance mode console before taking action. A restart is usually required to return to normal mode, but it reboots the entire device and interrupts all traffic, so run it only during an approved maintenance window:
+
+            ```text
+            request restart system
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/ngfw/administration/firewall-administration
+        title: Firewall Administration
+  - uid: mondoo-panos-security-threat-content-installed
+    title: Ensure threat content version is installed
+    impact: 85
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-id-ra-1
+      compliance/nist-csf-2: nist-csf-2-id-ra-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a03
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: soc2-control-cc7-1-2
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: panos.system.threatVersion != ""
+    docs:
+      desc: |
+        This check verifies that the firewall has threat prevention content installed.
+
+        Threat content is the signature package behind vulnerability protection, anti-spyware, and the rest of the intrusion prevention engine. It arrives through the Applications and Threats update, and the installed version is shown under Device > Dynamic Updates and in the Dashboard's General Information panel. This check requires a threat content version to be present rather than blank.
+
+        **Why this matters**
+
+        An appliance with no threat content still matches traffic against the security policy, but the profiles attached to those rules have nothing to compare packets against. An attacker sending a known exploit for an unpatched mail server, load balancer, or VPN appliance behind the firewall gets a clean pass, and the traffic log records an allowed session rather than a blocked threat.
+
+        The gap is invisible from the outside. Rules still show vulnerability and anti-spyware profiles attached, threat logs still exist, and the only difference is that they stay empty. Teams reading a quiet threat log as evidence that nothing is attacking them will not question it until an endpoint is already compromised.
+
+        Missing content usually means the device cannot reach the update servers, that the subscription lapsed, or that a scheduled download completed while the install step failed. Each of those is silent, so the absence tends to persist for weeks.
+
+        A firewall that has just been factory reset or newly staged will legitimately report no content until its first update runs. Pair this check with the license checks in this policy, because downloads stop the moment the underlying subscription expires even though the last installed version stays on disk and keeps this check passing.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Device → Dynamic Updates**.
+        3. Locate the **Applications and Threats** section and review the **Currently Installed** version.
+
+        If the Applications and Threats section shows an installed version, the check passes. If no version is installed, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show system info | match threat-version
+           ```
+
+        If the command returns a non-empty `threat-version` value, the check passes. If the value is empty, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Device → Dynamic Updates**
+            2. Click **Check Now** to retrieve the latest available content versions
+            3. Locate the **Applications and Threats** entry and click **Download**, then **Install**
+
+            To configure automatic updates so threat content stays current:
+
+            1. Navigate to **Device → Dynamic Updates**
+            2. Click the schedule link next to **Applications and Threats**
+            3. Set the recurrence (daily recommended) and enable **Install**
+            4. Enable **Threshold** to delay installation until the content has been available for a set number of hours, reducing the risk of deploying a faulty update
+            5. Click **OK** and commit the configuration
+
+            Note: Threat content and application content are delivered together in the Applications and Threats update package. An active Threat Prevention license is required to receive these updates.
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Download and install the latest threat content:
+
+            ```text
+            request content upgrade download latest
+            request content upgrade install version latest
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/ngfw/administration/firewall-administration
+        title: Firewall Administration
+      - url: https://docs.paloaltonetworks.com/best-practices
+        title: Palo Alto Networks Best Practices
+  - uid: mondoo-panos-security-threat-prevention-license
+    title: Ensure Threat Prevention license is active
+    impact: 95
+    filters: panos.licenses != empty
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      panos.licenses.
+        where(feature.downcase.contains("threat") && expired == "no").
+        length > 0
+    docs:
+      desc: |
+        This check verifies that the firewall carries an active Threat Prevention subscription.
+
+        Threat Prevention entitles the device to vulnerability protection, anti-spyware, and antivirus signatures, along with the ongoing Applications and Threats content stream that keeps them current. Its status is listed under Device > Licenses, and this check requires an entry for the threat feature that is not expired.
+
+        **Why this matters**
+
+        This subscription is what turns the appliance from a stateful firewall into an intrusion prevention system. Without it the device still decides which sessions are allowed, but it stops looking inside the ones it allows. An exploit aimed at an internet-facing web server, a database driver, or an unpatched VPN concentrator behind the firewall crosses as ordinary permitted traffic.
+
+        The subscription is also the gate on content downloads. When it lapses the installed signatures stay in place and keep matching, so the device appears to be working; it simply never learns anything new again. The result is a control whose effectiveness decays a little every day without producing a single alert about it.
+
+        Anti-spyware belongs to the same subscription and covers the outbound half of an intrusion. Losing it means command-and-control beacons, DNS-based exfiltration, and known botnet traffic leaving the network stop being flagged, which removes the detection most likely to catch a compromise that began somewhere the firewall could not see.
+
+        This is the one subscription essentially every production firewall needs, so a device that fails this check and is not a lab unit should be handled as a licensing incident rather than a configuration finding. The entitlement on its own inspects nothing until the corresponding profiles are attached to security rules.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Device → Licenses**.
+        3. Locate the **Threat Prevention** entry and review its **Expires** date and status.
+
+        If a Threat Prevention license is present and not expired, the check passes. If the license is missing or expired, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           request license info
+           ```
+
+        If the output lists a Threat Prevention feature with an expiry date in the future, the check passes. If no Threat Prevention feature is listed or it is expired, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Contact your Palo Alto Networks sales representative or authorized reseller to purchase a Threat Prevention subscription
+            2. Log into the [Customer Support Portal](https://support.paloaltonetworks.com) and retrieve the license activation code
+            3. Navigate to **Device → Licenses**
+            4. Click **Retrieve license keys from license server** to activate the subscription
+            5. Navigate to **Device → Dynamic Updates** and download the latest **Applications and Threats** content
+            6. Configure Anti-Spyware and Vulnerability Protection security profiles and attach them to your security policy rules
+            7. Commit the configuration
+
+            Threat Prevention is considered a core security subscription and should be maintained on all production firewalls.
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Retrieve the license key after purchase, download the latest content, and verify:
+
+            ```text
+            request license fetch
+            request license info
+            request content upgrade download latest
+            request content upgrade install version latest
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/best-practices
+        title: Palo Alto Networks Best Practices
+  - uid: mondoo-panos-security-url-filtering-license
+    title: Ensure URL Filtering license is active
+    impact: 80
+    filters: panos.licenses != empty
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-23
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      panos.licenses.
+        where(feature.downcase.contains("url") && expired == "no").
+        length > 0
+    docs:
+      desc: |
+        This check verifies that the firewall carries an active URL Filtering subscription.
+
+        URL Filtering supplies the categorization database and the cloud lookup service that classify web destinations, along with credential submission detection and the ability to act on a site's risk score. Its status is listed under Device > Licenses, and this check requires an entry for the URL feature that is not expired.
+
+        **Why this matters**
+
+        Phishing is a delivery problem before it is an endpoint problem, and a categorized web destination is the last place to stop it in transit. Without the subscription, a credential-harvesting domain registered an hour ago resolves and loads for every user behind the firewall, and the only remaining defense is the recipient noticing.
+
+        Category lookup is also how the firewall recognizes command-and-control and payload staging over ordinary HTTPS. Attackers deliberately host second-stage payloads on hosting and file-sharing services that no port or application rule would ever block, because the traffic is genuinely web traffic to a genuinely popular provider. Categorization and reputation are the signal that separates them.
+
+        Credential phishing prevention depends on this subscription too. Losing it removes the control that notices a corporate password being typed into an uncategorized or newly seen site, which is the most direct precursor to an account takeover there is.
+
+        Without the subscription the device falls back to a small set of built-in categories, so some rules keep working and the loss is partial rather than total, which is exactly why it goes unnoticed. Pair this check with the rule-level URL filtering check, since the database is only consulted for traffic on rules that carry a URL filtering profile.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Device → Licenses**.
+        3. Locate the URL Filtering entry (PAN-DB or Advanced URL Filtering) and review its **Expires** date and status.
+
+        If a URL Filtering license is present and not expired, the check passes. If the license is missing or expired, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           request license info
+           ```
+
+        If the output lists a URL Filtering feature with an expiry date in the future, the check passes. If no URL Filtering feature is listed or it is expired, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Contact your Palo Alto Networks sales representative or authorized reseller to purchase a URL Filtering subscription. Advanced URL Filtering is recommended over the legacy PAN-DB option
+            2. Log into the [Customer Support Portal](https://support.paloaltonetworks.com) and retrieve the license activation code
+            3. Navigate to **Device → Licenses**
+            4. Click **Retrieve license keys from license server** to activate the subscription
+            5. Navigate to **Objects → Security Profiles → URL Filtering** and create or configure a URL Filtering profile
+            6. Attach the URL Filtering profile to your security policy rules that handle outbound web traffic
+            7. Commit the configuration
+
+            This subscription is recommended for all environments where users access the internet through the firewall.
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Retrieve the license key after purchase and verify activation:
+
+            ```text
+            request license fetch
+            request license info
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/best-practices
+        title: Palo Alto Networks Best Practices
+  - uid: mondoo-panos-security-wildfire-content-installed
+    title: Ensure WildFire content version is installed
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-id-ra-1
+      compliance/nist-csf-2: nist-csf-2-id-ra-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a03
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: soc2-control-cc7-1-2
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: panos.system.wildfireVersion != ""
+    docs:
+      desc: |
+        This check verifies that the firewall has WildFire content installed.
+
+        WildFire content is the fast-turnaround signature feed generated from cloud sandbox verdicts across Palo Alto Networks' customer base. Where antivirus content is a daily package, WildFire signatures are published within minutes of a sample being convicted, which closes the window between a new payload appearing somewhere in the world and this firewall being able to recognize it. The installed version is listed as the WildFire package under Device > Dynamic Updates, and this check requires it to be present.
+
+        **Why this matters**
+
+        Attackers routinely recompile or repack a payload for each campaign so that no existing signature matches. The value of this feed is that the first victim's submission produces a verdict every other firewall can enforce almost immediately. A device without the feed is permanently in the position of the first victim.
+
+        Targeted intrusions are where that matters most. A bespoke loader written for one organization will never appear in a daily antivirus package, and the only signal available at the perimeter is the sandbox verdict on the sample itself.
+
+        Without the content installed, the appliance can still forward files for analysis when a WildFire profile is attached, but it cannot act on any verdict it did not produce locally. That turns a preventive control into a reporting one.
+
+        This feed is only useful alongside the WildFire subscription and a WildFire Analysis profile attached to the rules carrying file traffic. A current content version on a device with no such profiles changes nothing about what reaches users.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Device → Dynamic Updates**.
+        3. Locate the **WildFire** section and review the **Currently Installed** version.
+
+        If the WildFire section shows an installed version, the check passes. If no version is installed, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show system info | match wildfire-version
+           ```
+
+        If the command returns a non-empty `wildfire-version` value, the check passes. If the value is empty, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Device → Dynamic Updates**
+            2. Click **Check Now** to retrieve the latest available content versions
+            3. Locate the **WildFire** entry and click **Download**, then **Install**
+
+            To configure automatic updates so WildFire content stays current:
+
+            1. Navigate to **Device → Dynamic Updates**
+            2. Click the schedule link next to **WildFire**
+            3. Set the recurrence to **Every Minute** (recommended, as WildFire signatures are published every five minutes)
+            4. Enable **Install**
+            5. Click **OK** and commit the configuration
+
+            Note: An active WildFire license is required to receive content updates at the every-minute interval. Without a license, WildFire signatures are delivered only through the daily Applications and Threats update.
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Download and install the latest WildFire content:
+
+            ```text
+            request wildfire upgrade download latest
+            request wildfire upgrade install version latest
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/ngfw/administration/firewall-administration
+        title: Firewall Administration
+      - url: https://docs.paloaltonetworks.com/best-practices
+        title: Palo Alto Networks Best Practices
+  - uid: mondoo-panos-security-wildfire-license
+    title: Ensure WildFire license is active
+    impact: 85
+    filters: panos.licenses != empty
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      panos.licenses.
+        where(feature.downcase.contains("wildfire") && expired == "no").
+        length > 0
+    docs:
+      desc: |
+        This check verifies that the firewall carries an active WildFire subscription.
+
+        WildFire is the cloud sandbox service. The subscription entitles the device to forward unknown files and links for detonation and to receive the resulting verdicts as signatures on a minutes-scale feed rather than the daily antivirus cadence. Its status is listed under Device > Licenses, and this check requires an entry for the WildFire feature that is not expired.
+
+        **Why this matters**
+
+        Signature-based inspection only recognizes what has been seen before, and an attacker's cheapest evasion is making sure their payload has not been. Repacking a commodity loader for each target defeats the antivirus package outright. Sandbox analysis is the control designed for that case, because it judges a sample by what it does rather than by what it looks like.
+
+        Without the subscription, unknown files are simply forwarded. There is no detonation, no verdict, and no signature, so the first anyone learns that a file was malicious is from the endpoint it landed on.
+
+        The subscription also feeds the fast signature channel the rest of the fleet depends on. A device without it gains nothing from convictions produced elsewhere, so a payload already caught at another site keeps working here.
+
+        Analysis forwards file content to the cloud service, so organizations with data residency constraints should route to a regional cloud or an on-premises appliance rather than dropping the subscription. As with the other entitlements, it does nothing until a WildFire Analysis profile is attached to the rules carrying file traffic.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Device → Licenses**.
+        3. Locate the **WildFire** entry and review its **Expires** date and status.
+
+        If a WildFire license is present and not expired, the check passes. If the license is missing or expired, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           request license info
+           ```
+
+        If the output lists a WildFire feature with an expiry date in the future, the check passes. If no WildFire feature is listed or it is expired, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Contact your Palo Alto Networks sales representative or authorized reseller to purchase a WildFire subscription
+            2. Log into the [Customer Support Portal](https://support.paloaltonetworks.com) and retrieve the license activation code
+            3. Navigate to **Device → Licenses**
+            4. Click **Retrieve license keys from license server** to activate the subscription
+            5. Navigate to **Device → Dynamic Updates** and configure the WildFire update schedule to **Every Minute** for near real-time signature delivery
+            6. Navigate to **Objects → Security Profiles → WildFire Analysis** and create or configure a WildFire Analysis profile
+            7. Attach the WildFire Analysis profile to your security policy rules
+            8. Commit the configuration
+
+            WildFire is strongly recommended for all production firewalls, especially those protecting sensitive environments.
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Retrieve the license key after purchase, configure WildFire updates, and verify:
+
+            ```text
+            request license fetch
+            request license info
+            request wildfire upgrade download latest
+            request wildfire upgrade install version latest
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/best-practices
+        title: Palo Alto Networks Best Practices
+  # ============================================================
+  # Zone Security
+  # ============================================================
+  - uid: mondoo-panos-security-zone-protection-profile
+    title: Ensure all zones have a zone protection profile
+    impact: 90
+    filters: panos.zones != empty
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-22
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: panos.zones.all(zoneProfile != "")
+    docs:
+      desc: |
+        This check verifies that every security zone has a zone protection profile applied.
+
+        A zone protection profile sets the flood thresholds, reconnaissance detection, and packet-based attack protections that apply to traffic arriving on any interface in that zone. Profiles are built under Network > Network Profiles > Zone Protection and attached to a zone under Network > Zones, and this check requires every zone to name one.
+
+        **Why this matters**
+
+        Zone protection acts before the security policy does, on traffic that has not yet matched a rule. That makes it the only control covering a SYN flood aimed at the firewall itself, and the scanning and sweeping that precede a targeted attack. A rulebase, however tight, does not help when the resource being exhausted is the session table.
+
+        Reconnaissance detection is the part most often missed. Port scans and host sweeps against an internet-facing zone are a reliable early indicator that something specific is being planned, and without a profile they generate no event at all, so the first sign of the intrusion is the intrusion.
+
+        Packet-based attack protection covers the older but still effective malformed-packet techniques: spoofed source addresses, overlapping fragments, and IP options used to slip past inspection. These are dropped at the zone level or not at all.
+
+        Thresholds, not attachment, are the hard part of this control. A profile with flood limits set below the site's real peak throughput drops legitimate traffic during a busy period, so baseline the zone before committing values and set the alert threshold well below the drop threshold, ensuring the first indication is a log entry rather than an outage.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Network → Zones**.
+        3. Review the **Zone Protection Profile** column for every zone.
+
+        If every zone has a zone protection profile assigned, the check passes. If any zone shows no profile, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show config running xpath devices/entry/vsys/entry/zone
+           ```
+
+        If every zone entry contains a `network/zone-protection-profile` value, the check passes. If any zone lacks one, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Network → Network Profiles → Zone Protection**
+            2. Click **Add** to create a new zone protection profile or select an existing one to review
+            3. Configure flood protection thresholds for SYN, UDP, ICMP, ICMPv6, and other IP traffic under the **Flood Protection** tab
+            4. Enable reconnaissance protection for port scans and host sweeps under the **Reconnaissance Protection** tab
+            5. Configure packet-based attack protection under the **Packet Based Attack Protection** tab
+            6. Click **OK** to save the profile
+            7. Navigate to **Network → Zones** and select each zone
+            8. In the **Zone Protection Profile** dropdown, select the appropriate profile
+            9. Click **OK** and commit the configuration
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Create a zone protection profile with flood and reconnaissance protection, then apply it to a zone. Reconnaissance protection entries are keyed by threat ID: 8001 is TCP port scan, 8002 is host sweep, and 8003 is UDP port scan. The `set` commands edit the candidate configuration; `commit` activates the change on the running configuration.
+
+            ```text
+            configure
+            set network profiles zone-protection-profile <profile-name> flood tcp-syn enable yes
+            set network profiles zone-protection-profile <profile-name> flood udp enable yes
+            set network profiles zone-protection-profile <profile-name> flood icmp enable yes
+            set network profiles zone-protection-profile <profile-name> scan 8001 action block-ip duration 3600 track-by source
+            set network profiles zone-protection-profile <profile-name> scan 8002 action alert
+            set network profiles zone-protection-profile <profile-name> scan 8003 action alert
+            set zone <zone-name> network zone-protection-profile <profile-name>
+            commit
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/best-practices/dos-and-zone-protection-best-practices/dos-and-zone-protection-best-practices
+        title: DoS and Zone Protection Best Practices
+  - uid: mondoo-panos-security-zone-packet-buffer-protection
+    title: Ensure all zones have packet buffer protection enabled
+    impact: 80
+    filters: panos.zones != empty
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-22
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-5
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: panos.zones.all(enablePacketBufferProtection == true)
+    docs:
+      desc: |
+        This check verifies that packet buffer protection is enabled on every security zone.
+
+        Packet buffer protection watches the firewall's dataplane buffers and, when utilization crosses a threshold, identifies and then throttles or blocks the individual sessions and source addresses responsible. The global thresholds live under Device > Setup > Session, and the per-zone toggle that puts them into effect is on each zone under Network > Zones. This check requires that toggle to be on.
+
+        **Why this matters**
+
+        Packet buffers are a finite dataplane resource shared across every zone on the appliance. A single abusive source anywhere on the device can therefore starve traffic everywhere on it, and without per-zone enforcement the blast radius of one hostile session is the whole firewall.
+
+        This is cheap to mount and hard to attribute. The traffic need not be malformed or even unusually large in aggregate; it only needs to be shaped so buffers fill faster than they drain. From the operator's side the symptom is packet loss on unrelated interfaces, which sends the investigation toward the network rather than toward the source.
+
+        Enforcement is also what makes the event visible. With protection enabled the firewall names the offending session and source in its logs, turning an ambiguous performance complaint into an actionable incident.
+
+        The global thresholds ship with values that are conservative for the platform, so review them against the real traffic profile before relying on the control; on a heavily loaded device an aggressive block threshold can terminate legitimate long-lived sessions. This is resource protection rather than a substitute for the flood thresholds in a zone protection profile, and the two are meant to be configured together.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Network → Zones**.
+        3. Review the **Packet Buffer Protection** column for every zone.
+
+        If every zone has packet buffer protection enabled, the check passes. If any zone shows it disabled, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show config running xpath devices/entry/vsys/entry/zone
+           ```
+
+        If every zone entry shows `enable-packet-buffer-protection yes`, the check passes. If any zone has it set to `no`, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Network → Zones**
+            2. Select each zone
+            3. Check the **Packet Buffer Protection** checkbox to enable it
+            4. Click **OK** and commit the configuration
+
+            Additionally, enable global packet buffer protection:
+
+            1. Navigate to **Device → Setup → Session**
+            2. Click the gear icon next to **Session Settings**
+            3. Enable **Packet Buffer Protection** and configure the alert and activation thresholds
+            4. Click **OK** and commit
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Enable packet buffer protection on a zone. The `set` command edits the candidate configuration; `commit` activates the change on the running configuration.
+
+            ```text
+            configure
+            set zone <zone-name> network enable-packet-buffer-protection yes
+            commit
+            ```
+
+            Zone-level packet buffer protection only takes effect when global packet buffer protection is enabled under **Device → Setup → Session**.
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/ngfw/administration/zone-protection-and-dos-protection/zone-defense/packet-buffer-protection/configure-packet-buffer-protection
+        title: Configure Packet Buffer Protection
+  - uid: mondoo-panos-security-zone-log-forwarding
+    title: Ensure all zones have log forwarding configured
+    impact: 70
+    filters: panos.zones != empty
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-08
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-15
+      compliance/nis-2: nis-2-21-2-g
+      compliance/nist-csf-1: nist-csf-1-de-ae-3
+      compliance/nist-csf-2: nist-csf-2-de-ae-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-2-1
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    mql: panos.zones.all(logSetting != "")
+    docs:
+      desc: |
+        This check verifies that every security zone has a log forwarding profile attached.
+
+        The log setting on a zone determines where events raised by that zone's protection profile, such as flood detections and reconnaissance alerts, are sent. Forwarding profiles are defined under Objects > Log Forwarding and selected on each zone under Network > Zones, and this check requires every zone to name one.
+
+        **Why this matters**
+
+        Local log storage on a firewall is a small circular buffer. During exactly the event these logs exist to record, a flood or a sweep generating entries at high rate, the buffer rolls over fastest and the earliest records go first. The entries describing how an attack started are the ones lost soonest.
+
+        Off-box forwarding is also what survives the device. If the firewall is rebooted to recover from the incident, replaced, or compromised, anything held only in local storage goes with it, and an attacker with administrative access on the appliance can clear those logs deliberately.
+
+        Correlation is the other half. Zone events are most useful next to endpoint and identity data in a log platform, because a host sweep from an internal address only becomes interesting once it is tied to the workstation that started it.
+
+        Zones carrying only low-value internal traffic may reasonably forward at a higher severity threshold rather than not at all, which is a filter decision inside the forwarding profile rather than a reason to leave the zone unset. Note that a forwarding profile does nothing on a zone that has no zone protection profile generating events in the first place.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Network → Zones**.
+        3. Review the **Log Setting** column for every zone.
+
+        If every zone has a log forwarding profile assigned, the check passes. If any zone shows no log setting, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show config running xpath devices/entry/vsys/entry/zone
+           ```
+
+        If every zone entry contains a `network/log-setting` value, the check passes. If any zone lacks one, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Objects → Log Forwarding** and create or verify a log forwarding profile that sends logs to your SIEM or log management system
+            2. Navigate to **Network → Zones** and select each zone
+            3. In the **Log Setting** dropdown, select the appropriate log forwarding profile
+            4. Click **OK** and commit the configuration
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Configure log forwarding on a zone. The `set` command edits the candidate configuration; `commit` activates the change on the running configuration.
+
+            ```text
+            configure
+            set zone <zone-name> network log-setting <log-forwarding-profile>
+            commit
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/ngfw/administration/monitoring/configure-log-forwarding
+        title: Configure Log Forwarding
+  # ============================================================
+  # Security Rule Hygiene
+  # ============================================================
+  - uid: mondoo-panos-security-no-allow-any-rules
+    title: Ensure no overly permissive allow-any rules exist
+    impact: 95
+    filters: panos.securityRules != empty
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-4
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-3
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      panos.securityRules.none(
+        action == "allow" &&
+        disabled == false &&
+        applications.any(_ == "any") &&
+        services.any(_ == "any") &&
+        sourceAddresses.any(_ == "any") &&
+        destinationAddresses.any(_ == "any")
+      )
+    docs:
+      desc: |
+        This check verifies that no enabled security rule allows every application, service, source, and destination at once.
+
+        A rule of that shape permits all traffic between all addresses with no application or port constraint. Rules are administered under Policies > Security, and this check requires that no enabled rule with an allow action has all four of those fields set to any.
+
+        **Why this matters**
+
+        A rule like this ends the security policy for everything it matches. Because rules are evaluated in order and the first match wins, an allow-any rule placed high in the rulebase silently voids every specific rule beneath it, including the ones an audit will read and approve.
+
+        For an attacker who has landed anywhere behind the firewall, this is the difference between a segmented network and a flat one. Lateral movement to any host, on any port, in any direction is permitted, and the traffic log shows every step of it as policy compliant.
+
+        These rules almost always arrive as a temporary measure. Someone opens one during a migration or to break an outage at 2am, the immediate problem goes away, and the rule survives because nothing ever fails afterward to prompt its removal. The absence of complaints is the reason it stays.
+
+        Where a broad rule is genuinely needed, narrow at least one dimension and attach security profiles so the traffic is still inspected, then record an explicit review date. A rule matching this shape with a deny action is the intended default-deny form and is not what this check looks for.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Policies → Security**.
+        3. Review every enabled rule with an **Allow** action and inspect the **Source Address**, **Destination Address**, **Application**, and **Service** columns.
+
+        If no enabled allow rule sets all four columns to **Any**, the check passes. If any enabled allow rule has all four set to **Any**, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show running security-policy
+           ```
+
+        If no enabled allow rule has source, destination, application, and service all set to `any`, the check passes. If any does, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Policies → Security**
+            2. Identify rules where Source, Destination, Application, and Service are all set to **Any**
+            3. For each overly permissive rule:
+               - Define specific source and destination zones and addresses
+               - Specify the applications that need to be allowed using App-ID
+               - Set the service to **application-default** or specific service objects
+               - Attach appropriate security profiles such as Antivirus, Anti-Spyware, Vulnerability Protection, URL Filtering, and WildFire
+            4. If the rule was a temporary placeholder, replace it with specific rules for each required traffic flow
+            5. Commit the configuration
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Review the rulebase from the operational prompt:
+
+            ```text
+            show running security-policy
+            ```
+
+            Then enter configuration mode and replace each wildcard member list with specific values. The `set` command appends members to an existing list, so delete each list first to remove the `any` entry. The `set` and `delete` commands edit the candidate configuration; `commit` activates the change on the running configuration.
+
+            ```text
+            configure
+            delete rulebase security rules <rule-name> application
+            set rulebase security rules <rule-name> application [ <app1> <app2> ]
+            delete rulebase security rules <rule-name> service
+            set rulebase security rules <rule-name> service application-default
+            delete rulebase security rules <rule-name> source
+            set rulebase security rules <rule-name> source [ <source-address> ]
+            delete rulebase security rules <rule-name> destination
+            set rulebase security rules <rule-name> destination [ <destination-address> ]
+            commit
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/best-practices/internet-gateway-best-practices/best-practice-internet-gateway-security-policy
+        title: Best Practice Internet Gateway Security Policy
+  - uid: mondoo-panos-security-rules-use-app-id
+    title: Ensure security rules use App-ID instead of any application
+    impact: 85
+    filters: panos.securityRules != empty
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-4
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-3
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      panos.securityRules.
+        where(action == "allow" && disabled == false).
+        all(applications.none(_ == "any"))
+    docs:
+      desc: |
+        This check verifies that enabled allow rules identify traffic by application rather than permitting any application.
+
+        Setting a rule's application to any means the firewall permits whatever it finds on the allowed ports without regard to what the session actually carries. The field is on the Application tab of each rule under Policies > Security, and this check requires that no enabled allow rule leaves it set to any.
+
+        **Why this matters**
+
+        Port numbers are a convention, not a control. An attacker who wants an outbound channel from a compromised host picks 443 because it is open everywhere, and a rule allowing any application on 443 cannot tell a browser session from an SSH tunnel, a remote access tool, or an implant beaconing over TLS.
+
+        The same weakness runs inbound. A rule intended to publish a web service but written to allow any application accepts whatever protocol a client chooses to speak to that port, which turns a narrow exposure into whatever the backend happens to answer.
+
+        Application matching also gates the rest of the inspection stack. The decoders that extract files, URLs, and credentials operate on an identified application, so a rule matching by port alone inspects the session far more shallowly than the profiles attached to it suggest.
+
+        Legitimate exceptions exist: a proprietary protocol with no application signature has to fall back to a service definition, and those rules should use a custom application or a tightly scoped service and address pair rather than being left open. When tightening an existing rule, build the application list from the traffic already logged against it, since guessing tends to break something that only runs once a month.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Policies → Security**.
+        3. Review the **Application** column for every enabled rule with an **Allow** action.
+
+        If every enabled allow rule lists specific App-ID applications, the check passes. If any enabled allow rule has the application set to **Any**, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show running security-policy
+           ```
+
+        If no enabled allow rule has its application set to `any`, the check passes. If any does, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Policies → Security**
+            2. Identify rules where the **Application** column shows **Any**
+            3. Use **Monitor → App Scope → Summary** or **ACC** to identify which applications are actually being used by each rule
+            4. Replace **Any** with the specific applications observed in traffic
+            5. Set the **Service** to **application-default** to allow each application's default ports
+            6. Commit and monitor for any blocked traffic that indicates a missing application
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Replace the application list with specific App-IDs. The `set` command appends members to an existing list, so delete the list first to remove the `any` entry. The `set` and `delete` commands edit the candidate configuration; `commit` activates the change on the running configuration.
+
+            ```text
+            configure
+            delete rulebase security rules <rule-name> application
+            set rulebase security rules <rule-name> application [ <app1> <app2> ]
+            delete rulebase security rules <rule-name> service
+            set rulebase security rules <rule-name> service application-default
+            commit
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/best-practices/internet-gateway-best-practices/best-practice-internet-gateway-security-policy
+        title: Best Practice Internet Gateway Security Policy
+  - uid: mondoo-panos-security-rules-have-security-profiles
+    title: Ensure allow rules have security profiles or profile groups attached
+    impact: 90
+    filters: panos.securityRules != empty
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-de-cm-4
+      compliance/nist-csf-2: nist-csf-2-de-cm-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc7-1-2
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      panos.securityRules.
+        where(action == "allow" && disabled == false).
+        all(
+          profileGroup != "" ||
+          virusProfile != "" ||
+          spywareProfile != "" ||
+          vulnerabilityProfile != ""
+        )
+    docs:
+      desc: |
+        This check verifies that enabled allow rules apply threat inspection through a security profile or profile group.
+
+        Profiles are what cause allowed traffic to be examined for exploits, malware, and spyware; a rule without one permits the session and inspects nothing. The setting is on the Actions tab of each rule under Policies > Security, and this check requires an enabled allow rule to name either a profile group or at least one of the antivirus, anti-spyware, and vulnerability protection profiles.
+
+        **Why this matters**
+
+        Subscriptions and content on the device do nothing on their own. A firewall with current signatures and every license active still passes an exploit untouched if the rule that admitted the session has no profile attached, and nothing warns that this is happening.
+
+        This is the most common way a next-generation firewall ends up operating as a stateful packet filter. Rules get written for connectivity first, the traffic flows, and the profile field is left empty because nothing about the rule's behavior suggests it should not be.
+
+        For an attacker the consequence is direct. Exploiting a vulnerable internal service means getting the exploit to it, and a rule without vulnerability protection does exactly that, delivering the payload to a host that may be months behind on patching.
+
+        Inspection adds load, so on very high throughput rules carrying traffic that is already inspected elsewhere a deliberately reduced profile group is a reasonable trade. Prefer a shared profile group over per-rule profiles, so a policy change propagates in one place instead of being reapplied rule by rule.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Policies → Security**.
+        3. Review the **Profile** column for every enabled rule with an **Allow** action.
+
+        If every enabled allow rule has a security profile or profile group attached, the check passes. If any enabled allow rule has an empty Profile column, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show config running xpath devices/entry/vsys/entry/rulebase/security
+           ```
+
+        If every enabled allow rule contains a `profile-setting` with a group or with virus, spyware, or vulnerability profiles, the check passes. If any lacks one, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Policies → Security**
+            2. Identify allow rules without security profiles (the **Profile** column will be empty)
+            3. Select each rule and go to the **Actions** tab
+            4. Under **Profile Setting**, select either:
+               - **Group**: Choose a security profile group (recommended for consistency)
+               - **Profiles**: Select individual profiles for Antivirus, Anti-Spyware, Vulnerability Protection, URL Filtering, File Blocking, and WildFire Analysis
+            5. Click **OK** and commit the configuration
+
+            Best practice is to create a security profile group with all recommended profiles and apply it consistently across rules.
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Attach a security profile group to a rule. The `set` commands edit the candidate configuration; `commit` activates the change on the running configuration.
+
+            ```text
+            configure
+            set rulebase security rules <rule-name> profile-setting group <profile-group-name>
+            commit
+            ```
+
+            Or attach individual profiles:
+
+            ```text
+            configure
+            set rulebase security rules <rule-name> profile-setting profiles virus <av-profile>
+            set rulebase security rules <rule-name> profile-setting profiles spyware <as-profile>
+            set rulebase security rules <rule-name> profile-setting profiles vulnerability <vp-profile>
+            commit
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/best-practices/internet-gateway-best-practices/best-practice-internet-gateway-security-policy/create-best-practice-security-profiles
+        title: Create Best Practice Security Profiles for the Internet Gateway
+  - uid: mondoo-panos-security-rules-url-filtering
+    title: Ensure allow rules have URL filtering applied
+    impact: 80
+    filters: panos.securityRules != empty
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-23
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      panos.securityRules.
+        where(action == "allow" && disabled == false).
+        all(urlFilteringProfile != "" || profileGroup != "")
+    docs:
+      desc: |
+        This check verifies that enabled allow rules apply URL filtering to the web traffic they permit.
+
+        A URL filtering profile classifies each web destination a session reaches and acts on the category, and it takes effect only on the rules that reference it. The setting is on the Actions tab of each rule under Policies > Security, and this check requires an enabled allow rule to name either a URL filtering profile or a profile group containing one.
+
+        **Why this matters**
+
+        Outbound web access is the path a phishing click takes and the path the payload comes back on. A rule permitting it without categorization cannot distinguish a business application from a credential-harvesting page registered an hour ago, so the browser loads both.
+
+        It is also the return channel for an established compromise. Command and control over HTTPS is indistinguishable from ordinary browsing at the session level; the destination's category and reputation are the only remaining signal, and a rule without a profile never asks for them.
+
+        Because blocked-category logging lives in the profile, a rule without one produces no record of where users actually went. Reconstructing an incident afterward then depends entirely on endpoint telemetry that may not exist.
+
+        This applies to rules carrying general web traffic; a rule scoped to one internal service on a fixed address gains little from categorization and can reasonably omit it. URL filtering also only sees what it can read, so pair it with decryption on the rules where inspecting HTTPS is permitted, or classification falls back to the certificate name alone.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Policies → Security**.
+        3. Review the **Profile** column for every enabled rule with an **Allow** action.
+
+        If every enabled allow rule has a URL Filtering profile or a profile group attached, the check passes. If any enabled allow rule has neither, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show config running xpath devices/entry/vsys/entry/rulebase/security
+           ```
+
+        If every enabled allow rule references a `url-filtering` profile or a profile-setting group, the check passes. If any lacks both, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Objects → Security Profiles → URL Filtering** and create or verify a URL Filtering profile
+            2. Navigate to **Policies → Security**
+            3. Select each allow rule and go to the **Actions** tab
+            4. Under **Profile Setting**, either:
+               - Select a **Group** that includes URL Filtering
+               - Under **Profiles**, select a URL Filtering profile
+            5. Click **OK** and commit the configuration
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Attach a URL filtering profile to a rule. The `set` command edits the candidate configuration; `commit` activates the change on the running configuration.
+
+            ```text
+            configure
+            set rulebase security rules <rule-name> profile-setting profiles url-filtering <url-profile>
+            commit
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/best-practices/internet-gateway-best-practices/best-practice-internet-gateway-security-policy/create-best-practice-security-profiles
+        title: Create Best Practice Security Profiles for the Internet Gateway
+  - uid: mondoo-panos-security-rules-logging-enabled
+    title: Ensure security rules have session-end logging enabled
+    impact: 75
+    filters: panos.securityRules != empty
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-08
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-15
+      compliance/nis-2: nis-2-21-2-g
+      compliance/nist-csf-1: nist-csf-1-de-ae-3
+      compliance/nist-csf-2: nist-csf-2-de-ae-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-2-1
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    mql: |
+      panos.securityRules.
+        where(disabled == false).
+        all(logEnd == true)
+    docs:
+      desc: |
+        This check verifies that enabled security rules log at session end.
+
+        Session-end logging writes one record per session after it closes, carrying the application, the byte and packet counts in each direction, the duration, the user, and the action taken. The option is on the Actions tab of each rule under Policies > Security, and this check requires it on every enabled rule.
+
+        **Why this matters**
+
+        Traffic logs are the primary evidence a firewall produces. Without them an investigation cannot establish whether a host ever talked to a given address, how much data left, or when it started, and all three questions come up in the first hour of an incident.
+
+        Session end is the record carrying the byte counts, which is what makes exfiltration visible. A session-start log shows that a connection happened; only the session-end record shows that four gigabytes went out over it.
+
+        Deny rules matter as much as allow rules here. Blocked traffic is the signal that something is scanning, misconfigured, or already compromised and probing for a way out, and a deny rule that does not log turns that signal into silence.
+
+        The usual reason logging gets disabled is volume on a very chatty rule, and the right answer is to filter or sample in the forwarding profile rather than to stop generating the record. Where a rule must genuinely stay quiet, document why, and confirm that retention on the receiving system is long enough for the logs to still exist when someone comes to read them.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Policies → Security**.
+        3. Select each enabled rule, open the **Actions** tab, and review **Log at Session End**.
+
+        If every enabled rule has **Log at Session End** selected, the check passes. If any enabled rule has it cleared, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show config running xpath devices/entry/vsys/entry/rulebase/security
+           ```
+
+        If every enabled rule shows `log-end yes`, the check passes. If any enabled rule has `log-end no`, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Policies → Security**
+            2. Select each rule and go to the **Actions** tab
+            3. Check **Log at Session End** (this is the default for new rules, but may have been disabled)
+            4. Optionally, select a **Log Forwarding** profile to send logs to an external SIEM
+            5. Click **OK** and commit the configuration
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Enable session-end logging on a rule. The `set` command edits the candidate configuration; `commit` activates the change on the running configuration.
+
+            ```text
+            configure
+            set rulebase security rules <rule-name> log-end yes
+            commit
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/ngfw/administration/monitoring/configure-log-forwarding
+        title: Configure Log Forwarding
+  - uid: mondoo-panos-security-no-disabled-rules
+    title: Ensure no disabled security rules remain in the rulebase
+    impact: 60
+    filters: panos.securityRules != empty
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc8-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: panos.securityRules.none(disabled == true)
+    docs:
+      desc: |
+        This check verifies that the security rulebase contains no disabled rules.
+
+        A disabled rule stays in the configuration and in the displayed rule order but is skipped during evaluation. Rules are enabled and disabled under Policies > Security, and this check requires that none of them are left in the disabled state.
+
+        **Why this matters**
+
+        Disabled rules make the rulebase harder to read correctly, and rule order is the whole of the policy's meaning. Anyone reviewing the configuration has to mentally filter out inactive entries to work out what actually matches first, and reviews run against a longer, noisier list find fewer real problems.
+
+        Re-enablement is the specific hazard. A rule disabled two years ago for a decommissioned application may reference address objects that have since been reused for something else entirely, so switching it back on grants access nobody intended, to a system nobody was thinking about.
+
+        Disabled rules also distort the tools people use to reason about the policy. Rule usage and hit-count data has nothing to say about a rule that never evaluates, so the normal signal for identifying dead policy fails on exactly the entries that are already dead.
+
+        Short-lived disablement during a change window is legitimate, and a rule kept disabled as a documented rollback path is defensible; both should carry a description saying so and a date. Everything else belongs in version control rather than in the running configuration.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Policies → Security**.
+        3. Scan the rulebase for rules that appear grayed out or marked with a disabled icon.
+
+        If no rules in the rulebase are disabled, the check passes. If any disabled rule remains, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show config running xpath devices/entry/vsys/entry/rulebase/security
+           ```
+
+        If no rule entry shows `disabled yes`, the check passes. If any rule has `disabled yes`, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Policies → Security**
+            2. Identify disabled rules (they appear grayed out or have a disabled icon)
+            3. For each disabled rule, determine if it is still needed:
+               - If no longer needed, select the rule and click **Delete**
+               - If temporarily disabled, document the reason and set a review date
+            4. Commit the configuration after removing unnecessary rules
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Review the rulebase from the operational prompt:
+
+            ```text
+            show running security-policy
+            ```
+
+            Then enter configuration mode and remove each disabled rule. The `delete` command edits the candidate configuration; `commit` activates the change on the running configuration.
+
+            ```text
+            configure
+            delete rulebase security rules <disabled-rule-name>
+            commit
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/best-practices
+        title: Palo Alto Networks Best Practices
+  - uid: mondoo-panos-security-rules-wildfire-profile
+    title: Ensure allow rules have WildFire analysis profile attached
+    impact: 80
+    filters: panos.securityRules != empty
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-de-cm-4
+      compliance/nist-csf-2: nist-csf-2-de-cm-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc7-1-2
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      panos.securityRules.
+        where(action == "allow" && disabled == false).
+        all(wildFireAnalysisProfile != "" || profileGroup != "")
+    docs:
+      desc: |
+        This check verifies that enabled allow rules forward unknown files for sandbox analysis.
+
+        A WildFire Analysis profile tells the firewall which file types on a rule to submit to the sandbox when no existing verdict applies. It is selected on the Actions tab of each rule under Policies > Security, and this check requires an enabled allow rule to name either that profile or a profile group containing one.
+
+        **Why this matters**
+
+        Antivirus signatures only cover samples that have been seen. The files worth worrying about most, a loader built for this target or repacked for this campaign, are by construction the ones no signature matches, and sandbox analysis is the only control on the device that can reach a verdict about them.
+
+        Without a profile attached, those files are delivered. The firewall had them in hand, decoded, on a rule it was inspecting, and passed them through because nothing instructed it to ask. The verdict that would have identified the sample is never produced.
+
+        Submission also protects everyone else. A conviction generated from one organization's sample becomes a signature the whole fleet enforces within minutes, so a device that never submits is both unprotected and a gap in the shared feed.
+
+        Sandboxing sends file content to the analysis cloud, so rules carrying regulated or highly sensitive data may need a regional cloud or an on-premises analysis appliance instead. Verdicts also arrive after the file has been forwarded, so pair this with the antivirus profile, which blocks inline, rather than treating sandbox analysis as the only file control.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Policies → Security**.
+        3. Review the **Profile** column for every enabled rule with an **Allow** action.
+
+        If every enabled allow rule has a WildFire Analysis profile or a profile group attached, the check passes. If any enabled allow rule has neither, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show config running xpath devices/entry/vsys/entry/rulebase/security
+           ```
+
+        If every enabled allow rule references a `wildfire-analysis` profile or a profile-setting group, the check passes. If any lacks both, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Objects → Security Profiles → WildFire Analysis** and create or verify a WildFire Analysis profile
+            2. Navigate to **Policies → Security**
+            3. Select each allow rule and go to the **Actions** tab
+            4. Under **Profile Setting**, either:
+               - Select a **Group** that includes WildFire Analysis
+               - Under **Profiles**, select a WildFire Analysis profile
+            5. Click **OK** and commit the configuration
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Attach a WildFire Analysis profile to a rule. The `set` command edits the candidate configuration; `commit` activates the change on the running configuration.
+
+            ```text
+            configure
+            set rulebase security rules <rule-name> profile-setting profiles wildfire-analysis <wf-profile>
+            commit
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/best-practices
+        title: Palo Alto Networks Best Practices
+  # ============================================================
+  # Network Interface Hardening
+  # ============================================================
+  - uid: mondoo-panos-security-interface-management-profile
+    title: Ensure active Layer 3 interfaces have a management profile configured
+    impact: 85
+    filters: panos.ethernetInterfaces != empty
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-3
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      panos.ethernetInterfaces.
+        where(mode == "layer3" && status == "up").
+        all(managementProfile != "")
+    docs:
+      desc: |
+        This check verifies that active Layer 3 interfaces carry an explicit interface management profile.
+
+        An interface management profile lists which management services, among ping, SSH, HTTPS, SNMP, response pages, and User-ID, may be reached on the dataplane interfaces referencing it. Profiles are built under Network > Network Profiles > Interface Mgmt and attached on the Advanced tab of each interface under Network > Interfaces, and this check requires every Layer 3 interface that is up to name one.
+
+        **Why this matters**
+
+        A dataplane interface with no profile already denies management services, so the absence of one is not itself an exposure. What it costs is intent. Nothing in the configuration states that management on that interface is meant to be closed, so a reviewer cannot tell a deliberate deny from an oversight, and neither can the next administrator who needs to add ping for a monitoring system.
+
+        That ambiguity is where real exposure enters. The Palo Alto management plane has been the target of mass-exploited pre-authentication vulnerabilities more than once, and the incidents that ended badly involved interfaces reachable from untrusted networks. Profiles are the record of which interfaces those are, and without a baseline separating trusted from untrusted, permissive profiles get attached to the wrong ones.
+
+        Profiles are also where permitted source addresses are set. One that enables HTTPS or SSH with no address list turns the interface into an open management endpoint for anyone who can route to it, which is the first thing to look for when reviewing the profiles that already exist.
+
+        Attaching a profile named for a deny-everything baseline to internet-facing and untrusted interfaces makes the intent explicit and cheap to audit. Management access belongs on the dedicated management interface on an out-of-band network wherever the deployment allows it, with dataplane management reserved for cases that genuinely have no alternative.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Network → Interfaces → Ethernet**.
+        3. For each Layer 3 interface that is up, open the **Advanced** tab and review the **Management Profile** field.
+
+        If every active Layer 3 interface has a management profile assigned, the check passes. If any active Layer 3 interface has none, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show config running xpath devices/entry/network/interface/ethernet
+           ```
+
+        If every Layer 3 interface that is up contains an `interface-management-profile` value, the check passes. If any lacks one, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Network → Network Profiles → Interface Mgmt** and create management profiles:
+               - Create a deny-all profile with no services enabled for untrusted interfaces
+               - Create a restricted profile for trusted interfaces that enables only required services and limits access with **Permitted IP Addresses**
+            2. Navigate to **Network → Interfaces → Ethernet**
+            3. Select each Layer 3 interface
+            4. In the **Advanced** tab, select the appropriate **Management Profile**
+            5. Click **OK** and commit the configuration
+
+            Never enable HTTP, HTTPS, SSH, or SNMP in a profile assigned to an internet-facing interface. Exposing these services on an untrusted interface gives attackers a direct path to the firewall's management plane.
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Create a deny-all profile for untrusted interfaces and a restricted profile for trusted interfaces, then assign each interface the appropriate profile. The `set` commands edit the candidate configuration; `commit` activates the change on the running configuration.
+
+            Before you commit, confirm that you are not removing your own management path. A deny-all profile or an incorrect `permitted-ip` on the interface you administer the firewall through will sever your access. The commit is atomic and applies immediately, so verify that a trusted interface with the correct services and permitted IP addresses still reaches the management plane.
+
+            ```text
+            configure
+            set network profiles interface-management-profile deny-all ping no
+            set network interface ethernet <untrusted-interface> layer3 interface-management-profile deny-all
+            set network profiles interface-management-profile mgmt-trusted https yes
+            set network profiles interface-management-profile mgmt-trusted ssh yes
+            set network profiles interface-management-profile mgmt-trusted permitted-ip <trusted-subnet>
+            set network interface ethernet <trusted-interface> layer3 interface-management-profile mgmt-trusted
+            commit
+            ```
+
+            Only enable management services on interfaces that face trusted networks, and always restrict access with permitted IP addresses.
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/best-practices
+        title: Palo Alto Networks Best Practices
+  - uid: mondoo-panos-security-no-dhcp-interfaces
+    title: Ensure no Layer 3 interfaces use DHCP addressing
+    impact: 65
+    filters: panos.ethernetInterfaces != empty
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc8-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      panos.ethernetInterfaces.
+        where(mode == "layer3").
+        none(enableDhcp == true)
+    docs:
+      desc: |
+        This check verifies that Layer 3 interfaces use static addressing rather than DHCP.
+
+        Setting a Layer 3 interface to DHCP client makes the firewall request its address, mask, gateway, and optionally a default route from whatever server answers on that segment. The address type is on the IPv4 tab of each interface under Network > Interfaces, and this check requires that no Layer 3 interface is configured as a DHCP client.
+
+        **Why this matters**
+
+        DHCP has no authentication. Anything on the segment can answer a request and the client takes the first reply, so an attacker with a foothold on that network can hand the firewall a gateway address they control and receive traffic the firewall then forwards to them. On a perimeter interface that is an interception primitive requiring no access to the firewall at all.
+
+        The default route option is the sharper edge of the same problem. A DHCP client interface can accept a route from the server, letting an untrusted party influence where the firewall sends traffic for destinations it has no specific route for.
+
+        The availability cost is separate and just as real. VPN peers, NAT rules, address objects, and remote monitoring all reference the interface address, and a lease renewal that returns a different one breaks them at once, usually outside a change window and without an obvious cause.
+
+        Small branch and consumer-broadband deployments are the legitimate exception, where the upstream provider offers nothing but DHCP. In those cases decline the default route from the server and configure a static one instead, and restrict what the interface accepts to the minimum the link requires.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Network → Interfaces → Ethernet**.
+        3. For each Layer 3 interface, open the **IPv4** tab and review the address **Type**.
+
+        If no Layer 3 interface uses **DHCP Client** addressing, the check passes. If any Layer 3 interface uses DHCP, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show config running xpath devices/entry/network/interface/ethernet
+           ```
+
+        If no Layer 3 interface contains a `layer3/dhcp-client` block with `enable yes`, the check passes. If any does, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Network → Interfaces → Ethernet**
+            2. Select the interface currently using DHCP
+            3. In the **IPv4** tab, change the **Type** from **DHCP Client** to **Static**
+            4. Add the appropriate static IP address and subnet mask
+            5. Update any routing, NAT, or VPN configurations that reference this interface
+            6. Click **OK** and commit the configuration
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Replace DHCP with a static address. Perform this change during a maintenance window: the address change interrupts traffic on the interface, and any static routes, NAT rules, or IKE gateways that reference the old address must be updated in the same commit. The `set` and `delete` commands edit the candidate configuration; `commit` activates the change on the running configuration.
+
+            ```text
+            configure
+            set network interface ethernet <interface> layer3 ip <address/mask>
+            delete network interface ethernet <interface> layer3 dhcp-client
+            commit
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/best-practices
+        title: Palo Alto Networks Best Practices
+  - uid: mondoo-panos-security-interfaces-assigned-to-zone
+    title: Ensure all active Layer 3 interfaces are assigned to a security zone
+    impact: 90
+    filters: panos.ethernetInterfaces != empty
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-22
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      panos.ethernetInterfaces.
+        where(mode == "layer3" && status == "up").
+        all(zone != "")
+    docs:
+      desc: |
+        This check verifies that active Layer 3 interfaces belong to a security zone.
+
+        Zones are what the security policy matches on, since every rule names a source and destination zone, so an interface outside every zone is outside the policy. The assignment is on the Config tab of each interface under Network > Interfaces, and this check requires every Layer 3 interface that is up to name a zone.
+
+        **Why this matters**
+
+        PAN-OS drops traffic on an interface with no zone, so the immediate effect is an availability one. The link is up, the address is configured, the cable is right, and nothing passes. This is a common cause of an interface that looks healthy at every layer and still carries no traffic.
+
+        The security cost appears when the omission gets fixed carelessly. Under time pressure the quickest way to make traffic flow is to drop the interface into an existing zone that already has permissive rules, which extends whatever trust that zone carries to a segment nobody assessed for it.
+
+        Zone membership also determines which network-layer protections apply. Zone protection profiles, packet buffer protection, and DoS protection are all bound to a zone, so an unzoned interface sits outside those controls as well as outside the rulebase.
+
+        Interfaces that are genuinely unused should be administratively disabled rather than left up without a zone, which removes them from this check and from the configuration's ambiguity at the same time. When adding a zone to bring an interface into service, create one scoped to that segment rather than reusing an existing zone for convenience.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Network → Interfaces → Ethernet**.
+        3. Review the **Security Zone** column for each Layer 3 interface that is up.
+
+        If every active Layer 3 interface is assigned to a security zone, the check passes. If any active Layer 3 interface has no zone, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show interface all
+           ```
+
+        If every Layer 3 interface that is up reports a zone assignment, the check passes. If any active Layer 3 interface shows no zone, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Network → Zones**
+            2. Select the appropriate zone (or create a new one) for the unzoned interface
+            3. In the zone configuration, add the interface to the **Interfaces** list
+            4. Alternatively, navigate to **Network → Interfaces → Ethernet**, select the interface, and set the **Security Zone** in the **Config** tab
+            5. Create security policy rules for traffic entering and leaving this zone
+            6. Click **OK** and commit the configuration
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Assign an interface to a zone. The `set` command edits the candidate configuration; `commit` activates the change on the running configuration.
+
+            ```text
+            configure
+            set zone <zone-name> network layer3 <interface-name>
+            commit
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/best-practices
+        title: Palo Alto Networks Best Practices
+  # ============================================================
+  # VPN/IPsec Security
+  # ============================================================
+  - uid: mondoo-panos-security-ike-version-v2
+    title: Ensure IKE gateways use IKEv2
+    impact: 80
+    filters: panos.ikeGateways != empty
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: |
+      panos.ikeGateways.
+        where(disabled == false).
+        all(version.in(["ikev2", "ikev2-preferred"]))
+    docs:
+      desc: |
+        This check verifies that enabled IKE gateways negotiate with IKEv2.
+
+        The version setting on an IKE gateway selects IKEv1, IKEv2, or IKEv2 with a fallback to IKEv1 for peers that cannot do better. It is on the General tab of each gateway under Network > Network Profiles > IKE Gateways, and this check requires enabled gateways to be set to IKEv2 or to the IKEv2-preferred mode.
+
+        **Why this matters**
+
+        IKEv1 is a 1998 protocol whose weaknesses are structural rather than implementation defects. Its aggressive mode exposes the identity payload and a hash derived from the pre-shared key in cleartext on the wire, which gives a passive observer everything needed to grind that key offline at their own pace.
+
+        IKEv2 removes the exposure by protecting identities in every exchange and by making the responder prove liveness before committing state, which also blunts the half-open flooding attacks IKEv1 responders are vulnerable to.
+
+        The operational half matters on a perimeter device. IKEv2 has built-in liveness detection and NAT traversal and rekeys without tearing the tunnel down, so tunnels recover from a transient outage instead of staying black-holed until someone notices, and mobility support keeps a tunnel up across an address change on a dynamic link.
+
+        The IKEv2-preferred setting exists for the real constraint here, which is a peer that cannot be upgraded. It is a migration state rather than a destination: it silently falls back to IKEv1 with all of its weaknesses, so track which gateways are actually negotiating down and finish the migration instead of leaving the fallback as the permanent configuration.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Network → Network Profiles → IKE Gateways**.
+        3. For each enabled IKE gateway, open the **General** tab and review the **IKE Version** setting.
+
+        If every enabled IKE gateway uses **IKEv2 only** or **IKEv2 preferred mode**, the check passes. If any enabled gateway uses IKEv1 only, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show config running xpath devices/entry/network/ike/gateway
+           ```
+
+        If every enabled gateway shows a `protocol/version` of `ikev2` or `ikev2-preferred`, the check passes. If any uses `ikev1`, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Network → Network Profiles → IKE Gateways**
+            2. Select each IKE gateway
+            3. In the **General** tab, change the **IKE Version** to **IKEv2 only** or **IKEv2 preferred mode**
+            4. Ensure the remote peer also supports IKEv2 and coordinate the change with the remote administrator
+            5. Click **OK** and commit the configuration
+
+            Note: If the remote peer only supports IKEv1, use **IKEv2 preferred mode** to allow fallback during migration.
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Update an IKE gateway to use IKEv2. Setting the version to IKEv2 only drops the tunnel until the remote peer also negotiates IKEv2, so coordinate the change or use `ikev2-preferred` during migration. The `set` command edits the candidate configuration; `commit` activates the change on the running configuration.
+
+            ```text
+            configure
+            set network ike gateway <gateway-name> protocol version ikev2
+            commit
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/network-security/ipsec-vpn/administration/get-started-with-ipsec-vpn-site-to-site/site-to-site-vpn-overview
+        title: Site-to-Site VPN Overview
+  - uid: mondoo-panos-security-ike-certificate-auth
+    title: Ensure IKE gateways use certificate-based authentication
+    impact: 85
+    filters: panos.ikeGateways != empty
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-02
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-8-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      panos.ikeGateways.
+        where(disabled == false).
+        all(authType == "certificate")
+    docs:
+      desc: |
+        This check verifies that enabled IKE gateways authenticate peers with certificates rather than pre-shared keys.
+
+        An IKE gateway authenticates either with a pre-shared key typed into both ends or with a certificate validated against a configured certificate profile. The method is set on the General tab of each gateway under Network > Network Profiles > IKE Gateways, and this check requires enabled gateways to use certificate authentication.
+
+        **Why this matters**
+
+        A pre-shared key is a password that two devices share and that people have to move between them. In practice it is chosen by whoever built the tunnel, sent over email or chat to the other party, written into a runbook, and reused across sites because keeping them distinct is work. Any one of those steps is enough for it to leak.
+
+        Once it leaks, an attacker who can reach the gateway brings up a tunnel as the legitimate peer and appears inside the network at whatever zone that tunnel terminates in. The gateway cannot tell the difference, because knowledge of the key is the entire identity claim.
+
+        Recovery is the part that hurts. There is no revocation for a shared secret, so a suspected compromise means coordinating a simultaneous change with every peer that used the key, and keys reused across sites all have to move at once. Certificates turn that into a revocation list update.
+
+        Certificate authentication depends on a working PKI: a certificate profile that genuinely validates the chain, a revocation source the firewall can reach, and monitoring for expiry, since an expired peer certificate takes the tunnel down. Where a partner cannot support certificates, use a long random key unique to that tunnel and rotate it on a schedule.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Network → Network Profiles → IKE Gateways**.
+        3. For each enabled IKE gateway, open the **Authentication** tab and review the authentication type.
+
+        If every enabled IKE gateway uses **Certificate** authentication, the check passes. If any enabled gateway uses a pre-shared key, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show config running xpath devices/entry/network/ike/gateway
+           ```
+
+        If every enabled gateway contains an `authentication/certificate` block, the check passes. If any uses `authentication/pre-shared-key`, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Ensure you have a certificate infrastructure in place, using either an internal or a third-party certificate authority
+            2. Navigate to **Device → Certificate Management → Certificates** and import or generate the required certificates
+            3. Navigate to **Device → Certificate Management → Certificate Profile** and create a certificate profile
+            4. Navigate to **Network → Network Profiles → IKE Gateways**
+            5. Select each IKE gateway
+            6. In the **Authentication** tab, change the type to **Certificate**
+            7. Select the **Local Certificate** and **Certificate Profile**
+            8. Coordinate with the remote peer to also configure certificate authentication
+            9. Click **OK** and commit the configuration
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Switch the gateway from pre-shared key to certificate authentication. The tunnel stays down until the remote peer is also reconfigured for certificate authentication, so coordinate the change. The `set` and `delete` commands edit the candidate configuration; `commit` activates the change on the running configuration.
+
+            ```text
+            configure
+            delete network ike gateway <gateway-name> authentication pre-shared-key
+            set network ike gateway <gateway-name> authentication certificate local-certificate name <cert-name>
+            set network ike gateway <gateway-name> authentication certificate certificate-profile <profile-name>
+            commit
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/network-security/ipsec-vpn/administration/get-started-with-ipsec-vpn-site-to-site/site-to-site-vpn-overview
+        title: Site-to-Site VPN Overview
+  - uid: mondoo-panos-security-ike-dead-peer-detection
+    title: Ensure IKE gateways have dead peer detection enabled
+    impact: 70
+    filters: panos.ikeGateways != empty
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-de-cm-1
+      compliance/nist-csf-2: nist-csf-2-de-cm-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: |
+      panos.ikeGateways.
+        where(disabled == false).
+        all(
+          version == "ikev1" && enableDeadPeerDetection == true ||
+          version == "ikev2" && enableLivenessCheck == true ||
+          version == "ikev2-preferred" && enableDeadPeerDetection == true && enableLivenessCheck == true
+        )
+    docs:
+      desc: |
+        This check verifies that enabled IKE gateways detect when a peer stops responding.
+
+        The mechanism differs by version. IKEv1 gateways use dead peer detection, IKEv2 gateways use the liveness check, and gateways set to IKEv2-preferred need both because either version may end up in use. The settings are under Advanced Options on each gateway under Network > Network Profiles > IKE Gateways, and this check requires the mechanism matching the gateway's configured version to be enabled.
+
+        **Why this matters**
+
+        IPsec has no notion of a connection that closes. When a peer reboots, loses power, or is cut off upstream, its security associations simply stop being answered, and without an active probe the local end never learns this. It keeps encrypting into a tunnel that no longer terminates anywhere.
+
+        The visible symptom is a tunnel that shows as up while nothing traverses it. Traffic is routed into it and disappears, monitoring reports the tunnel as healthy, and the outage gets diagnosed as an application problem on the far side because the network layer insists everything is fine.
+
+        Failover depends entirely on this signal. A backup tunnel or an alternate path is only taken once the primary is known to be down, so without liveness detection the redundancy that was designed and paid for never engages.
+
+        Stale security associations also accumulate on the gateway, consuming resources and, when the peer returns, causing rekey collisions that stop the tunnel from re-establishing cleanly until the old entries time out. Set the probe interval against the link's real characteristics, since intervals that are too aggressive on a high-latency or lossy path tear down a tunnel that is merely slow.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Network → Network Profiles → IKE Gateways**.
+        3. For each enabled IKE gateway, open **Advanced Options**. For IKEv1 gateways, review **Dead Peer Detection** on the **IKEv1** tab. For IKEv2 gateways, review **Liveness Check** on the **IKEv2** tab.
+
+        If every enabled IKEv1 gateway has dead peer detection enabled and every enabled IKEv2 gateway has the liveness check enabled, the check passes. Gateways in IKEv2 preferred mode must have both enabled. If any enabled gateway is missing the required setting, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show config running xpath devices/entry/network/ike/gateway
+           ```
+
+        If every enabled IKEv1 gateway shows `protocol/ikev1/dpd/enable yes` and every enabled IKEv2 gateway shows `protocol/ikev2/dpd/enable yes`, the check passes. Gateways in IKEv2 preferred mode must show both. If any enabled gateway is missing the required setting, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Network → Network Profiles → IKE Gateways**
+            2. Select each IKE gateway and open **Advanced Options**
+            3. For gateways using IKEv1, open the **IKEv1** tab, check **Dead Peer Detection**, and set the **Interval** and **Retry** values; 5 and 5 are reasonable starting points
+            4. For gateways using IKEv2 or IKEv2 preferred mode, open the **IKEv2** tab, check **Liveness Check**, and set the **Interval**
+            5. Click **OK** and commit the configuration
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Enable dead peer detection for IKEv1 gateways and the liveness check for IKEv2 gateways. The `set` commands edit the candidate configuration; `commit` activates the change on the running configuration.
+
+            ```text
+            configure
+            set network ike gateway <gateway-name> protocol ikev1 dpd enable yes interval 5 retry 5
+            set network ike gateway <gateway-name> protocol ikev2 dpd enable yes interval 5
+            commit
+            ```
+
+            Use the first command for gateways negotiating IKEv1 and the second for gateways negotiating IKEv2. Gateways set to IKEv2 preferred mode should have both configured.
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/network-security/ipsec-vpn/administration/get-started-with-ipsec-vpn-site-to-site/site-to-site-vpn-overview
+        title: Site-to-Site VPN Overview
+  - uid: mondoo-panos-security-ike-no-aggressive-mode
+    title: Ensure IKEv1 gateways do not use aggressive mode
+    impact: 80
+    filters: panos.ikeGateways != empty
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: |
+      panos.ikeGateways.
+        where(disabled == false && version != "ikev2").
+        none(ikev1ExchangeMode == "aggressive")
+    docs:
+      desc: |
+        This check verifies that IKEv1 gateways negotiate in main mode rather than aggressive mode.
+
+        IKEv1 phase 1 can run as a six-message main mode exchange or a three-message aggressive mode exchange. The exchange mode is set under Advanced Options on each gateway under Network > Network Profiles > IKE Gateways, and this check requires that no enabled gateway capable of IKEv1 is set to aggressive.
+
+        **Why this matters**
+
+        Aggressive mode sends the initiator's identity and a hash computed over the pre-shared key before any encryption is established. Anyone who can capture that single exchange, or who simply sends one packet to the gateway and records the reply, walks away with material they can attack offline for as long as they like, at whatever rate their hardware allows.
+
+        That last part is what separates it from an online guessing attack. There is no lockout, no rate limit, and no log entry on the firewall for the millions of attempts, because none of them touch the firewall. A key that would take years to guess over the network falls in hours against a GPU.
+
+        The recovered key is rarely just a credential for that one tunnel. Because pre-shared keys get reused across gateways, cracking a single aggressive mode exchange frequently yields access to several tunnels, and the attacker arrives as a trusted peer inside whichever zone they terminate in.
+
+        Aggressive mode exists to support peers with dynamic addresses that cannot be identified by IP before the exchange begins. Certificate authentication solves that constraint better, identifying the peer without exposing anything derived from a shared secret. Where aggressive mode genuinely cannot be avoided, treat the key as public and move the gateway to IKEv2 as the actual fix.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Network → Network Profiles → IKE Gateways**.
+        3. For each enabled IKEv1 gateway, open **Advanced Options** and review the **Exchange Mode** setting.
+
+        If no enabled IKEv1 gateway uses **Aggressive** exchange mode, the check passes. If any enabled IKEv1 gateway uses aggressive mode, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show config running xpath devices/entry/network/ike/gateway
+           ```
+
+        If no enabled IKEv1 gateway shows `protocol/ikev1/exchange-mode aggressive`, the check passes. If any does, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Network → Network Profiles → IKE Gateways**
+            2. Select each IKEv1 gateway
+            3. In the **Advanced Options** section, change the **Exchange Mode** from **Aggressive** to **Main** or **Auto**
+            4. Coordinate with the remote peer to also use main mode
+            5. Click **OK** and commit the configuration
+
+            Note: The preferred long-term solution is to migrate to IKEv2, which eliminates this vulnerability entirely.
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Change the IKEv1 exchange mode. The `set` command edits the candidate configuration; `commit` activates the change on the running configuration.
+
+            ```text
+            configure
+            set network ike gateway <gateway-name> protocol ikev1 exchange-mode main
+            commit
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/network-security/ipsec-vpn/administration/get-started-with-ipsec-vpn-site-to-site/site-to-site-vpn-overview
+        title: Site-to-Site VPN Overview
+  - uid: mondoo-panos-security-ipsec-anti-replay
+    title: Ensure IPsec tunnels have anti-replay protection enabled
+    impact: 75
+    filters: panos.ipsecTunnels != empty
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: |
+      panos.ipsecTunnels.
+        where(disabled == false).
+        all(antiReplay == true)
+    docs:
+      desc: |
+        This check verifies that enabled IPsec tunnels discard replayed packets.
+
+        Anti-replay tracks the sequence numbers on arriving ESP packets against a sliding window and drops anything outside it or already seen. The option is among the advanced settings of each tunnel under Network > IPSec Tunnels, and this check requires it on every enabled tunnel.
+
+        **Why this matters**
+
+        Encryption stops an observer from reading a packet; it does nothing to stop them from sending it again. Without replay protection an attacker who can capture ciphertext on the path can inject those exact packets back into the tunnel later, and the receiving end decrypts and processes them as authentic, because cryptographically they are.
+
+        What that buys depends on what the tunnel carries. Replayed application traffic can re-trigger operations meant to happen once, and on links carrying control or telemetry protocols it lets an attacker resubmit a stale state update without ever needing to read or forge anything.
+
+        It is also a cheap denial of service. Flooding replayed packets forces the far end to decrypt and authenticate every one before discarding it, spending the expensive part of the work on traffic that was never going to be accepted.
+
+        Replay protection is on by default and is normally switched off deliberately, most often to work around out-of-order delivery on a multipath or heavily load-balanced link that pushes packets outside the window. Widening the replay window is the better answer there; if it must stay off, confirm the underlying path is one an attacker can neither observe nor inject on.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Network → IPsec Tunnels**.
+        3. For each enabled IPsec tunnel, review whether **Enable Replay Protection** is selected.
+
+        If every enabled IPsec tunnel has anti-replay protection enabled, the check passes. If any enabled tunnel has it disabled, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show config running xpath devices/entry/network/tunnel/ipsec
+           ```
+
+        If no enabled tunnel shows `anti-replay no`, the check passes. If any enabled tunnel has anti-replay disabled, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Network → IPsec Tunnels**
+            2. Select each IPsec tunnel
+            3. Check **Enable Replay Protection** (also labeled **Anti Replay**)
+            4. Click **OK** and commit the configuration
+
+            Anti-replay is enabled by default on new tunnels. This check identifies tunnels where it has been explicitly disabled.
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Enable anti-replay on an IPsec tunnel. The `set` command edits the candidate configuration; `commit` activates the change on the running configuration.
+
+            ```text
+            configure
+            set network tunnel ipsec <tunnel-name> anti-replay yes
+            commit
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/network-security/ipsec-vpn/administration/get-started-with-ipsec-vpn-site-to-site/site-to-site-vpn-overview
+        title: Site-to-Site VPN Overview
+  - uid: mondoo-panos-security-ipsec-tunnel-monitoring
+    title: Ensure IPsec tunnels have tunnel monitoring enabled
+    impact: 65
+    filters: panos.ipsecTunnels != empty
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-de-cm-1
+      compliance/nist-csf-2: nist-csf-2-de-cm-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: |
+      panos.ipsecTunnels.
+        where(disabled == false).
+        all(enableTunnelMonitor == true)
+    docs:
+      desc: |
+        This check verifies that enabled IPsec tunnels are monitored for end-to-end reachability.
+
+        Tunnel monitoring sends probes through the tunnel to an address on the far side and takes a configured action, either waiting for recovery or failing over, when those probes stop being answered. It is configured per tunnel under Network > IPSec Tunnels, and this check requires it on every enabled tunnel.
+
+        **Why this matters**
+
+        Tunnel monitoring answers a different question from peer liveness detection. Liveness checks confirm the peer gateway is still talking IKE; monitoring confirms that traffic placed in the tunnel actually arrives somewhere useful. A tunnel can be negotiated, established, and completely broken at the same time, when a routing change, a proxy identifier mismatch, or a firewall on the far side quietly discards whatever comes out of it.
+
+        That state is the hard one to diagnose. Every status display shows the tunnel up, so the investigation starts at the application and works backward, and the outage lasts as long as it takes someone to think of testing the path itself.
+
+        Monitoring is also what drives automatic failover on a route pointing at the tunnel interface. Without it the route stays installed and traffic keeps being sent into a path that does not work, so a designed-in backup link never takes over.
+
+        The monitored destination has to be chosen with care. An address that is reachable but not representative, or one behind a device that drops the probe protocol, produces either false confidence or a tunnel that flaps. Pick a host on the far side whose availability actually stands in for the service the tunnel exists to carry.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Network → IPsec Tunnels**.
+        3. For each enabled IPsec tunnel, review the **Tunnel Monitor** section and whether **Enable** is selected.
+
+        If every enabled IPsec tunnel has tunnel monitoring enabled, the check passes. If any enabled tunnel has it disabled, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show config running xpath devices/entry/network/tunnel/ipsec
+           ```
+
+        If every enabled tunnel shows `tunnel-monitor/enable yes`, the check passes. If any has it disabled, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Network → Interfaces → Tunnel** and confirm the tunnel interface has an IP address assigned. Tunnel monitoring sources its probes from this address and the commit fails without one
+            2. Navigate to **Network → IPsec Tunnels**
+            3. Select each IPsec tunnel
+            4. In the **Tunnel Monitor** section:
+               - Check **Enable**
+               - Set the **Destination IP** to an IP address reachable through the tunnel
+               - Select a **Tunnel Monitor Profile** with the fail-over action if traffic should switch to a backup path on failure. The default behavior is wait-recover, which keeps traffic on the tunnel
+            5. Click **OK** and commit the configuration
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Assign an IP address to the tunnel interface if it does not already have one, then enable tunnel monitoring. The `set` commands edit the candidate configuration; `commit` activates the change on the running configuration.
+
+            ```text
+            configure
+            set network interface tunnel units <tunnel-interface> ip <local-address/mask>
+            set network tunnel ipsec <tunnel-name> tunnel-monitor enable yes destination-ip <remote-ip>
+            commit
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/network-security/ipsec-vpn/administration/set-up-tunnel-monitoring
+        title: Set Up Tunnel Monitoring
+  # ============================================================
+  # Decryption Policy
+  # ============================================================
+  - uid: mondoo-panos-security-decryption-profile
+    title: Ensure decryption rules have a decryption profile attached
+    impact: 85
+    filters: panos.decryptionRules != empty
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: |
+      panos.decryptionRules.
+        where(action == "decrypt" && disabled == false).
+        all(decryptionProfile != "")
+    docs:
+      desc: |
+        This check verifies that enabled decryption rules with a decrypt action apply a decryption profile.
+
+        A decryption profile sets the rules for the sessions being decrypted: the minimum TLS version, the permitted cipher suites and key exchange algorithms, and what to do about expired, untrusted, or unsupported certificates. Profiles live under Objects > Decryption > Decryption Profile and are attached on the Options tab of each rule under Policies > Decryption, where this check requires every enabled decrypt rule to name one.
+
+        **Why this matters**
+
+        When the firewall decrypts a session it becomes the TLS client for the real server, and the security of that outbound connection is now the firewall's decision rather than the browser's. Without a profile that decision defaults to accepting far more than any modern client would: obsolete protocol versions, weak ciphers, and certificates that fail validation.
+
+        The result is worse than not decrypting at all. The user's browser sees a valid certificate issued by the firewall and shows a lock, so every signal the endpoint would have used to warn them is replaced by a reassuring one, while the connection the firewall actually made to the server was never validated. An attacker intercepting beyond the firewall is invisible to both ends.
+
+        Certificate handling is the specific setting to review. A profile that blocks untrusted issuers and expired certificates is what preserves the warning the user would otherwise have received; without it, decryption strips the endpoint's ability to detect exactly the attack decryption was deployed to find.
+
+        Blocking on validation failure will break sites that are genuinely misconfigured, so plan for an exception process and for applications that pin certificates and cannot be decrypted at all. Those belong on a no-decrypt rule with a profile of their own rather than being accommodated by loosening the profile covering everything else.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Policies → Decryption**.
+        3. For each enabled rule with a **Decrypt** action, review the **Decryption Profile** column.
+
+        If every enabled decrypt rule has a decryption profile attached, the check passes. If any enabled decrypt rule has none, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show config running xpath devices/entry/vsys/entry/rulebase/decryption
+           ```
+
+        If every enabled decrypt rule contains a `profile` value, the check passes. If any lacks one, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Objects → Decryption → Decryption Profile** and create or verify a profile
+            2. Configure the profile to:
+               - Block sessions with expired or untrusted certificates
+               - Enforce minimum TLS version (TLS 1.2 or higher recommended)
+               - Block weak cipher suites and algorithms
+            3. Navigate to **Policies → Decryption**
+            4. Select each decrypt rule and attach the decryption profile in the **Options** tab
+            5. Click **OK** and commit the configuration
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Attach a decryption profile to a decryption rule. The `set` command edits the candidate configuration; `commit` activates the change on the running configuration.
+
+            ```text
+            configure
+            set rulebase decryption rules <rule-name> profile <decryption-profile>
+            commit
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/best-practices/10-1/decryption-best-practices/decryption-best-practices
+        title: Decryption Best Practices
+  - uid: mondoo-panos-security-decryption-log-failures
+    title: Ensure decryption rules log TLS handshake failures
+    impact: 70
+    filters: panos.decryptionRules != empty
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-08
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-15
+      compliance/nis-2: nis-2-21-2-g
+      compliance/nist-csf-1: nist-csf-1-de-ae-3
+      compliance/nist-csf-2: nist-csf-2-de-ae-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-2-1
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    mql: |
+      panos.decryptionRules.
+        where(disabled == false).
+        all(logFailedTlsHandshakes == true)
+    docs:
+      desc: |
+        This check verifies that enabled decryption rules log unsuccessful TLS handshakes.
+
+        When a session fails to negotiate, PAN-OS can record the attempt together with the reason it failed. The option is on the Options tab of each rule under Policies > Decryption, and this check requires it on every enabled decryption rule.
+
+        **Why this matters**
+
+        Handshake failures are the visible edge of both attacks and breakage, and they are the one place the two look alike. Without the record, a client that pins its certificate and a client whose session is being tampered with in transit produce identical evidence: none.
+
+        The operational case is what usually gets this enabled. Decryption deployments fail on a long tail of applications that pin certificates, require client certificates, or speak a TLS variant the profile rejects, and each one presents to the user as a generic connection error. The failure log is the only artifact naming the application and the reason, which is the difference between adding a targeted exception and switching decryption off for a whole subnet.
+
+        The security case is thinner but real. A rise in validation failures against a destination that normally succeeds is what interception upstream of the firewall looks like, and downgrade attempts appear here as negotiation failures rather than as sessions.
+
+        This does generate volume, particularly in the first weeks of a decryption rollout, so send it to a forwarding profile rather than relying on local storage, and expect to spend time on exceptions before the rate settles.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Policies → Decryption**.
+        3. For each enabled decryption rule, open the **Options** tab and review **Log Failed TLS Handshakes**.
+
+        If every enabled decryption rule logs failed TLS handshakes, the check passes. If any enabled rule has it disabled, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show config running xpath devices/entry/vsys/entry/rulebase/decryption
+           ```
+
+        If every enabled decryption rule shows `log-fail yes`, the check passes. If any has it set to `no`, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Policies → Decryption**
+            2. Select each decryption rule
+            3. In the **Options** tab, enable **Log Failed TLS Handshakes**
+            4. Ensure a **Log Forwarding** profile is configured to send these logs to your SIEM
+            5. Click **OK** and commit the configuration
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Enable TLS failure logging on a decryption rule. The `set` command edits the candidate configuration; `commit` activates the change on the running configuration.
+
+            ```text
+            configure
+            set rulebase decryption rules <rule-name> log-fail yes
+            commit
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/best-practices/10-1/decryption-best-practices/decryption-best-practices
+        title: Decryption Best Practices
+  # ============================================================
+  # Routing Security
+  # ============================================================
+  - uid: mondoo-panos-security-default-route-exists
+    title: Ensure virtual routers have a default route configured
+    impact: 70
+    filters: panos.virtualRouters != empty
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-1
+      compliance/owasp-top-10-2025: false
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc8-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      panos.virtualRouters.
+        all(staticRoutes.any(destination == "0.0.0.0/0"))
+    docs:
+      desc: |
+        This check verifies that every virtual router has a statically configured default route.
+
+        A default route of 0.0.0.0/0 is the entry a router uses for destinations no other route covers. Static routes are configured per virtual router under Network > Virtual Routers, and this check requires each virtual router to have one with that destination.
+
+        **Why this matters**
+
+        A router with no default route discards traffic for anything not explicitly in its table, and it does so silently. No failure surfaces that points at the routing table, so the symptom presented to users is that some destinations work and others hang, which sends the investigation toward DNS or the application long before anyone opens the router configuration.
+
+        On a firewall this failure also cuts against the device's own services. Content updates, license checks, cloud lookups for URL and DNS categorization, and log forwarding to an off-box collector all originate from the firewall and all depend on a path to destinations outside its directly connected networks. A missing default route degrades the security controls themselves, not just transit traffic.
+
+        Recovery from an unreachable firewall is the availability concern behind this. Losing the return path to the management network means losing the way in to fix it, which is why an out-of-band console path matters on a device whose routing can be changed remotely.
+
+        Virtual routers that learn their default route from OSPF, BGP, or a dynamic path monitor are correctly configured and will still fail this check, because it looks only at static routes. Confirm which model each virtual router uses before acting, and note that a virtual router deliberately confined to a set of internal networks may legitimately have no default route at all.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Network → Virtual Routers**.
+        3. For each virtual router, open the **Static Routes** tab and review the configured destinations.
+
+        If every virtual router has a static route with destination 0.0.0.0/0, the check passes. If any virtual router has no default route, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show routing route
+           ```
+
+        If every virtual router has a 0.0.0.0/0 route, the check passes. If any virtual router lacks one, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Network → Virtual Routers**
+            2. Select the virtual router
+            3. Go to the **Static Routes** tab
+            4. Click **Add** to create a new static route:
+               - **Name**: default-route
+               - **Destination**: 0.0.0.0/0
+               - **Interface**: Select the egress interface (typically the untrust/internet-facing interface)
+               - **Next Hop**: Enter the upstream gateway IP address
+            5. Click **OK** and commit the configuration
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Add a default route to a virtual router. The `set` command edits the candidate configuration; `commit` activates the change on the running configuration.
+
+            ```text
+            configure
+            set network virtual-router <vr-name> routing-table ip static-route default-route destination 0.0.0.0/0 nexthop ip-address <gateway-ip> interface <egress-interface>
+            commit
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/ngfw/networking/static-routes
+        title: Static Routes
+
+  - uid: mondoo-panos-security-ospf-interface-authentication
+    title: Ensure OSPF interfaces use authentication
+    impact: 90
+    filters: |
+      panos.virtualRouters.any(ospf.enable == true)
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: false
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: false
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-15
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      panos.virtualRouters.where(ospf.enable == true).
+        all(ospfAreas.all(interfaces().all(authProfile != "")))
+    docs:
+      desc: |
+        This check verifies that OSPF interfaces require authentication before forming an adjacency.
+
+        An OSPF authentication profile carries a password or an MD5 key that neighbors must present for their packets to be accepted. Profiles are defined in the OSPF configuration of each virtual router under Network > Virtual Routers and referenced by the interfaces in each area, where this check requires every OSPF-enabled interface to name one.
+
+        **Why this matters**
+
+        Unauthenticated OSPF accepts routing information from anything on the segment. An attacker with any foothold on a network where OSPF runs, whether a compromised host, a switch port in an unlocked closet, or a virtual machine on the wrong VLAN, can form an adjacency with the firewall and begin advertising routes to it.
+
+        What that buys is traffic redirection. Advertising a more specific route for a subnet the attacker cares about pulls that traffic through a host they control, where they can read it, modify it, and forward it on so the interception stays invisible from both endpoints. Routing manipulation at the firewall is especially valuable, because it can steer traffic around the zones the security policy depends on.
+
+        The same primitive works as a denial of service. Advertising a route and then dropping what arrives black-holes a subnet, and because the firewall's routing table is genuinely correct according to the protocol, the outage looks like a network failure rather than an attack.
+
+        Authentication here is a secret shared between neighbors, so it needs to be distinct per area or link and rotated like any other credential; the older simple password type sends it in cleartext and should not be used. Even on a point-to-point link the firewall fully controls, configuring it costs one profile and outlives the assumption about who can reach that link.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Network → Virtual Routers** and select a virtual router running OSPF.
+        3. Open the **OSPF → Areas** tab and review the **Auth Profile** setting for each interface.
+
+        If every OSPF interface has an authentication profile assigned, the check passes. If any OSPF interface has none, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show config running xpath devices/entry/network/virtual-router
+           ```
+
+        If every OSPF area interface contains an `authentication` value, the check passes. If any lacks one, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Network → Virtual Routers**
+            2. Select the virtual router running OSPF
+            3. Go to the **OSPF** tab and open **Auth Profiles**
+            4. Add an authentication profile that uses MD5 keys. PAN-OS OSPF supports simple password and MD5 authentication, and MD5 is the stronger choice
+            5. Go to **Areas** and select the area containing the interface
+            6. Select the interface and set its **Auth Profile**
+            7. Click **OK** and commit the configuration
+
+            Enabling authentication tears down OSPF adjacencies until every neighbor on the segment uses a matching key, so coordinate the change with the administrators of adjacent routers and schedule a maintenance window.
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Create an MD5 authentication profile and reference it from the OSPF interface. Adjacencies drop until neighbors are configured with the same key. The `set` commands edit the candidate configuration; `commit` activates the change on the running configuration.
+
+            ```text
+            configure
+            set network virtual-router <vr-name> protocol ospf auth-profile <profile-name> md5 <key-id> key <key-value>
+            set network virtual-router <vr-name> protocol ospf area <area-id> interface <interface-name> authentication <profile-name>
+            commit
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/ngfw/networking/ospf
+        title: OSPF Configuration
+
+  - uid: mondoo-panos-security-ospf-virtual-link-authentication
+    title: Ensure OSPF virtual links use authentication
+    impact: 85
+    filters: |
+      panos.virtualRouters.any(ospf.enable == true && ospfAreas.any(virtualLinks().length > 0))
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: false
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: false
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-15
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      panos.virtualRouters.where(ospf.enable == true).
+        all(ospfAreas.all(virtualLinks().all(authProfile != "")))
+    docs:
+      desc: |
+        This check verifies that OSPF virtual links require authentication.
+
+        A virtual link is a logical adjacency carrying backbone traffic across a transit area, used when an area has no direct attachment to area 0. Virtual links are configured per area in the OSPF settings of a virtual router under Network > Virtual Routers, and this check requires each of them to reference an authentication profile.
+
+        **Why this matters**
+
+        A virtual link is a backbone adjacency, and the routers it passes through are not part of it. Every device along the transit area can see its packets and can send packets appearing to come from the far end, so the set of parties able to interfere with the link is far larger than the set that was meant to be in the backbone at all.
+
+        That difference is what makes an unauthenticated virtual link worse than an unauthenticated ordinary interface. A route injected into area 0 propagates to the entire OSPF domain rather than to one segment, so a single spoofed advertisement can redirect or black-hole traffic between sites that have no other relationship to the compromised area.
+
+        Virtual links are also easy to overlook. They are configured somewhere different from interface settings, they are usually added once during a topology fix and never revisited, and an authentication standard applied to interfaces frequently misses them entirely.
+
+        A virtual link is a workaround for an area that lost its backbone attachment, and the durable fix is normally to restore direct connectivity rather than to keep the link. While one exists, authenticate it under the same key management as the rest of the domain, and remember the transit area's own interfaces need authentication too, since the virtual link's traffic depends on the routing through them.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Network → Virtual Routers** and select a virtual router running OSPF.
+        3. Open the **OSPF → Areas** tab and review the **Auth Profile** setting for each virtual link.
+
+        If every OSPF virtual link has an authentication profile assigned, the check passes. If any virtual link has none, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show config running xpath devices/entry/network/virtual-router
+           ```
+
+        If every OSPF virtual link contains an `authentication` value, the check passes. If any lacks one, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Network → Virtual Routers**
+            2. Select the virtual router running OSPF
+            3. Go to the **OSPF** tab and open **Auth Profiles**
+            4. Add an authentication profile that uses MD5 keys. PAN-OS OSPF supports simple password and MD5 authentication, and MD5 is the stronger choice
+            5. Go to **Areas** and select the transit area containing the virtual link
+            6. Select the virtual link and set its **Auth Profile**
+            7. Click **OK** and commit the configuration
+
+            Enabling authentication tears down the virtual link until the router at the other end uses a matching key, so coordinate the change with that router's administrator.
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Create an MD5 authentication profile and reference it from the OSPF virtual link. The virtual link drops until the remote end is configured with the same key. The `set` commands edit the candidate configuration; `commit` activates the change on the running configuration.
+
+            ```text
+            configure
+            set network virtual-router <vr-name> protocol ospf auth-profile <profile-name> md5 <key-id> key <key-value>
+            set network virtual-router <vr-name> protocol ospf area <transit-area-id> virtual-link <link-name> authentication <profile-name>
+            commit
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/ngfw/networking/ospf
+        title: OSPF Configuration
+
+  - uid: mondoo-panos-security-ospf-no-rfc1583
+    title: Ensure OSPF RFC 1583 compatibility is disabled
+    impact: 70
+    filters: |
+      panos.virtualRouters.any(ospf.enable == true)
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: false
+      compliance/nist-csf-1: nist-csf-1-pr-ip-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      panos.virtualRouters.where(ospf.enable == true).
+        all(ospf.rfc1583 == false)
+    docs:
+      desc: |
+        This check verifies that RFC 1583 compatibility is turned off in OSPF.
+
+        RFC 1583 compatibility restores the older route preference rules for choosing among external routes to the same destination, which RFC 2328 replaced because the original rules could produce persistent routing loops. The setting is in the OSPF configuration of each virtual router under Network > Virtual Routers, and this check requires it to be disabled.
+
+        **Why this matters**
+
+        The problem the newer rules fix is that different routers applying the older preference algorithm to the same set of external advertisements can each choose a next hop pointing at the other. Traffic then circulates between them until its time to live expires, consuming bandwidth on every link in the loop.
+
+        Anyone able to inject external routes can arrange this deliberately. Advertising the same destination from two points with the right cost relationship turns a routing subtlety into an amplifier: a small amount of traffic sent into the loop occupies the path repeatedly, and the resulting outage reads as congestion rather than as an attack.
+
+        The preference rules also decide which advertisement wins when several routers offer a path to the same external prefix, so an attacker able to influence that choice can pull traffic toward a route they control. The older algorithm leaves more room to do it.
+
+        Compatibility mode has to be set consistently across the whole OSPF domain, because a mixed setting is what actually produces the inconsistent choices. Where a legacy device requires it, treat the setting as a constraint to be tracked and retired with that device, and limit the interim risk by authenticating the domain so external routes can only come from routers that belong in it.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Network → Virtual Routers** and select a virtual router running OSPF.
+        3. Open the **OSPF** tab and review the **RFC 1583 Compatibility** checkbox.
+
+        If RFC 1583 compatibility is cleared on every virtual router running OSPF, the check passes. If it is enabled on any, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show config running xpath devices/entry/network/virtual-router
+           ```
+
+        If every virtual router running OSPF shows `protocol/ospf/rfc1583 no`, the check passes. If any has it set to `yes`, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Network → Virtual Routers**
+            2. Select the virtual router running OSPF
+            3. Go to the **OSPF** tab
+            4. Uncheck **RFC 1583** in the OSPF configuration
+            5. Click **OK** and commit the configuration
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Disable RFC 1583 compatibility on OSPF. The `set` command edits the candidate configuration; `commit` activates the change on the running configuration.
+
+            ```text
+            configure
+            set network virtual-router <vr-name> protocol ospf rfc1583 no
+            commit
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/ngfw/networking/ospf
+        title: OSPF Configuration
+
+  - uid: mondoo-panos-security-ospf-reject-default-route
+    title: Ensure OSPF rejects default routes from neighbors
+    impact: 80
+    filters: |
+      panos.virtualRouters.any(ospf.enable == true)
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: false
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: false
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      panos.virtualRouters.where(ospf.enable == true).
+        all(ospf.rejectDefaultRoute == true)
+    docs:
+      desc: |
+        This check verifies that OSPF is configured to reject default routes learned from neighbors.
+
+        With this option set, the virtual router will not install a 0.0.0.0/0 route received in an OSPF advertisement. It is in the OSPF configuration of each virtual router under Network > Virtual Routers, and this check requires it to be enabled.
+
+        **Why this matters**
+
+        The default route is the single most valuable entry in a routing table, because it decides where everything unmatched goes. Accepting one from OSPF means any router able to form an adjacency can nominate itself as the destination for all traffic the firewall has no specific route for, which on a perimeter device is most of what passes through it.
+
+        Redirecting that traffic is a complete interception. It leaves the firewall exactly as it arrived, reaches a host the attacker controls, and can be forwarded on to the real destination afterward, so neither sender nor receiver sees anything unusual and the firewall's own logs show a normal allowed session.
+
+        The accidental case is more common than the attack and just as damaging. A misconfigured router redistributing a default route into OSPF can pull a site's entire outbound traffic through a link that was never sized for it, or through a path bypassing the inspection points the design depends on.
+
+        A firewall's default route should be a deliberate, statically configured decision, which is what the default route check in this policy looks for. Where a design genuinely requires a dynamically learned default, use a route filter that accepts it only from one specific, authenticated neighbor rather than accepting it from the protocol at large.
+      audit: |
+        ### Audit via the PAN-OS web interface
+
+        1. Log in to the PAN-OS web interface.
+        2. Navigate to **Network → Virtual Routers** and select a virtual router running OSPF.
+        3. Open the **OSPF** tab and review the **Reject Default Route** checkbox.
+
+        If **Reject Default Route** is selected on every virtual router running OSPF, the check passes. If it is cleared on any, the check fails.
+
+        ### Audit via the PAN-OS CLI
+
+        1. Open an SSH session to the firewall.
+        2. Run the following command:
+
+           ```text
+           show config running xpath devices/entry/network/virtual-router
+           ```
+
+        If every virtual router running OSPF shows `protocol/ospf/reject-default-route yes`, the check passes. If any has it set to `no`, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            **Using the PAN-OS Web Interface**
+
+            1. Navigate to **Network → Virtual Routers**
+            2. Select the virtual router running OSPF
+            3. Go to the **OSPF** tab
+            4. Check **Reject Default Route** in the OSPF configuration
+            5. Click **OK** and commit the configuration
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Configure OSPF to reject default routes. The `set` command edits the candidate configuration; `commit` activates the change on the running configuration.
+
+            ```text
+            configure
+            set network virtual-router <vr-name> protocol ospf reject-default-route yes
+            commit
+            ```
+
+    refs:
+      - url: https://docs.paloaltonetworks.com/ngfw/networking/ospf
+        title: OSPF Configuration

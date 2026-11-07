@@ -1,0 +1,62 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+
+packs:
+  - uid: mondoo-windows-incident-response
+    name: Windows Incident Response Pack
+    version: 1.3.0
+    license: BUSL-1.1
+    require:
+      - provider: os
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    tags:
+      mondoo.com/platform: windows
+      mondoo.com/category: security
+      mondoo.com/icon: windows
+    summary: Gather Windows host evidence for incident response
+    docs:
+      desc: |
+        Collects Windows host evidence for incident investigation: installed hotfixes, system uptime and timezone, installed packages, computer and OS details, and running services.
+
+        Enable this query pack in [Mondoo Platform](https://mondoo.com/platform) to automatically gather this evidence from your Windows hosts, or scan a host manually with cnspec:
+
+        ```bash
+        cnspec scan local -f mondoo-windows-incident-response.mql.yaml
+        ```
+    filters: asset.platform == "windows"
+    queries:
+      - uid: mondoo-windows-incident-response-installed-hotfixes
+        title: Installed hotfixes
+        docs:
+          desc: Installed hotfixes and dates, showing the patch level.
+        mql: windows.hotfixes { hotfixId installedOn }
+      - uid: mondoo-windows-incident-response-uptime
+        title: Operating system uptime
+        docs:
+          desc: System uptime, to pin down the last reboot.
+        mql: os.uptime
+      - uid: mondoo-windows-incident-response-installed-packages
+        title: Installed packages
+        docs:
+          desc: |
+            Installed software, to spot malicious applications.
+
+            Software installed into a single user's profile has `installScope` set to `user`, with the owning user in `installUser` and the install location in `files`. A scan over a remote connection reads per-user installs only for users who are logged in.
+        mql: packages { name version installScope installUser { name } files { path } }
+      - uid: mondoo-windows-incident-response-interface-configuration
+        title: Windows Computer/System information
+        docs:
+          desc: Computer and OS details identifying the host.
+        mql: windows.computerInfo
+      - uid: mondoo-windows-incident-response-timezone
+        title: System timezone
+        docs:
+          desc: Host timezone, for correlating log timestamps.
+        mql: os.date.timezone
+      - uid: mondoo-windows-incident-response-running-services
+        title: Running services
+        docs:
+          desc: Services currently running, to surface rogue ones.
+        mql: services.where(running == true)

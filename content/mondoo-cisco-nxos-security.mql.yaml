@@ -1,0 +1,2272 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+policies:
+  - uid: mondoo-cisco-nxos-security
+    name: Mondoo Cisco NX-OS Security
+    version: 1.0.4
+    license: BUSL-1.1
+    tags:
+      mondoo.com/category: security
+      mondoo.com/platform: cisco-nx-os,networkdevice
+      mondoo.com/icon: cisco
+    require:
+      - provider: networkdevices
+    authors:
+      - name: Mondoo, Inc.
+        email: hello@mondoo.com
+    summary: Secure Cisco NX-OS switches
+    docs:
+      desc: |
+        The Mondoo Cisco NX-OS Security policy identifies critical misconfigurations on Cisco Nexus switches running NX-OS that could leave your data-center network vulnerable to attackers. This policy helps organizations detect and remediate hardening gaps before they can be exploited, reducing the likelihood of unauthorized device access, east-west traffic interception, fabric tampering, and disruption of data-center workloads.
+
+        This policy provides security checks across key areas of Cisco NX-OS configuration:
+
+        - SSH key configuration and algorithm strength
+        - Password strength checking and encryption
+        - AAA authentication with TACACS+ or RADIUS integration
+        - User account security and credential management
+        - Logging configuration and remote log collection
+        - SNMP security, including SNMPv3 enforcement
+        - NTP time synchronization
+        - Boot security, including POAP and boot order
+        - Control Plane Policing (CoPP) configuration
+        - VTY and console line security with ACLs and timeouts
+        - Security banners
+        - BGP and OSPF routing protocol authentication
+        - Disabling source routing and unnecessary services
+
+        Learn more about scanning Cisco NX-OS in the [cnspec Cisco NX-OS documentation](https://mondoo.com/docs/cnspec/network/cisco).
+
+        Have suggestions for new checks in this policy? Visit our [cnspec repository](https://github.com/mondoohq/cnspec).
+
+    groups:
+      - title: SSH Security
+        filters: asset.platform == "cisco-nxos"
+        checks:
+          - uid: mondoo-cisco-nxos-security-ssh-key-algorithm
+          - uid: mondoo-cisco-nxos-security-ssh-key-size
+          - uid: mondoo-cisco-nxos-security-ssh-login-attempts-limit
+      - title: Authentication and Authorization (AAA)
+        filters: asset.platform == "cisco-nxos"
+        checks:
+          - uid: mondoo-cisco-nxos-security-aaa-authentication-login-configured
+          - uid: mondoo-cisco-nxos-security-aaa-group-servers-configured
+      - title: User Account Security
+        filters: asset.platform == "cisco-nxos"
+        checks:
+          - uid: mondoo-cisco-nxos-security-password-strength-check
+          - uid: mondoo-cisco-nxos-security-encryption-service-enabled
+          - uid: mondoo-cisco-nxos-security-users-encrypted-credentials
+          - uid: mondoo-cisco-nxos-security-passphrase-min-length
+          - uid: mondoo-cisco-nxos-security-system-login-block
+      - title: NTP and Time Configuration
+        filters: asset.platform == "cisco-nxos"
+        checks:
+          - uid: mondoo-cisco-nxos-security-ntp-servers-configured
+          - uid: mondoo-cisco-nxos-security-timezone-configured
+      - title: Logging and Auditing
+        filters: asset.platform == "cisco-nxos"
+        checks:
+          - uid: mondoo-cisco-nxos-security-logging-remote-servers
+          - uid: mondoo-cisco-nxos-security-logging-timestamp-configured
+          - uid: mondoo-cisco-nxos-security-logging-source-interface
+      - title: SNMP Security
+        filters: asset.platform == "cisco-nxos"
+        checks:
+          - uid: mondoo-cisco-nxos-security-snmp-no-public-community
+          - uid: mondoo-cisco-nxos-security-snmp-encryption-enforced
+          - uid: mondoo-cisco-nxos-security-snmp-communities-acl
+      - title: Boot and Platform Security
+        filters: asset.platform == "cisco-nxos"
+        checks:
+          - uid: mondoo-cisco-nxos-security-poap-disabled
+          - uid: mondoo-cisco-nxos-security-copp-profile-strict
+      - title: Line and Access Security
+        filters: asset.platform == "cisco-nxos"
+        checks:
+          - uid: mondoo-cisco-nxos-security-vty-exec-timeout
+          - uid: mondoo-cisco-nxos-security-console-exec-timeout
+          - uid: mondoo-cisco-nxos-security-vty-acl-configured
+      - title: Access Control and Banners
+        filters: asset.platform == "cisco-nxos"
+        checks:
+          - uid: mondoo-cisco-nxos-security-motd-banner-configured
+          - uid: mondoo-cisco-nxos-security-exec-banner-configured
+          - uid: mondoo-cisco-nxos-security-hostname-configured
+      - title: Network Services
+        filters: asset.platform == "cisco-nxos"
+        checks:
+          - uid: mondoo-cisco-nxos-security-source-routing-disabled
+          - uid: mondoo-cisco-nxos-security-ip-directed-broadcast-disabled
+      - title: Routing Protocol Security
+        filters: asset.platform == "cisco-nxos"
+        checks:
+          - uid: mondoo-cisco-nxos-security-bgp-neighbor-passwords
+          - uid: mondoo-cisco-nxos-security-bgp-log-neighbor-changes
+          - uid: mondoo-cisco-nxos-security-ospf-authentication
+    scoring_system: average
+queries:
+  - uid: mondoo-cisco-nxos-security-ssh-key-algorithm
+    title: Ensure SSH key uses a strong algorithm
+    impact: 90
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-2-iv-access-control-encryption-and-decryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-12
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-11
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-3-5-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-1
+    mql: |
+      cisco.nxos.ssh.algorithm.in(["rsa", "ecdsa"])
+    docs:
+      desc: |
+        This check verifies that the host key protecting remote administrative sessions is built on a cryptographically sound algorithm.
+
+        NX-OS ships with SSH enabled by default, so the host key is in service from the moment the switch has a management address, whether or not anyone reviewed it. The key comes from `ssh key rsa 2048` or `ssh key ecdsa 256`, and since it cannot be replaced while the daemon runs, regeneration means `no feature ssh`, the new `ssh key` command, then `feature ssh`. This check requires RSA or ECDSA and fails a DSA key.
+
+        **Why this matters**
+
+        DSA on NX-OS is capped at 1024 bits, which is within reach of well funded attackers. Worse, a DSA signature leaks the private key outright if the per-signature random value is ever reused or partially predictable, a failure mode that has recovered real keys from real devices.
+
+        Recovering the host key lets an attacker impersonate the switch. They answer the operator's SSH connection with the stolen key, trigger no warning, capture the TACACS+ or local password typed into the prompt, and relay the session onward so the operator sees a normal login.
+
+        Modern OpenSSH clients also refuse `ssh-dss` unless it is re-enabled by hand, so a DSA key usually breaks automation before anyone notices it is weak. Regeneration drops every session, so keep console access available.
+      audit: |-
+        To verify that the SSH key uses a strong algorithm:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the SSH server key information:
+
+           ```text
+           show ssh key
+           ```
+
+        The device passes when the host key is reported as RSA or ECDSA. A DSA key is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Replacing the SSH host key requires temporarily disabling the SSH server. Perform this change from a console session, because disabling the SSH server drops all active SSH sessions.
+
+            Generate an SSH key with a strong algorithm:
+
+            ```text
+            configure terminal
+            no feature ssh
+            ssh key rsa 2048 force
+            feature ssh
+            ```
+
+            Or for ECDSA:
+
+            ```text
+            configure terminal
+            no feature ssh
+            ssh key ecdsa 256 force
+            feature ssh
+            ```
+
+            The new host key invalidates cached host keys on SSH clients. Update known hosts entries on management stations after the change.
+
+            NX-OS does not automatically persist running-config changes. Save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/security/cisco-nexus-9000-nx-os-security-configuration-guide-105x/m-configuring-ssh-scp.html
+        title: Cisco NX-OS SSH Configuration Guide
+  - uid: mondoo-cisco-nxos-security-ssh-key-size
+    title: Ensure SSH RSA key is at least 2048 bits
+    impact: 90
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-2-iv-access-control-encryption-and-decryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-12
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-11
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-3-5-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-1
+    mql: |
+      if (cisco.nxos.ssh.algorithm == "rsa") {
+        cisco.nxos.ssh.keySize >= 2048
+      }
+    docs:
+      desc: |
+        This check verifies that the RSA host key used for SSH is long enough to resist factoring.
+
+        Key length is fixed at generation time by `ssh key rsa 2048` or a larger modulus and cannot be extended in place. NX-OS accepts moduli well below 2048 bits, and switches commissioned years ago often still carry a 1024-bit key produced by the initial setup script. This check applies only when the algorithm is RSA and requires at least 2048 bits.
+
+        **Why this matters**
+
+        Public factoring efforts have broken 768-bit RSA, and 1024 bits is widely treated as within reach of state-level resources. A switch installed in 2016 and still forwarding production traffic today has given an adversary a decade of improving hardware against a key that never changed.
+
+        An attacker who factors the host key never has to touch the switch again. They sit on the management path, answer as the switch, present the correct fingerprint so no client warning appears, harvest the administrator password, and pass the session through to the real device.
+
+        Replacing the key requires `no feature ssh`, then `ssh key rsa 2048 force`, then `feature ssh`, which disconnects every SSH session including your own. Run it from the console and expect every client to report a changed host key.
+      audit: |-
+        To verify the SSH RSA key modulus size:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the SSH server key information:
+
+           ```text
+           show ssh key
+           ```
+
+        The device passes when the RSA host key reports a modulus of 2048 bits or larger. An RSA modulus smaller than 2048 bits is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Replacing the SSH host key requires temporarily disabling the SSH server. Perform this change from a console session, because disabling the SSH server drops all active SSH sessions.
+
+            Generate a 2048-bit RSA key:
+
+            ```text
+            configure terminal
+            no feature ssh
+            ssh key rsa 2048 force
+            feature ssh
+            ```
+
+            The new host key invalidates cached host keys on SSH clients. Update known hosts entries on management stations after the change.
+
+            NX-OS does not automatically persist running-config changes. Save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/security/cisco-nexus-9000-nx-os-security-configuration-guide-105x/m-configuring-ssh-scp.html
+        title: Cisco NX-OS SSH Configuration Guide
+  - uid: mondoo-cisco-nxos-security-ssh-login-attempts-limit
+    title: Ensure SSH login attempts limit is configured
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-02
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-j
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      cisco.nxos.sshLoginAttemptsLimit > 0
+      cisco.nxos.sshLoginAttemptsLimit <= 3
+    docs:
+      desc: |
+        This check verifies that the SSH server allows only a small number of password guesses per connection.
+
+        `ssh login-attempts` sets how many authentication failures NX-OS tolerates inside a single SSH connection before it drops the session. The NX-OS default is 3, which passes. This check requires a value of at least 1 and no more than 3, so a value of 0, which removes the limit, and any value above 3 both fail.
+
+        **Why this matters**
+
+        Password guessing against a switch is cheap and nearly free of consequence. What costs the attacker time is the TCP handshake and key exchange for each connection, and a generous per-connection allowance amortizes that cost across many guesses. A low limit removes exactly that economy.
+
+        The wordlists used against network gear are short and effective. They lead with vendor defaults and with the account names that accumulate on switches over the years, so a run that gets ten guesses per connection often succeeds where a run limited to three does not.
+
+        A per-connection cap does nothing against an attacker who simply reconnects, so treat it as one half of the control. Pair it with the login blocking covered by a companion check in this policy, which enforces a lockout across connections, and with an inbound access class on the VTY lines.
+      audit: |-
+        To verify that an SSH login attempts limit is configured:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the effective SSH login attempts limit, including default values:
+
+           ```text
+           show running-config security all | include "ssh login-attempts"
+           ```
+
+        The device passes when `ssh login-attempts` is set to a value greater than 0 and 3 or fewer. The NX-OS default of 3 passes. A limit of 0 or greater than 3 is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Configure SSH login attempts limit:
+
+            ```text
+            configure terminal
+            ssh login-attempts 3
+            ```
+
+            NX-OS does not automatically persist running-config changes. Save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/security/cisco-nexus-9000-nx-os-security-configuration-guide-105x/m-configuring-ssh-scp.html
+        title: Cisco NX-OS SSH Configuration Guide
+  - uid: mondoo-cisco-nxos-security-aaa-authentication-login-configured
+    title: Ensure AAA authentication login is configured
+    impact: 95
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-02
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-j
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-3
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      cisco.nxos.runAaaAuthenticationLogin.length > 0
+    docs:
+      desc: |
+        This check verifies that logins are authenticated against a centrally managed identity source rather than only the switch's own user database.
+
+        `aaa authentication login default group <server-group> local` points the default method list at a TACACS+ or RADIUS server group and keeps the local database as a fallback. This check requires at least one `aaa authentication login` method list to be present.
+
+        **Why this matters**
+
+        Local accounts on a data center switch are the accounts nobody deprovisions. An engineer leaves, the identity provider disables their corporate account within the hour, and the `username` entry survives untouched in the running configuration of forty Nexus switches. Stale network device credentials have been a repeated entry point in state-sponsored campaigns against Cisco infrastructure precisely because nothing expires them.
+
+        Central authentication also produces the record local login cannot. TACACS+ logs the identity behind each session and, with command accounting, each command typed, so a change is attributable to a person rather than a shared account.
+
+        Configure this defensively, because it can lock operators out. If the method list names only servers that become unreachable, nobody logs in and recovery means a password recovery procedure at the console. Keep `local` as the final method and set `aaa authentication login console local`.
+      audit: |-
+        To verify that AAA authentication login method lists are configured:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the running configuration for AAA authentication login:
+
+           ```text
+           show running-config aaa | include authentication login
+           ```
+
+        The device passes when at least one `aaa authentication login` method list is listed. Empty output is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Configure AAA authentication to use a TACACS+ or RADIUS server group with local fallback. The server group must already exist. For RADIUS, the predefined group named `radius` contains all globally configured RADIUS servers. For TACACS+, first enable `feature tacacs+` and create a named server group with `aaa group server tacacs+`. Keeping `local` as a fallback method and `local` on the console line prevents a lockout if the AAA servers become unreachable.
+
+            ```text
+            configure terminal
+            aaa authentication login default group <server-group-name> local
+            aaa authentication login console local
+            ```
+
+            Verify the configuration from a second session before closing your current one:
+
+            ```text
+            show running-config aaa | include "authentication login"
+            ```
+
+            NX-OS does not automatically persist running-config changes. Once you have confirmed access still works, save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/security/cisco-nexus-9000-nx-os-security-configuration-guide-105x/m-configuring-aaa.html
+        title: Cisco NX-OS AAA Configuration Guide
+  - uid: mondoo-cisco-nxos-security-aaa-group-servers-configured
+    title: Ensure AAA group servers are configured
+    impact: 85
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-02
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-j
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-3
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      cisco.nxos.runAaaGroupsServerTacacs.length > 0 ||
+      cisco.nxos.runAaaGroupsServerRadius.length > 0
+    docs:
+      desc: |
+        This check verifies that the switch actually has an external authentication server group to send login requests to.
+
+        A method list is only a pointer. The group behind it is built by enabling `feature tacacs+`, defining the servers, and grouping them with `aaa group server tacacs+ <group-name>`, or by using the predefined `radius` group that holds all globally configured RADIUS servers. This check passes when at least one TACACS+ or RADIUS server group exists.
+
+        **Why this matters**
+
+        NX-OS rejects every TACACS+ command while the feature is disabled, so half-finished rollouts are common here. The result is a switch whose method list references a group that was never created. Authentication silently falls through to the local database while a configuration review sees the method list and concludes the device is centrally managed.
+
+        That gap matters most during an incident. The account you believe was revoked in the identity provider still works on the switch, and the accounting trail you expect to reconstruct the change from was never produced, because no server ever received the requests.
+
+        Define more than one server in the group, since a single authentication server turns a routine reboot into a fleet-wide login outage, and place the servers in the management VRF so authentication does not depend on the routed data path.
+      audit: |-
+        To verify that AAA group servers are configured:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the configured AAA server groups:
+
+           ```text
+           show aaa groups
+           ```
+
+        The device passes when at least one TACACS+ or RADIUS server group is listed. Empty output is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Enable the TACACS+ feature, define the server, and create a server group. The `feature tacacs+` command must come first; NX-OS rejects all TACACS+ configuration while the feature is disabled.
+
+            ```text
+            configure terminal
+            feature tacacs+
+            tacacs-server host <server-ip> key <shared-secret>
+            aaa group server tacacs+ <group-name>
+              server <server-ip>
+              use-vrf management
+              source-interface mgmt0
+            ```
+
+            Adjust the VRF and source interface to match how the device reaches the TACACS+ server.
+
+            NX-OS does not automatically persist running-config changes. Save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/security/cisco-nexus-9000-nx-os-security-configuration-guide-105x/m-configuring-aaa.html
+        title: Cisco NX-OS AAA Configuration Guide
+  - uid: mondoo-cisco-nxos-security-password-strength-check
+    title: Ensure password strength check is enabled
+    impact: 85
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-02
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-j
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      cisco.nxos.passwordStrengthCheck == true
+    docs:
+      desc: |
+        This check verifies that the switch refuses a weak password at the moment an operator tries to set one.
+
+        `password strength-check` turns on the built-in NX-OS validator, which rejects a new password that is shorter than eight characters, that lacks an uppercase letter, a lowercase letter, a digit, or a special character, that repeats characters consecutively, or that is a recognizable dictionary word. This check requires the feature to be enabled.
+
+        **Why this matters**
+
+        With the validator off, NX-OS accepts anything, and the passwords that end up on switches are the ones typed during a late build window: the hostname, the site code, the vendor name with a digit appended. Those lead every wordlist aimed at network gear.
+
+        Enforcement at the point of entry carries more weight on a switch than on a server, because there is no password expiry driving a later correction and no endpoint agent to flag the weak value afterward. Whatever is set during the build is very likely still set five years later.
+
+        Note the limit. The validator runs only when a password is set, so existing accounts keep whatever they have until each is reset. Do that sweep after enabling it, and pair it with the minimum passphrase length enforced by a companion check in this policy.
+      audit: |-
+        To verify that password strength checking is enabled:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the running configuration for the password setting:
+
+           ```text
+           show running-config | include password strength-check
+           ```
+
+        The device passes when the output contains `password strength-check`. A `no password strength-check` line or empty output is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Enable password strength checking:
+
+            ```text
+            configure terminal
+            password strength-check
+            ```
+
+            NX-OS does not automatically persist running-config changes. Save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/security/cisco-nexus-9000-nx-os-security-configuration-guide-105x/m-configuring-user-accounts-and-rbac.html
+        title: Cisco NX-OS User Account Configuration Guide
+  - uid: mondoo-cisco-nxos-security-encryption-service-enabled
+    title: Ensure encryption service is enabled
+    impact: 85
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-2-iv-access-control-encryption-and-decryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-28
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-11
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-3-5-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-1
+    mql: |
+      cisco.nxos.encryptionService.enabled == true
+      cisco.nxos.encryptionService.masterKeyConfigured == true
+    docs:
+      desc: |
+        This check verifies that secrets stored in the configuration are protected by a device master key rather than a reversible encoding.
+
+        NX-OS Type 6 encryption applies AES to stored secrets using a master key deliberately kept outside the configuration file. `key config-key ascii` prompts for that key interactively, and `feature password encryption aes` moves the supported secrets, notably RADIUS and TACACS+ shared keys, to Type 6. This check requires both the service enabled and a master key present.
+
+        **Why this matters**
+
+        The TACACS+ shared key is the highest value secret on the switch. Anyone holding it decrypts captured TACACS+ traffic, which carries the credentials of every administrator who logged in through it and every command they ran. It also lets them stand up a server the switch trusts for authentication decisions.
+
+        Without Type 6, those keys sit in the running configuration as Type 7 strings. Type 7 is a published XOR against a fixed key with decoders freely available for over twenty years. Configurations travel constantly: nightly TFTP backups, ticket attachments, vendor support cases, configuration management repositories. Every copy is a credential store.
+
+        Treat the master key as a separate secret with its own custody. It is not written to the configuration and not carried by `copy running-config startup-config`, so restoring onto a replacement supervisor means setting it first or re-entering every secret by hand.
+      audit: |-
+        To verify that the encryption service is enabled with a master key:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the password encryption status:
+
+           ```text
+           show encryption service stat
+           ```
+
+        The device passes when AES encryption is enabled and a master key is configured. A disabled service or missing master key is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Configure a master key and enable the AES password encryption feature. The `key config-key ascii` command prompts for the master key interactively; the key is not entered on the command line.
+
+            ```text
+            configure terminal
+            key config-key ascii
+            feature password encryption aes
+            ```
+
+            To convert existing Type 7 encrypted secrets in the configuration to Type 6 AES encryption:
+
+            ```text
+            encryption re-encrypt obfuscated
+            ```
+
+            NX-OS does not automatically persist running-config changes. Save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/security/cisco-nexus-9000-nx-os-security-configuration-guide-105x/m-configuring-user-accounts-and-rbac.html
+        title: Cisco NX-OS Encryption Configuration Guide
+  - uid: mondoo-cisco-nxos-security-users-encrypted-credentials
+    title: Ensure all users have encrypted credentials
+    impact: 90
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-02
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-j
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      cisco.nxos.users.all(
+        creds.all(encryptionType != "0")
+      )
+    docs:
+      desc: |
+        This check verifies that no local account stores its password in readable form.
+
+        When an operator runs `username <user> password <password> role <role>`, the password is typed in the clear and NX-OS hashes it before writing the line. A credential with encryption type 0 is stored as literal text instead, which happens when a line already carrying a type 0 marker is pasted in or written by provisioning tooling. This check requires every local credential to use a type other than 0.
+
+        **Why this matters**
+
+        A type 0 password is a live credential in every place the configuration ends up. That is the nightly backup share, the diff attached to a change ticket, the git repository the network team uses for configuration drift, and the text file an engineer saved while troubleshooting. Read access to any one of them is enough.
+
+        Network credentials are also reused across the fleet more often than any team admits, so one type 0 line frequently yields the `network-admin` password that works on every switch in the data center.
+
+        Editing the stored string does not fix it. The encryption type only changes when the password is set again, so reset the affected accounts with a fresh strong password, verify with `show running-config | include ^username`, and persist with `copy running-config startup-config`.
+      audit: |-
+        To verify that all local users have encrypted credentials:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the configured user accounts:
+
+           ```text
+           show running-config | include ^username
+           ```
+
+        The device passes when every `username` credential uses a non-clear-text encryption type. A user with a type 0 (clear text) password is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Reset the password for any user whose credential is stored in clear text. Enter the password in plain text; NX-OS hashes it before storing it in the configuration.
+
+            ```text
+            configure terminal
+            username <user> password <strong-password> role <role>
+            ```
+
+            Verify that no credential is stored with encryption type 0:
+
+            ```text
+            show running-config | include ^username
+            ```
+
+            NX-OS does not automatically persist running-config changes. Save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/security/cisco-nexus-9000-nx-os-security-configuration-guide-105x/m-configuring-user-accounts-and-rbac.html
+        title: Cisco NX-OS User Account Configuration Guide
+  - uid: mondoo-cisco-nxos-security-passphrase-min-length
+    title: Ensure minimum passphrase length is configured
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-02
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-j
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      cisco.nxos.passphraseLength.minLength >= 8
+    docs:
+      desc: |
+        This check verifies that a floor is enforced on how short a local account password may be.
+
+        `userpassphrase min-length` sets that floor, and it is normally paired with an upper bound, as in `userpassphrase min-length 15 max-length 127`. NX-OS applies it when a password is set, refusing anything shorter. This check requires a configured minimum of at least 8 characters.
+
+        **Why this matters**
+
+        Length is the one password property that reliably costs an attacker time. Character classes and substitutions barely slow a modern cracking rig, but each additional character multiplies the search space. An eight character password recovered from a captured hash falls in hours on commodity GPUs; a fifteen character one does not fall at all by that route.
+
+        Online guessing against the switch matters more day to day, and short passwords lose there too, because a password short enough to be typed quickly at a console is usually one memorable enough to appear in a wordlist.
+
+        Eight is the floor this check enforces, not the number to configure. Fifteen or more is the sensible setting for a device whose accounts are rarely rotated and whose lifetime is measured in years. Pair it with `password strength-check`, which covers composition rather than length, and remember that the limit binds only on passwords set after it is configured, so existing short passwords need an explicit reset.
+      audit: |-
+        To verify that the minimum passphrase length is configured:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the running configuration for the passphrase setting:
+
+           ```text
+           show running-config | include userpassphrase
+           ```
+
+        The device passes when `userpassphrase min-length` is set to 8 or greater. A minimum length below 8 or no setting is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Configure minimum passphrase length:
+
+            ```text
+            configure terminal
+            userpassphrase min-length 15 max-length 127
+            ```
+
+            NX-OS does not automatically persist running-config changes. Save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/security/cisco-nexus-9000-nx-os-security-configuration-guide-105x/m-configuring-user-accounts-and-rbac.html
+        title: Cisco NX-OS User Account Configuration Guide
+  - uid: mondoo-cisco-nxos-security-system-login-block
+    title: Ensure system login block is configured
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-02
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-j
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      cisco.nxos.systemLogin.blockFor > 0
+      cisco.nxos.systemLogin.attempts > 0
+    docs:
+      desc: |
+        This check verifies that repeated failed logins temporarily shut an attacker out of the device.
+
+        `system login block-for 60 attempts 3 within 60` puts NX-OS into quiet mode, refusing further login attempts for sixty seconds once three failures occur inside a sixty second window. `system login quiet-mode access-class` names an ACL of hosts that remain permitted while quiet mode is active. This check requires both a non-zero block period and a non-zero attempt count.
+
+        **Why this matters**
+
+        A per-connection attempt cap barely slows a password guesser, because reconnecting resets the count. Quiet mode attacks the reconnect itself, and that changes the arithmetic completely: a rate of thousands of guesses per hour drops to a handful per minute, which is the difference between a wordlist finishing overnight and never finishing at all.
+
+        It also converts a quiet attack into a loud one. The transition into quiet mode is a distinct syslog event, so a brute-force attempt that would otherwise blend into ordinary failed-login noise becomes a single alertable message on the collector.
+
+        Quiet mode blocks everyone it applies to, including you, which an attacker can trigger deliberately to keep operators off the switch during a larger action. Configure `system login quiet-mode access-class` to exempt your management subnet, keep console access available, and save the configuration with `copy running-config startup-config`.
+      audit: |-
+        To verify that the system login block feature is configured:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the running configuration for the login block setting:
+
+           ```text
+           show running-config | include system login block-for
+           ```
+
+        The device passes when a `system login block-for` entry with a non-zero block period and attempt count is configured. Empty output is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Configure login blocking:
+
+            ```text
+            configure terminal
+            system login block-for 60 attempts 3 within 60
+            ```
+
+            This blocks logins for 60 seconds after 3 failed attempts within 60 seconds. During the block period the device denies all login attempts, which an attacker can abuse to lock out administrators. Permit trusted management hosts during the quiet period with an ACL:
+
+            ```text
+            ip access-list LOGIN-QUIET-MODE
+              permit tcp <management-subnet> any eq 22
+            exit
+            system login quiet-mode access-class LOGIN-QUIET-MODE
+            ```
+
+            NX-OS does not automatically persist running-config changes. Save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/security/cisco-nexus-9000-nx-os-security-configuration-guide-105x/m-configuring-user-accounts-and-rbac.html
+        title: Cisco NX-OS Login Configuration Guide
+  - uid: mondoo-cisco-nxos-security-ntp-servers-configured
+    title: Ensure NTP servers are configured
+    impact: 75
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-08
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-17
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-6
+      compliance/nist-csf-2: nist-csf-2-pr-ds-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-2-1
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    mql: |
+      cisco.nxos.ntp.servers.length > 0
+    docs:
+      desc: |
+        This check verifies that the switch keeps its clock synchronized to an authoritative time source.
+
+        `ntp server <address> use-vrf management` points the switch at a time server reachable over the management VRF, which keeps synchronization independent of the routed data path. This check requires at least one NTP server to be configured.
+
+        **Why this matters**
+
+        A Nexus switch that was never given a time source free-runs from whatever the clock held at boot. The drift is slow enough to go unnoticed and large enough to matter, and it degrades every syslog line the switch emits and every accounting record it sends to TACACS+.
+
+        Correlation is most of the work during an incident, and correlation is what a wrong clock destroys. When the switch reports an interface event at 03:14 and the firewall reports the connection at 03:31, there is no way to establish which caused which, and the timeline that would have identified the entry point never assembles.
+
+        Time also gates certificate validation, so a switch running a year behind will happily accept a certificate that expired months ago.
+
+        Configure more than one server, and consider `ntp authenticate` with `ntp authentication-key` and `ntp trusted-key` so an attacker on the management segment cannot move the clock and reshape the evidence.
+      audit: |-
+        To verify that NTP servers are configured:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the configured NTP peers:
+
+           ```text
+           show ntp peers
+           ```
+
+        The device passes when at least one NTP server is listed. Empty output is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Configure NTP servers:
+
+            ```text
+            configure terminal
+            ntp server <ntp-server-ip-1> use-vrf management
+            ntp server <ntp-server-ip-2> use-vrf management
+            ```
+
+            NX-OS does not automatically persist running-config changes. Save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/system-management/cisco-nexus-9000-nx-os-system-management-configuration-guide-105x/m-configuring-ntp.html
+        title: Cisco NX-OS NTP Configuration Guide
+  - uid: mondoo-cisco-nxos-security-timezone-configured
+    title: Ensure timezone is configured
+    impact: 65
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-08
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-17
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-6
+      compliance/nist-csf-2: nist-csf-2-pr-ds-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-2-1
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    mql: |
+      cisco.nxos.clock.timezone != ""
+    docs:
+      desc: |
+        This check verifies that the switch stamps its output with a declared, unambiguous local time reference.
+
+        `clock timezone EST -5 0` names the zone and its offset from UTC, and `clock summer-time` handles seasonal adjustment where it applies. This check requires a timezone to be configured.
+
+        **Why this matters**
+
+        With no timezone set, the switch reports time with no zone the reader can rely on, and the assumption each person makes about that value differs. The operator reading `show logging` at the console assumes local time. The analyst reading the same event on the collector assumes UTC. One of them is wrong by several hours and neither knows it.
+
+        That cost lands exactly when time is most expensive. Reconstructing an intrusion means aligning switch events against firewall logs, badge records, and change tickets, and an unlabeled hour of skew is enough to place the switch event on the wrong side of the change that caused it.
+
+        Fleet consistency matters more than the specific zone. Standardizing on UTC across every device is a perfectly good answer, and so is local time, but it needs to be the configured answer rather than the absence of one. Apply the same choice everywhere, and save it with `copy running-config startup-config` so a reload does not quietly revert one switch out of forty.
+      audit: |-
+        To verify that a timezone is configured:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the running configuration for the clock timezone:
+
+           ```text
+           show running-config | include clock timezone
+           ```
+
+        The device passes when a `clock timezone` entry is configured. Empty output is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Configure the timezone:
+
+            ```text
+            configure terminal
+            clock timezone EST -5 0
+            ```
+
+            NX-OS does not automatically persist running-config changes. Save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/system-management/cisco-nexus-9000-nx-os-system-management-configuration-guide-105x/m-configuring-ntp.html
+        title: Cisco NX-OS Clock Configuration Guide
+  - uid: mondoo-cisco-nxos-security-logging-remote-servers
+    title: Ensure remote logging servers are configured
+    impact: 85
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-08
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-16
+      compliance/nis-2: nis-2-21-2-b
+      compliance/nist-csf-1: nist-csf-1-de-cm-1
+      compliance/nist-csf-2: nist-csf-2-de-cm-09
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-2-1
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    mql: |
+      cisco.nxos.logging.serverEnabled == true
+      cisco.nxos.logging.remoteServers.length > 0
+    docs:
+      desc: |
+        This check verifies that the switch's log stream is copied off the box as it is produced.
+
+        `logging server <syslog-server-ip> 6 use-vrf management` sends messages at the chosen severity to a collector over the management VRF. This check requires remote logging to be enabled and at least one server to be configured.
+
+        **Why this matters**
+
+        The on-box log is memory. It is bounded, it wraps under any real volume, and it is gone at reload, so a switch that logs only locally has an evidence window of hours and nothing at all after the reboot that so often follows an incident.
+
+        It is also fully under the control of whoever holds the switch. An attacker with `network-admin` runs `clear logging logfile` and the record of how they arrived disappears. Implant campaigns against Cisco network devices have gone further and modified the device so that it stops reporting the attacker's own activity, which is only detectable when an off-box copy exists to compare against.
+
+        Off-box logs are the one record the intruder on the switch cannot edit after the fact, which is what makes them the record worth having.
+
+        Send to a collector reachable in the management VRF so logging survives the data plane problems you most want logged, and alert on a switch that stops reporting.
+      audit: |-
+        To verify that remote logging servers are configured:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the configured logging servers:
+
+           ```text
+           show logging server
+           ```
+
+        The device passes when remote logging is enabled and at least one syslog server is listed. No configured server is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Configure remote logging:
+
+            ```text
+            configure terminal
+            logging server <syslog-server-ip> 6 use-vrf management
+            logging source-interface mgmt0
+            ```
+
+            NX-OS does not automatically persist running-config changes. Save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/system-management/cisco-nexus-9000-nx-os-system-management-configuration-guide-105x/m-configuring-system-message-logging.html
+        title: Cisco NX-OS Logging Configuration Guide
+  - uid: mondoo-cisco-nxos-security-logging-timestamp-configured
+    title: Ensure logging timestamps are configured
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-08
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-16
+      compliance/nis-2: nis-2-21-2-b
+      compliance/nist-csf-1: nist-csf-1-de-cm-1
+      compliance/nist-csf-2: nist-csf-2-de-cm-09
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-2-1
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    mql: |
+      cisco.nxos.logging.timestampFormat == "MilliSeconds" ||
+      cisco.nxos.logging.timestampFormat == "MicroSeconds"
+    docs:
+      desc: |
+        This check verifies that log entries carry enough timestamp precision to order events that occur close together.
+
+        `logging timestamp milliseconds` raises the resolution of syslog timestamps from the NX-OS default of whole seconds. Microsecond resolution is also available. This check passes on millisecond or microsecond precision and fails on second-level timestamps.
+
+        **Why this matters**
+
+        A switch produces its most important output in bursts. A single link failure emits interface down, protocol adjacency loss, MAC table churn, and route withdrawal within the same second. At second resolution all of those lines carry an identical timestamp and land in whatever order the collector happened to write them.
+
+        In an investigation the ordering is the finding. Whether the ACL change preceded the traffic or followed it, whether the adjacency dropped before or after the interface, whether the spanning tree topology change caused the MAC moves or resulted from them: each of those questions is answered by sequence, and second-level stamps discard the sequence exactly where the events cluster.
+
+        Precision is not accuracy. Millisecond timestamps on a switch with no time source are precisely wrong, so treat this as one half of a pair with the NTP requirement enforced by a companion check in this policy. Set it in configuration mode and persist it with `copy running-config startup-config`.
+      audit: |-
+        To verify that logging timestamps use high precision:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the logging timestamp setting:
+
+           ```text
+           show logging timestamp
+           ```
+
+        The device passes when the timestamp format is reported as milliseconds or microseconds. A seconds-precision format is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Configure millisecond timestamps:
+
+            ```text
+            configure terminal
+            logging timestamp milliseconds
+            ```
+
+            NX-OS does not automatically persist running-config changes. Save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/system-management/cisco-nexus-9000-nx-os-system-management-configuration-guide-105x/m-configuring-system-message-logging.html
+        title: Cisco NX-OS Logging Configuration Guide
+  - uid: mondoo-cisco-nxos-security-logging-source-interface
+    title: Ensure logging source interface is configured
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-08
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-16
+      compliance/nis-2: nis-2-21-2-b
+      compliance/nist-csf-1: nist-csf-1-de-cm-1
+      compliance/nist-csf-2: nist-csf-2-de-cm-09
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-2-1
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    mql: |
+      cisco.nxos.logging.srcInterfaceName != ""
+    docs:
+      desc: |
+        This check verifies that syslog messages always leave the switch from one predictable address.
+
+        `logging source-interface mgmt0` pins the source address of outbound syslog to a chosen interface. Without it, NX-OS sources each message from whichever interface the route to the collector happens to select, and a Nexus switch typically owns many addresses across SVIs, loopbacks, and the management port. This check requires a source interface to be set.
+
+        **Why this matters**
+
+        A collector identifies a device by the address the messages arrive from. When a routing change or a management path failover shifts that address, the same switch begins reporting as a new host. Its parsers do not match, its alert rules do not fire, and the historical timeline for that switch simply stops, which is the moment an operator is most likely to conclude the device is quiet and therefore healthy.
+
+        The sharper failure is silent loss. Syslog collectors are normally restricted to a list of known senders, so messages arriving from an unexpected address are dropped at the collector's filter. The switch reports nothing wrong, because syslog over UDP is never acknowledged.
+
+        Choose an interface that stays up independently of the data path, typically `mgmt0` or a loopback, make sure the collector permits that address, and confirm the switch is still landing in the collector after the change rather than assuming it.
+      audit: |-
+        To verify that a logging source interface is configured:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the running configuration for the logging source interface:
+
+           ```text
+           show running-config | include logging source-interface
+           ```
+
+        The device passes when a `logging source-interface` entry is configured. Empty output is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Configure logging source interface:
+
+            ```text
+            configure terminal
+            logging source-interface mgmt0
+            ```
+
+            NX-OS does not automatically persist running-config changes. Save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/system-management/cisco-nexus-9000-nx-os-system-management-configuration-guide-105x/m-configuring-system-message-logging.html
+        title: Cisco NX-OS Logging Configuration Guide
+  - uid: mondoo-cisco-nxos-security-snmp-no-public-community
+    title: Ensure SNMP does not use default community strings
+    impact: 95
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-02
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-j
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-8-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      cisco.nxos.snmp.communities.none(name == "public")
+      cisco.nxos.snmp.communities.none(name == "private")
+    docs:
+      desc: |
+        This check verifies that the switch does not answer to the SNMP community strings every scanner tries first.
+
+        Community strings are removed with `no snmp-server community public` and `no snmp-server community private` and replaced with an unpredictable value scoped to a role, as in `snmp-server community <unique-string> group network-operator`. This check fails when a community named exactly `public` or `private` exists. The comparison is case sensitive, so a capitalized variant such as `Public` passes it and is worth hunting down separately.
+
+        **Why this matters**
+
+        SNMP v1 and v2c carry the community string in the clear over UDP, and `public` and `private` are the values every vendor documents. Scanners test them continuously, so a switch left with defaults is found automatically rather than targeted.
+
+        Read access alone maps the environment. A walk with `public` returns the interface inventory, ARP and MAC tables, routing neighbors, and the running software version with its known vulnerabilities, which is often enough to fingerprint the whole fabric from one device.
+
+        Write access through `private` is direct control. An attacker changes configuration through SNMP, and on Cisco platforms can drive a configuration copy to a TFTP server they operate, which hands them the full running configuration including the credentials in it.
+
+        Renaming the community is not the fix, only the first step. The replacement string still crosses the wire in plaintext, so restrict it with an ACL and move monitoring to SNMPv3 with enforced privacy, both covered by companion checks in this policy.
+      audit: |-
+        To verify that default SNMP community strings are not in use:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the configured SNMP community strings:
+
+           ```text
+           show snmp community
+           ```
+
+        The device passes when no community named `public` or `private` is listed. A `public` or `private` community string is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Remove default community strings:
+
+            ```text
+            configure terminal
+            no snmp-server community public
+            no snmp-server community private
+            snmp-server community <unique-string> group network-operator
+            ```
+
+            NX-OS does not automatically persist running-config changes. Save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/system-management/cisco-nexus-9000-nx-os-system-management-configuration-guide-105x/m-configuring-snmp.html
+        title: Cisco NX-OS SNMP Configuration Guide
+  - uid: mondoo-cisco-nxos-security-snmp-encryption-enforced
+    title: Ensure SNMPv3 encryption is enforced globally
+    impact: 85
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: |
+      cisco.nxos.snmp.settings.encryptionEnforced == true
+    docs:
+      desc: |
+        This check verifies that every SNMPv3 user is required to authenticate and encrypt, with no per-user exception.
+
+        SNMPv3 users are created individually, as in `snmp-server user <username> network-operator auth sha <auth-password> priv aes-128 <priv-password>`, and each one can be created without privacy. `snmp-server globalEnforcePriv` makes encryption mandatory across all of them. This check requires that global enforcement to be in place.
+
+        **Why this matters**
+
+        SNMPv3 offers three levels of protection and only the strongest encrypts the payload. Leaving the choice to each user definition means the security of the whole management interface is set by whichever user was created most carelessly, usually the one added quickly to onboard a new monitoring tool.
+
+        An unencrypted SNMPv3 session is readable by anyone on the management path. The walk itself is the reconnaissance prize: interface inventory, address assignments, neighbor relationships, and platform versions, delivered in clean structured form.
+
+        The authentication digest travels with those packets too, so a captured session also gives the attacker material for an offline attack against the user's authentication password, and a recovered password is reusable against every switch that shares it.
+
+        Inventory your pollers before enabling this. Any SNMPv3 user defined without a privacy password stops working immediately, and monitoring that still relies on v2c community strings should be migrated to SNMPv3 first rather than discovered as an outage.
+      audit: |-
+        To verify that SNMPv3 encryption is enforced globally:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the running configuration for the SNMP privacy setting:
+
+           ```text
+           show running-config | include snmp-server globalEnforcePriv
+           ```
+
+        The device passes when the output contains `snmp-server globalEnforcePriv`. Empty output is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Before enforcing global privacy, make sure at least one SNMPv3 user is configured with both authentication and privacy. Global privacy enforcement requires every SNMP request to use SNMPv3 with encryption, so it silently stops all SNMPv1 and SNMPv2c community access. If no SNMPv3 auth and priv user exists when you enforce this, SNMP management of the device breaks entirely.
+
+            Create an SNMPv3 user with SHA authentication and AES-128 privacy, then enforce global privacy:
+
+            ```text
+            configure terminal
+            snmp-server user <username> network-operator auth sha <auth-password> priv aes-128 <priv-password>
+            snmp-server globalEnforcePriv
+            ```
+
+            The `snmp-server globalEnforcePriv` token is valid NX-OS syntax. Migrate any monitoring systems that still rely on v2c community strings to SNMPv3 before applying this change.
+
+            NX-OS does not automatically persist running-config changes. Save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/system-management/cisco-nexus-9000-nx-os-system-management-configuration-guide-105x/m-configuring-snmp.html
+        title: Cisco NX-OS SNMP Configuration Guide
+  - uid: mondoo-cisco-nxos-security-snmp-communities-acl
+    title: Ensure SNMP communities have ACLs applied
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ac-3
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-4
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-1
+      compliance/soc2-2017: soc2-control-cc6-6-1
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: |
+      if (cisco.nxos.snmp.communities.length > 0) {
+        cisco.nxos.snmp.communities.all(
+          ipv4Acl != "" || ipv6Acl != ""
+        )
+      }
+    docs:
+      desc: |
+        This check verifies that SNMP polling is accepted only from named management stations.
+
+        An ACL listing the authorized pollers is bound to each community with `snmp-server community <community> use-ipv4acl <acl>`, and the ACL must exist before it is referenced. This check requires every configured community to carry an IPv4 or IPv6 ACL, and passes on a switch that defines no communities at all.
+
+        **Why this matters**
+
+        A community string is a bearer token sent in cleartext UDP. Anyone who captures one packet on the management path holds it, and so does anyone who guesses a predictable value. Without an ACL, holding the string means querying the switch from anywhere that can route to it; with one, a stolen string is usable only from an address already inside your management network.
+
+        What that query returns is worth protecting. A full walk yields the interface inventory, ARP and MAC tables, routing adjacencies, and the software version, which is the reconnaissance an attacker performs before choosing where to move next.
+
+        Be honest about the limit. UDP source addresses are spoofable and the string still crosses the wire in the clear, so treat this as a stopgap while SNMPv3 is rolled out. Enumerate every poller first, because any station left out loses visibility of the switch immediately.
+      audit: |-
+        To verify that SNMP communities have ACLs applied:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the configured SNMP community strings:
+
+           ```text
+           show snmp community
+           ```
+
+        The device passes when every community string has an IPv4 or IPv6 ACL applied. Any community with no ACL is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            The preferred fix is to migrate SNMP management to SNMPv3, which provides per-user authentication and encryption rather than shared community strings. Applying ACLs to v2c communities is a stopgap that limits which hosts can poll the device but does not encrypt the traffic or authenticate individual users. See the check that enforces SNMPv3 encryption globally for the SNMPv3 migration path.
+
+            If you must keep v2c communities in the interim, create an ACL that permits only authorized management stations, then bind it to each SNMP community. The ACL must exist before it is referenced. Include every monitoring system in the ACL; any station not permitted loses SNMP access to the device as soon as the ACL is applied.
+
+            ```text
+            configure terminal
+            ip access-list SNMP-MGMT
+              permit ip <nms-ip>/32 any
+            exit
+            snmp-server community <community> use-ipv4acl SNMP-MGMT
+            ```
+
+            NX-OS does not automatically persist running-config changes. Save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/system-management/cisco-nexus-9000-nx-os-system-management-configuration-guide-105x/m-configuring-snmp.html
+        title: Cisco NX-OS SNMP Configuration Guide
+  - uid: mondoo-cisco-nxos-security-poap-disabled
+    title: Ensure POAP is disabled
+    impact: 85
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ac-3
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc6-6-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      cisco.nxos.boot.poapEnabled == false
+    docs:
+      desc: |
+        This check verifies that the switch will not fetch and execute a configuration script from the network when it boots without one.
+
+        Power-On Auto Provisioning is the NX-OS zero-touch build path. A Nexus switch that boots with no startup configuration broadcasts DHCP, takes a script and image location from the options it receives, downloads them, and runs the script with full administrative rights. `no boot poap enable` turns that off, and this check requires it disabled.
+
+        **Why this matters**
+
+        The entire trust model is the DHCP server, and the switch trusts whichever server answers first. On a data center fabric that can be any host an attacker has already compromised, and winning a DHCP race against a distant server is not a difficult problem.
+
+        The window opens more often than teams expect. A supervisor replacement, an RMA unit racked from the shelf, or a `write erase` and reload during troubleshooting all leave the switch with no startup configuration and POAP ready to run.
+
+        The outcome is total, because the script runs as the switch's own provisioning process. It can install attacker accounts, point AAA at a server they operate, mirror a production VLAN to a port they can reach, or load an image of their choosing.
+
+        If you genuinely build with POAP, keep it enabled only through the build, then run `no boot poap enable` and `copy running-config startup-config` before the switch carries production traffic.
+      audit: |-
+        To verify that POAP is disabled:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the running configuration for the boot POAP setting:
+
+           ```text
+           show running-config | include boot poap
+           ```
+
+        The device passes when the output contains `no boot poap enable` or no `boot poap enable` line at all. A `boot poap enable` line is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Disable POAP:
+
+            ```text
+            configure terminal
+            no boot poap enable
+            ```
+
+            NX-OS does not automatically persist running-config changes. Save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/fundamentals/cisco-nexus-9000-nx-os-fundamentals-configuration-guide-105x/m-using-poap.html
+        title: Cisco NX-OS POAP Configuration Guide
+  - uid: mondoo-cisco-nxos-security-copp-profile-strict
+    title: Ensure CoPP uses a strict profile
+    impact: 85
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ac-3
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-5
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-1
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      cisco.nxos.copp.profile.in(["strict", "moderate", "dense"])
+    docs:
+      desc: |
+        This check verifies that the switch polices traffic reaching its supervisor CPU, and has not been left with the weakest available protection.
+
+        Control Plane Policing classifies traffic destined for the CPU and polices each class. NX-OS accepts strict, moderate, lenient, dense, and skip for `copp profile`, normally chosen by the initial setup script and changeable later with `copp profile strict`. The check passes only on strict, moderate, or dense. It fails on lenient, the weakest profile; on skip, which installs no policing at all; and on a switch with no `copp profile` line in its running configuration.
+
+        **Why this matters**
+
+        The data plane of a Nexus switch forwards in hardware at line rate. The control plane is an ordinary CPU orders of magnitude slower, and everything punted to it competes for the same cycles: BGP keepalives, OSPF hellos, ARP resolution, and the SSH session an operator would use to intervene.
+
+        An attacker does not need volume to reach that CPU, only the right packets. A stream with an expiring TTL, traffic toward unresolved addresses that forces ARP glean, or a flood of management protocol requests all bypass the hardware fast path by design.
+
+        When the CPU saturates, routing adjacencies time out first. The switch withdraws its routes, so the outage propagates well beyond the device under attack, and the management session you need for recovery is queued behind the flood.
+
+        Tightening the profile can drop traffic that was previously tolerated, so change it in a maintenance window and watch the per-class drop counters.
+      audit: |-
+        To verify that CoPP uses a protective profile:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the active CoPP profile:
+
+           ```text
+           show copp status
+           ```
+
+        The device passes when the active CoPP profile is `strict`, `moderate`, or `dense`. A `lenient` profile, a `skip` profile, or no configured profile at all is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Configure CoPP with a strict profile:
+
+            ```text
+            configure terminal
+            copp profile strict
+            ```
+
+            NX-OS does not automatically persist running-config changes. Save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/security/cisco-nexus-9000-nx-os-security-configuration-guide-105x/m-configuring-copp.html
+        title: Cisco NX-OS CoPP Configuration Guide
+  - uid: mondoo-cisco-nxos-security-vty-exec-timeout
+    title: Ensure VTY exec timeout is configured
+    impact: 75
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-02
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-1
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-12
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-10
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      cisco.nxos.lineConfigs.where(type == "vty").all(
+        execTimeout > 0
+      )
+    docs:
+      desc: |
+        This check verifies that idle remote administrative sessions are closed rather than left open indefinitely.
+
+        `exec-timeout` under `line vty` sets the idle period in minutes after which NX-OS disconnects a session. The NX-OS default is 30 minutes, which passes. A value of 0 disables the timeout entirely and fails. Because the default is not printed in the abbreviated configuration, confirm the effective value with `show running-config all | section "line vty"`.
+
+        **Why this matters**
+
+        An abandoned VTY session is an authenticated shell with `network-admin` rights waiting on somebody's screen, meaning the ability to shut an uplink, add an SPAN session, or install an account with no further authentication.
+
+        The realistic path is not a stranger at a desk. It is a jump host where the engineer stays logged in, a terminal multiplexer that survives the laptop closing, or a workstation compromised by unrelated malware, where the attacker inherits a live switch session rather than needing credentials at all.
+
+        Sessions also accumulate. NX-OS caps concurrent VTY sessions, and stale ones hold those slots, so the operator who needs to log in during an outage is refused.
+
+        Choose a value that fits real work rather than the smallest number available. Nine or ten minutes is common, while an aggressive timeout drops operators mid-change and invites keepalive workarounds that defeat the control.
+      audit: |-
+        To verify that VTY lines have an exec timeout configured:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the effective VTY line configuration, including default values:
+
+           ```text
+           show running-config all | section "line vty"
+           ```
+
+        The device passes when the VTY line reports a non-zero `exec-timeout`. The NX-OS default of 30 minutes passes. A VTY line with `exec-timeout 0` is a failing result because a value of 0 disables the timeout.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Configure VTY exec timeout (10 minutes recommended):
+
+            ```text
+            configure terminal
+            line vty
+            exec-timeout 10
+            ```
+
+            NX-OS does not automatically persist running-config changes. Save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/security/cisco-nexus-9000-nx-os-security-configuration-guide-105x/m-configuring-user-accounts-and-rbac.html
+        title: Cisco NX-OS Line Configuration Guide
+  - uid: mondoo-cisco-nxos-security-console-exec-timeout
+    title: Ensure console exec timeout is configured
+    impact: 75
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-02
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-1
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-12
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-10
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      cisco.nxos.lineConfigs.where(type == "console").all(
+        execTimeout > 0
+      )
+    docs:
+      desc: |
+        This check verifies that a session left open on the physical console does not stay authenticated indefinitely.
+
+        `exec-timeout` under `line console` disconnects an idle console session after the configured number of minutes. The NX-OS default is 30 minutes and passes, while `exec-timeout 0` disables the timeout and fails. The default does not appear in the abbreviated configuration, so verify it with `show running-config all | section "line console"`.
+
+        **Why this matters**
+
+        The console is treated as physically trusted because reaching it needs a cable. In practice that cable usually terminates on a terminal server, which is itself a network device with its own management interface and its own weaknesses. An attacker who reaches it does not land at a login prompt, they land in whatever session was left running on the switch.
+
+        Data center floors are not closed rooms either. Vendor engineers, cabling contractors, and colocation staff pass racks routinely, and a console left at a live prompt needs no credential at all.
+
+        The console is also where AAA fallback delivers a local login, which makes a stale session there a bypass of the entire management plane rather than one more way in.
+
+        Keep it short enough to matter but long enough for real console work, since the console is the recovery path you depend on if a VTY access class or an AAA change removes remote access.
+      audit: |-
+        To verify that the console line has an exec timeout configured:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the effective console line configuration, including default values:
+
+           ```text
+           show running-config all | section "line console"
+           ```
+
+        The device passes when the console line reports a non-zero `exec-timeout`. The NX-OS default of 30 minutes passes. A console line with `exec-timeout 0` is a failing result because a value of 0 disables the timeout.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Configure console exec timeout (10 minutes recommended):
+
+            ```text
+            configure terminal
+            line console
+            exec-timeout 10
+            ```
+
+            NX-OS does not automatically persist running-config changes. Save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/security/cisco-nexus-9000-nx-os-security-configuration-guide-105x/m-configuring-user-accounts-and-rbac.html
+        title: Cisco NX-OS Line Configuration Guide
+  - uid: mondoo-cisco-nxos-security-vty-acl-configured
+    title: Ensure VTY lines have ACLs configured
+    impact: 85
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ac-3
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-4
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-1
+      compliance/soc2-2017: soc2-control-cc6-6-1
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: |
+      cisco.nxos.lineConfigs.where(type == "vty").all(
+        accessClassInName != ""
+      )
+    docs:
+      desc: |
+        This check verifies that remote management sessions are accepted only from approved source addresses.
+
+        An inbound access class applied under `line vty`, as in `access-class VTY-MGMT in`, filters SSH connections before authentication is attempted. This check requires every VTY line to carry an inbound access class.
+
+        **Why this matters**
+
+        Without one, the SSH daemon answers anything that can route to any address the switch owns, and a Nexus switch owns many: the management port, every loopback, and an address on every SVI it routes for. A switch acting as default gateway for a server VLAN therefore offers its management plane to every host in that VLAN, including a compromised application server.
+
+        Filtering ahead of authentication also removes the switch from opportunistic target lists. Password guessing stops at the ACL rather than the login prompt, and a flaw in the SSH implementation itself is unreachable from an address that never gets a TCP session.
+
+        This is the control most likely to lock you out. The access class takes effect the moment it is applied and can drop the session you are typing in. Build and verify the ACL first, keep a console session open, apply it, confirm a fresh SSH connection from a permitted station, and only then run `copy running-config startup-config`. Saving before verifying removes the reload as an escape route.
+      audit: |-
+        To verify that VTY lines have an inbound ACL configured:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the running configuration for the VTY line:
+
+           ```text
+           show running-config | section "line vty"
+           ```
+
+        The device passes when the VTY line reports an `access-class <acl> in` entry. A VTY line with no inbound access class is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Create the ACL before applying it to the VTY lines and make sure it permits the management hosts you connect from. Applying an inbound access class that does not match your management stations immediately cuts off remote SSH access, including the session you are working in. Keep a console session available until you have verified remote access still works.
+
+            ```text
+            configure terminal
+            ip access-list VTY-MGMT
+              permit tcp <management-subnet> any eq 22
+            exit
+            line vty
+              access-class VTY-MGMT in
+            ```
+
+            From a permitted management station, open a new SSH session to confirm access before closing your existing one.
+
+            NX-OS does not automatically persist running-config changes. Once you have confirmed remote access still works, save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/security/cisco-nexus-9000-nx-os-security-configuration-guide-105x/m-configuring-user-accounts-and-rbac.html
+        title: Cisco NX-OS Line Configuration Guide
+  - uid: mondoo-cisco-nxos-security-motd-banner-configured
+    title: Ensure MOTD banner is configured
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-02
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-9
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-8-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      cisco.nxos.motdBanner != ""
+    docs:
+      desc: |
+        This check verifies that anyone connecting to the switch is shown a warning before they authenticate.
+
+        `banner motd` sets the text NX-OS presents at connection time, ahead of the username prompt, using a delimiter character to mark the start and end of the message. This check requires the banner text to be non-empty.
+
+        **Why this matters**
+
+        This banner is a legal instrument rather than a technical control, and it is the one control on this list whose value is realized in a courtroom or a disciplinary hearing. Action under unauthorized access statutes generally turns on whether the person was on notice that the system was restricted, and a switch that greets a stranger with a bare login prompt supports the argument that access appeared open.
+
+        Placement is what makes it work. A notice shown only after login has no bearing on someone who never intended to log in, which is why the message has to arrive at connection time, before credentials are requested.
+
+        Keep the text free of anything useful to an attacker. Hostname, model, site, department, and support contacts are all reconnaissance, and welcoming language undercuts the notice itself. State that use is restricted, that activity is monitored and logged, and have your legal team supply the exact wording so the same text is deployed fleet-wide.
+      audit: |-
+        To verify that a Message of the Day banner is configured:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the running configuration for the MOTD banner:
+
+           ```text
+           show running-config | include banner motd
+           ```
+
+        The device passes when a `banner motd` entry with text is configured. Empty output is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Configure a MOTD banner:
+
+            ```text
+            configure terminal
+            banner motd @Authorized access only. All activity is monitored and logged.@
+            ```
+
+            NX-OS does not automatically persist running-config changes. Save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/fundamentals/cisco-nexus-9000-nx-os-fundamentals-configuration-guide-105x.html
+        title: Cisco NX-OS Banner Configuration Guide
+  - uid: mondoo-cisco-nxos-security-exec-banner-configured
+    title: Ensure exec banner is configured
+    impact: 65
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-02
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-9
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-8-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      cisco.nxos.execBanner != ""
+    docs:
+      desc: |
+        This check verifies that a policy notice is presented to users once they have successfully authenticated.
+
+        `banner exec` sets text that NX-OS prints immediately after login, just before the first prompt, delimited the same way as the message of the day banner. This check requires the banner text to be non-empty.
+
+        **Why this matters**
+
+        The pre-login banner addresses strangers. This one addresses the people who belong here, and on a data center switch that audience causes most of the real damage. The engineer who shuts the wrong uplink or applies a change meant for a lab spine is working from an unremarkable prompt on a device that looks like forty others.
+
+        Use it to say what only an authenticated operator needs to know: that the session and the commands in it are recorded through TACACS+ accounting, that the device is under change control, and what class of device this is. A distinctive marker on production spines is read in the second before a disruptive command is typed, which is the moment it can still change the outcome.
+
+        Recognize what it is not. An attacker sees this text only after they already have a session, so it works alongside the pre-authentication banner rather than in place of it. Keep it brief and free of details that would help someone who should not be reading it.
+      audit: |-
+        To verify that an exec banner is configured:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the running configuration for the exec banner:
+
+           ```text
+           show running-config | include banner exec
+           ```
+
+        The device passes when a `banner exec` entry with text is configured. Empty output is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Configure an exec banner:
+
+            ```text
+            configure terminal
+            banner exec @This system is for authorized use only. All activity is logged.@
+            ```
+
+            NX-OS does not automatically persist running-config changes. Save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/fundamentals/cisco-nexus-9000-nx-os-fundamentals-configuration-guide-105x.html
+        title: Cisco NX-OS Banner Configuration Guide
+  - uid: mondoo-cisco-nxos-security-hostname-configured
+    title: Ensure hostname is configured
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-08
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-de-cm-1
+      compliance/nist-csf-2: nist-csf-2-de-cm-09
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-10-2-1
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    mql: |
+      cisco.nxos.hostname != ""
+      cisco.nxos.hostname.downcase != "switch"
+      cisco.nxos.hostname.downcase != "nexus"
+    docs:
+      desc: |
+        This check verifies that the switch identifies itself by a name unique to it.
+
+        `hostname <unique-descriptive-name>` sets the value that appears in the CLI prompt, in every syslog message the switch emits, in its CDP and LLDP advertisements, and in the SSH session banner. A factory Nexus answers to `switch`, and many are left at `nexus` after a partial build. This check requires a non-empty hostname and rejects the literal values `switch` and `nexus`.
+
+        **Why this matters**
+
+        Syslog identifies the sender by hostname, so a collector receiving from forty devices that all call themselves `switch` merges them into one unusable stream. The interface that flapped, the ACL that changed, and the login that failed all become events without a device, and the reconstruction an incident depends on cannot be built.
+
+        The prompt is also the last verification an operator performs before a disruptive command. A window showing `switch#` could be any device in the fabric, and that ambiguity is how a change lands on the wrong Nexus during a maintenance window.
+
+        A factory hostname signals something to an attacker too: a device still carrying its default name advertises that nobody finished a build checklist on it, which reliably predicts default community strings and untouched credentials nearby.
+
+        Name it for role and location and apply the same convention fleet-wide.
+      audit: |-
+        To verify that a unique, descriptive hostname is configured:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the configured hostname:
+
+           ```text
+           show running-config | include ^hostname
+           ```
+
+        The device passes when a hostname is set and is not the generic value `switch` or `nexus`. An empty or generic hostname is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Configure a descriptive hostname:
+
+            ```text
+            configure terminal
+            hostname <unique-descriptive-name>
+            ```
+
+            NX-OS does not automatically persist running-config changes. Save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/fundamentals/cisco-nexus-9000-nx-os-fundamentals-configuration-guide-105x.html
+        title: Cisco NX-OS System Configuration Guide
+  - uid: mondoo-cisco-nxos-security-source-routing-disabled
+    title: Ensure IP source routing is disabled
+    impact: 85
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ac-3
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc6-6-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      cisco.nxos.ip.sourceRouteEnabled == false
+    docs:
+      desc: |
+        This check verifies that the switch ignores packets that try to dictate their own forwarding path.
+
+        The IP loose and strict source route options let a sender list hops a packet must traverse, overriding the forwarding decision the network would otherwise make. `no ip source-route` makes the switch discard them. Because the setting is not printed in the abbreviated configuration, confirm it with `show running-config all | include ip source-route`. This check requires source routing disabled.
+
+        **Why this matters**
+
+        Firewall and ACL placement rests on an assumption about which paths traffic can take. Source routing breaks that assumption directly, letting an attacker steer a packet through the switch and out an interface that no filter inspects, reaching a segment the topology was designed to keep unreachable.
+
+        The return path is the sharper problem. Replies follow the source route in reverse, so an attacker who spoofs a trusted internal address still receives the answers. That turns blind spoofing, which is mostly useless, into a working two-way session under a borrowed identity.
+
+        The same options serve as a reconnaissance tool, letting an outsider probe internal reachability and map segments they cannot route to directly.
+
+        There is effectively no legitimate production use left. The mechanism was deprecated in practice decades ago precisely because its abuse cases outnumbered its uses, so disable it globally and save the configuration.
+      audit: |-
+        To verify that IP source routing is disabled:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the running configuration for the source-route setting:
+
+           ```text
+           show running-config all | include ip source-route
+           ```
+
+        The device passes when the output contains `no ip source-route`. An `ip source-route` line is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Disable IP source routing:
+
+            ```text
+            configure terminal
+            no ip source-route
+            ```
+
+            NX-OS does not automatically persist running-config changes. Save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/security/cisco-nexus-9000-nx-os-security-configuration-guide-105x.html
+        title: Cisco NX-OS Security Configuration Guide
+  - uid: mondoo-cisco-nxos-security-ip-directed-broadcast-disabled
+    title: Ensure IP directed broadcast is disabled on interfaces
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ac-3
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-5
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-1
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      cisco.nxos.runInterfaces.all(
+        ipDirectedBroadcast == false
+      )
+    docs:
+      desc: |
+        This check verifies that no interface will convert a unicast packet addressed to a subnet broadcast into an actual broadcast on that subnet.
+
+        `no ip directed-broadcast` under each routed interface stops that translation. This check requires it disabled on every interface, so a single interface that still permits it fails the check.
+
+        **Why this matters**
+
+        Directed broadcast is the amplifier in a Smurf attack. One spoofed ICMP echo sent to a subnet's broadcast address becomes one reply from every live host on that segment, and because the source was forged, all of those replies converge on a victim who never sent anything. The amplification factor is simply the number of responding hosts.
+
+        A data center switch makes this considerably worse than a campus router does. A server VLAN holds hundreds of active hosts behind high speed uplinks, so a modest inbound stream becomes an outbound flood large enough to saturate whatever the attacker aims it at, and the traffic leaves from your address space.
+
+        The same mechanism doubles as a host census. One probe returns a reply per responding host, handing an attacker the live inventory of a segment they cannot otherwise enumerate.
+
+        Fix every routed interface rather than the first one flagged, verify with `show running-config interface`, and persist the change with `copy running-config startup-config`.
+      audit: |-
+        To verify that IP directed broadcast is disabled on all interfaces:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the interface configuration:
+
+           ```text
+           show running-config interface
+           ```
+
+        The device passes when no interface has `ip directed-broadcast` configured. Any interface with `ip directed-broadcast` enabled is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Apply this change to every routed interface flagged by the audit, not just one. The check fails while any interface still has `ip directed-broadcast` enabled, so repeat the interface block for each affected interface.
+
+            Disable IP directed broadcast on interfaces:
+
+            ```text
+            configure terminal
+            interface <interface>
+            no ip directed-broadcast
+            ```
+
+            NX-OS does not automatically persist running-config changes. Save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/security/cisco-nexus-9000-nx-os-security-configuration-guide-105x.html
+        title: Cisco NX-OS Security Configuration Guide
+  - uid: mondoo-cisco-nxos-security-bgp-neighbor-passwords
+    title: Ensure BGP neighbors have authentication configured
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: |
+      if (cisco.nxos.bgp.length > 0) {
+        cisco.nxos.bgp.all(
+          neighbors.all(key != "")
+        )
+      }
+    docs:
+      desc: |
+        This check verifies that BGP sessions authenticate the peer before exchanging routes.
+
+        With `feature bgp` enabled, each neighbor under `router bgp` takes a `password <shared-secret>` that turns on TCP MD5 signing for the session. This check applies when BGP is configured and requires every neighbor to carry a password.
+
+        **Why this matters**
+
+        BGP believes what its peer tells it. An unauthenticated neighbor statement accepts a session from anything reaching the right address with the right autonomous system number, so an attacker who can source traffic from the peer's address becomes a trusted routing source.
+
+        What follows is not a routing bug, it is a tap. The attacker announces a more specific prefix for a production subnet, the switch prefers it, and traffic destined for your servers arrives at a next hop they control, to be recorded or modified before being forwarded on so nothing appears broken. A withdrawal instead blackholes the same traffic outright.
+
+        MD5 signing also blunts the blind TCP reset: without it, an attacker who lands a plausible sequence number tears the session down and forces a reconvergence.
+
+        Coordinate with the peer operator first. Setting a password on an established neighbor drops the session until both ends match, so routing through that peer stops. Confirm recovery with `show bgp sessions`.
+      audit: |-
+        To verify that BGP neighbors have authentication configured:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the BGP configuration:
+
+           ```text
+           show running-config bgp
+           ```
+
+        The device passes when every configured `neighbor` has a `password` entry. A BGP neighbor with no password is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Coordinate this change with the operator of the remote peer. Setting a password on an established neighbor tears the BGP session down until the same password is configured on both sides, which interrupts routing through that peer.
+
+            Configure BGP neighbor authentication:
+
+            ```text
+            configure terminal
+            router bgp <as-number>
+              neighbor <neighbor-ip>
+                password <shared-secret>
+            ```
+
+            Enter the password in plain text; NX-OS stores it in encrypted form in the configuration. Verify the session returns to the established state:
+
+            ```text
+            show bgp sessions
+            ```
+
+            NX-OS does not automatically persist running-config changes. Save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/unicast-routing/cisco-nexus-9000-nx-os-unicast-routing-configuration-guide-105x/m-configuring-bgp.html
+        title: Cisco NX-OS BGP Configuration Guide
+  - uid: mondoo-cisco-nxos-security-bgp-log-neighbor-changes
+    title: Ensure BGP log neighbor changes is enabled
+    impact: 75
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-08
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-16
+      compliance/nis-2: nis-2-21-2-b
+      compliance/nist-csf-1: nist-csf-1-de-cm-1
+      compliance/nist-csf-2: nist-csf-2-de-cm-09
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-2-1
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    mql: |
+      if (cisco.nxos.bgp.length > 0) {
+        cisco.nxos.bgp.all(logNeighborChanges == true)
+      }
+    docs:
+      desc: |
+        This check verifies that BGP peer state transitions are recorded as they happen.
+
+        `log-neighbor-changes` under `router bgp <as-number>` makes NX-OS emit a syslog message each time a neighbor enters or leaves the established state. This check applies when BGP is configured and requires the setting on every BGP instance.
+
+        **Why this matters**
+
+        A BGP session dropping is one of the few switch events that is always significant. It means routes were withdrawn and traffic moved somewhere else, and on a data center fabric that is either an outage or the early shape of one.
+
+        Without the log line the evidence is transient. `show bgp` reports the state right now, so an adjacency that dropped for eleven seconds at two in the morning and recovered leaves nothing behind. The application team's latency spike has no explanation on the network side, and the flapping peer keeps flapping.
+
+        The pattern of transitions is also the security signal. An attacker probing the BGP port, attempting a session from a spoofed source, or running a reset attack against an established peer produces a characteristic burst of state changes that is visible only if state changes are logged.
+
+        Pair it with remote logging, since messages held only in the on-box buffer are lost at reload and can be cleared by anyone with `network-admin`. Alert on transition frequency rather than on each event.
+      audit: |-
+        To verify that BGP neighbor change logging is enabled:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the BGP configuration:
+
+           ```text
+           show running-config bgp
+           ```
+
+        The device passes when every configured BGP instance has `log-neighbor-changes` set. A BGP instance without it is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Enable BGP neighbor change logging:
+
+            ```text
+            configure terminal
+            router bgp <as-number>
+            log-neighbor-changes
+            ```
+
+            NX-OS does not automatically persist running-config changes. Save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/unicast-routing/cisco-nexus-9000-nx-os-unicast-routing-configuration-guide-105x/m-configuring-bgp.html
+        title: Cisco NX-OS BGP Configuration Guide
+  - uid: mondoo-cisco-nxos-security-ospf-authentication
+    title: Ensure OSPF interfaces use authentication
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: |
+      if (cisco.nxos.ospf.length > 0) {
+        cisco.nxos.ospf.all(
+          interfaces.all(
+            md5AuthenticationEnabled == true || authKeychain != ""
+          )
+        )
+      }
+    docs:
+      desc: |
+        This check verifies that OSPF accepts routing information only from routers that prove they hold a shared key.
+
+        Authentication is set per interface, either with `ip ospf authentication message-digest` alongside `ip ospf message-digest-key 1 md5 <key>`, or by referencing a key chain with `ip ospf authentication key-chain <keychain-name>`. This check applies when OSPF is configured and requires every OSPF interface to carry one of the two.
+
+        **Why this matters**
+
+        OSPF forms an adjacency with whatever answers a hello on the segment. On an unauthenticated interface that means any host on the VLAN can become a router: a server running a rogue routing daemon, a compromised hypervisor, or a laptop plugged into a live port.
+
+        Once adjacent, the attacker advertises a low cost route to a prefix they want and its traffic starts arriving at them. Because they can forward it onward, the result is a transparent interception that no application notices.
+
+        The destructive version needs less finesse. Flooding the area with churning link state advertisements forces every router in it to recompute continuously, and the instability spreads well past the segment the attacker reached.
+
+        Prefer a key chain over a static digest key, because key chains support rotation without tearing the adjacency down. Enabling authentication on a live interface drops the adjacency until the neighbor matches, so schedule it with the neighboring device and verify with `show ip ospf neighbors`.
+      audit: |-
+        To verify that OSPF interfaces use authentication:
+
+        1. Open an authenticated session to the device CLI.
+        2. Display the OSPF configuration:
+
+           ```text
+           show running-config ospf
+           ```
+
+        The device passes when every OSPF-enabled interface has message-digest authentication or an authentication key chain configured. An OSPF interface with no authentication is a failing result.
+      remediation:
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Enabling authentication on a live OSPF interface drops the adjacency until the neighboring router is configured with the same key. Schedule this change together with the neighbor or during a maintenance window.
+
+            Configure OSPF interface authentication with message digest keys:
+
+            ```text
+            configure terminal
+            interface <interface>
+              ip ospf authentication message-digest
+              ip ospf message-digest-key 1 md5 <key>
+            ```
+
+            Or create a key chain and reference it on the interface:
+
+            ```text
+            configure terminal
+            key chain <keychain-name>
+              key 1
+                key-string <key>
+            exit
+            interface <interface>
+              ip ospf authentication key-chain <keychain-name>
+            ```
+
+            Verify the adjacency reforms:
+
+            ```text
+            show ip ospf neighbors
+            ```
+
+            NX-OS does not automatically persist running-config changes. Once the adjacency has reformed, save the configuration so the change survives a reload:
+
+            ```text
+            copy running-config startup-config
+            ```
+    refs:
+      - url: https://www.cisco.com/c/en/us/td/docs/dcn/nx-os/nexus9000/105x/unicast-routing/cisco-nexus-9000-nx-os-unicast-routing-configuration-guide-105x/m-configuring-ospfv2.html
+        title: Cisco NX-OS OSPF Configuration Guide

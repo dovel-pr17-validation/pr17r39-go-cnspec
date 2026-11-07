@@ -1,0 +1,125 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+
+packs:
+  - uid: mondoo-macos-incident-response
+    name: macOS Incident Response Pack
+    version: 1.2.0
+    license: BUSL-1.1
+    require:
+      - provider: os
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    tags:
+      mondoo.com/platform: macos
+      mondoo.com/category: security
+      mondoo.com/icon: apple
+    summary: Gather macOS host evidence for incident response
+    docs:
+      desc: |
+        Collects macOS host evidence for incident investigation: platform and version details, user accounts, kernel version and extensions, running processes and services, mounted devices, installed packages, uptime and timezone, firewall exceptions, FileVault and Gatekeeper status, and pending software updates.
+
+        Enable this query pack in [Mondoo Platform](https://mondoo.com/platform) to automatically gather this evidence from your macOS hosts, or scan a host manually with cnspec:
+
+        ```bash
+        cnspec scan local -f mondoo-macos-incident-response.mql.yaml
+        ```
+    groups:
+      - uid: mondoo-macos-incident-response-system-group
+        title: System & Processes
+        filters: asset.platform == "macos"
+        queries:
+          - uid: mondoo-macos-incident-response-platform-info
+            title: Platform information
+            docs:
+              desc: Host platform, title, version, and architecture.
+            mql: asset { platform title version arch }
+          - uid: mondoo-macos-incident-response-uptime
+            title: Operating system uptime
+            docs:
+              desc: System uptime, to establish when the host last rebooted.
+            mql: os.uptime
+          - uid: mondoo-macos-incident-response-timezone
+            title: System timezone
+            docs:
+              desc: Configured timezone, for correlating log timestamps.
+            mql: os.date.timezone
+          - uid: mondoo-macos-incident-response-processes
+            title: Running processes
+            docs:
+              desc: Running processes with their PID and command line.
+            mql: processes.list { pid  command }
+          - uid: mondoo-macos-incident-response-running-services
+            title: Running services
+            docs:
+              desc: Running services with enabled, masked, and type state.
+            mql: services.where(running == true) { name running enabled masked type }
+          - uid: mondoo-macos-incident-response-mounts
+            title: Mounted devices
+            docs:
+              desc: Mounted filesystems with device, type, and capacity.
+            mql: mount.list { path fstype device options size used available }
+      - uid: mondoo-macos-incident-response-identity-group
+        title: Identity
+        filters: asset.platform == "macos"
+        queries:
+          - uid: mondoo-macos-incident-response-regular-users
+            title: Regular users
+            docs:
+              desc: Interactive user accounts, excluding system accounts.
+            mql: users.where( name != /^_/ && shell != /\/usr\/bin\/false/ )
+      - uid: mondoo-macos-incident-response-kernel-group
+        title: Kernel
+        filters: asset.platform == "macos"
+        queries:
+          - uid: mondoo-macos-incident-response-kernel-info
+            title: Running macOS kernel
+            docs:
+              desc: The running kernel version.
+            mql: kernel.info.version
+          - uid: mondoo-macos-incident-response-kernel-modules
+            title: macOS kernel modules
+            docs:
+              desc: Kernel extensions and whether each one is loaded.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: kernel.modules { name loaded }
+      - uid: mondoo-macos-incident-response-software-group
+        title: Software
+        filters: asset.platform == "macos"
+        queries:
+          - uid: mondoo-macos-incident-response-installed-packages
+            title: Installed packages
+            docs:
+              desc: Installed packages on the host.
+            mql: packages
+          - uid: mondoo-macos-incident-response-check-recommended-updates
+            title: Recommended OS and application updates
+            docs:
+              desc: Pending OS and application updates.
+            mql: macos.softwareupdate.updates { label title version size recommended action }
+      - uid: mondoo-macos-incident-response-security-group
+        title: Security
+        filters: asset.platform == "macos"
+        queries:
+          - uid: mondoo-macos-incident-response-alf-extensions
+            title: Application Layer Firewall app rules
+            docs:
+              desc: Apps with an Application Layer Firewall rule, and each rule's state.
+            mql: macos.firewall.applications { name bundleId state }
+          - uid: mondoo-macos-incident-response-filevault
+            title: FileVault disk encryption status
+            docs:
+              desc: Whether FileVault is on, and its reported status.
+            mql: macos.filevault { enabled status }
+          - uid: mondoo-macos-incident-response-filevault-recovery-keys
+            title: FileVault recovery keys and users
+            docs:
+              desc: Whether a personal or institutional FileVault recovery key is set, and the enabled users. Reading them requires root, so a non-root scan skips this query.
+            filters: command("id -u").stdout.trim == 0
+            mql: macos.filevault { hasPersonalRecoveryKey hasInstitutionalRecoveryKey users }
+          - uid: mondoo-macos-incident-response-gatekeeper
+            title: Gatekeeper assessment status
+            docs:
+              desc: Gatekeeper enabled state and assessment status.
+            mql: macos.gatekeeper { enabled status }

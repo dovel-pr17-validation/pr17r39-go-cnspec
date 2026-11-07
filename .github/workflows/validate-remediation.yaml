@@ -1,0 +1,484 @@
+---
+name: Validate Policy Remediation Content
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    paths:
+      # The three inputs these jobs actually read: the remediation blocks inside
+      # the policy bundles, the validators themselves, and the recorded CLI
+      # grammars and API specs they check commands against. The rest of
+      # content/ -- the IaC fixtures under validation/scans, the compliance-map
+      # tests, the upstream pin resolvers -- feeds nothing here, and listing
+      # "content/**" made every one of those changes install nine toolchains.
+      - "content/**.mql.yaml"
+      - "content/validation/remediation/**"
+      - "content/validation/data/**"
+      # Every linter and CLI version this file installs decides what the
+      # validators accept, so a pull request that changes only a pin has to run
+      # them -- otherwise the weekly bumps from
+      # validation-dependency-updates.yaml would merge unvalidated, which is
+      # the one thing opening them as pull requests is meant to prevent. The
+      # pins themselves live in tool-pins.env, so both paths are listed: the
+      # data file for a bump, this workflow for a change to how it installs.
+      - "content/validation/upstream/tool-pins.env"
+      - ".github/workflows/validate-remediation.yaml"
+  workflow_dispatch:
+
+# A pull request that is pushed again does not need the superseded run to finish
+# installing nine toolchains and re-linting every snippet. Scoped to pull
+# requests: the only other trigger here is workflow_dispatch, and two manual runs
+# share a group (both fall back to github.ref), so an unguarded true would let
+# one dispatch kill another.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  validate-cli:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Load the pinned tool versions
+        # Bumped by a bot, so declared in a data file rather than here: an
+        # installation token cannot push a change under .github/workflows/,
+        # which made every weekly bump of these pins unlandable. See
+        # content/validation/upstream/tool-pins.env for the full argument.
+        run: grep -E '^[A-Z0-9_]+=' content/validation/upstream/tool-pins.env >> "$GITHUB_ENV"
+
+      - name: Install AWS CLI v2
+        # Official AWS installer (https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html).
+        # ubuntu-latest usually has aws pre-installed, but installing explicitly
+        # keeps this job independent of runner-image changes.
+        run: |
+          curl -sSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+          unzip -q /tmp/awscliv2.zip -d /tmp
+          sudo /tmp/aws/install --update
+          aws --version
+
+      - name: Install Google Cloud SDK
+        # Official tarball from dl.google.com (https://docs.cloud.google.com/sdk/docs/install-sdk#linux).
+        # ubuntu-latest has gcloud pre-installed, but installing fresh ensures
+        # the validator introspects the latest command tree.
+        run: |
+          curl -sSL "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-linux-x86_64.tar.gz" -o /tmp/gcloud.tar.gz
+          tar -xzf /tmp/gcloud.tar.gz -C "$HOME"
+          "$HOME/google-cloud-sdk/install.sh" --quiet --path-update false --usage-reporting false
+          echo "$HOME/google-cloud-sdk/bin" >> "$GITHUB_PATH"
+          "$HOME/google-cloud-sdk/bin/gcloud" --version
+
+      - name: Install OCI CLI
+        # pip install always resolves to the latest oci-cli on PyPI.
+        run: pip install --upgrade oci-cli
+
+      - name: Install OpenStackClient
+        # `openstack complete` prints the whole command grammar, but only for
+        # the service plugins that are installed — OpenStackClient itself ships
+        # the core services and nothing else. The four packages after it back
+        # the loadbalancer (Octavia), coe (Magnum), database/datastore (Trove)
+        # and secret (Barbican) commands the policy remediates with. They are
+        # declared in OPENSTACK_PLUGINS, and the validator refuses to build a
+        # grammar if any of them contributed nothing, so dropping one here
+        # fails the job rather than silently shrinking what is checked.
+        run: |
+          pip install --upgrade \
+            python-openstackclient \
+            python-octaviaclient \
+            python-magnumclient \
+            python-troveclient \
+            python-barbicanclient
+          openstack --version
+
+      - name: Install doctl
+        # Pinned release tarball; DOCTL_VERSION and DOCTL_SHA256 come from
+        # tool-pins.env. No auth needed for `doctl --help` introspection.
+        run: |
+          # --fail makes curl exit non-zero on HTTP 4xx/5xx (default -sSL silently
+          # writes the error body to disk and trips the sha256 check below).
+          # --retry handles transient GitHub release-asset blips.
+          curl --fail --retry 5 --retry-delay 5 --retry-all-errors -sSL \
+            "https://github.com/digitalocean/doctl/releases/download/v${DOCTL_VERSION}/doctl-${DOCTL_VERSION}-linux-amd64.tar.gz" \
+            -o /tmp/doctl.tar.gz
+          echo "${DOCTL_SHA256}  /tmp/doctl.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/doctl.tar.gz -C /tmp
+          sudo mv /tmp/doctl /usr/local/bin/doctl
+          doctl version
+
+      - name: Verify kubectl and gh
+        # Both ship preinstalled on ubuntu-latest runner images and are
+        # kept current by the image maintainers. The Cobra-tree walkers
+        # only read `__complete` / `--help` output, so any recent version
+        # works; fail fast here if a future image drops them.
+        run: |
+          kubectl version --client
+          gh --version
+
+      - name: Install glab
+        # Pinned tarball from the gitlab-org/cli generic package registry;
+        # GLAB_VERSION and GLAB_SHA256 come from tool-pins.env.
+        run: |
+          curl --fail --retry 5 --retry-delay 5 --retry-all-errors -sSL \
+            "https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/packages/generic/glab/${GLAB_VERSION}/glab_${GLAB_VERSION}_linux_amd64.tar.gz" \
+            -o /tmp/glab.tar.gz
+          echo "${GLAB_SHA256}  /tmp/glab.tar.gz" | sha256sum -c -
+          mkdir -p /tmp/glab-extract
+          tar -xzf /tmp/glab.tar.gz -C /tmp/glab-extract
+          sudo mv /tmp/glab-extract/bin/glab /usr/local/bin/glab
+          glab --version
+
+      - name: Install hcloud
+        # Pinned release tarball; HCLOUD_VERSION and HCLOUD_SHA256 come from
+        # tool-pins.env.
+        run: |
+          curl --fail --retry 5 --retry-delay 5 --retry-all-errors -sSL \
+            "https://github.com/hetznercloud/cli/releases/download/v${HCLOUD_VERSION}/hcloud-linux-amd64.tar.gz" \
+            -o /tmp/hcloud.tar.gz
+          echo "${HCLOUD_SHA256}  /tmp/hcloud.tar.gz" | sha256sum -c -
+          mkdir -p /tmp/hcloud-extract
+          tar -xzf /tmp/hcloud.tar.gz -C /tmp/hcloud-extract
+          sudo mv /tmp/hcloud-extract/hcloud /usr/local/bin/hcloud
+          hcloud version
+
+      - name: Install databricks CLI
+        # Pinned release zip; DATABRICKS_VERSION and DATABRICKS_SHA256 come
+        # from tool-pins.env. No auth needed for the `__complete` / `--help`
+        # introspection the validator performs.
+        run: |
+          curl --fail --retry 5 --retry-delay 5 --retry-all-errors -sSL \
+            "https://github.com/databricks/cli/releases/download/v${DATABRICKS_VERSION}/databricks_cli_${DATABRICKS_VERSION}_linux_amd64.zip" \
+            -o /tmp/databricks.zip
+          echo "${DATABRICKS_SHA256}  /tmp/databricks.zip" | sha256sum -c -
+          mkdir -p /tmp/databricks-extract
+          unzip -q /tmp/databricks.zip -d /tmp/databricks-extract
+          sudo mv /tmp/databricks-extract/databricks /usr/local/bin/databricks
+          databricks version
+
+      - name: Install STACKIT CLI
+        # Pinned release tarball; STACKIT_VERSION and STACKIT_SHA256 come
+        # from tool-pins.env. No auth needed for the `__complete` / `--help`
+        # introspection the validator performs.
+        run: |
+          curl --fail --retry 5 --retry-delay 5 --retry-all-errors -sSL \
+            "https://github.com/stackitcloud/stackit-cli/releases/download/v${STACKIT_VERSION}/stackit-cli_${STACKIT_VERSION}_linux_amd64.tar.gz" \
+            -o /tmp/stackit.tar.gz
+          echo "${STACKIT_SHA256}  /tmp/stackit.tar.gz" | sha256sum -c -
+          mkdir -p /tmp/stackit-extract
+          tar -xzf /tmp/stackit.tar.gz -C /tmp/stackit-extract
+          sudo mv /tmp/stackit-extract/stackit /usr/local/bin/stackit
+          stackit --version
+
+      - name: Validate remediation commands
+        run: python3 content/validation/remediation/commands/validate.py --github-actions
+
+  # The fan-out lives in one place: SHARD_TOTAL below. The matrix indices and
+  # the I/N the validator is called with are both derived from it, so adding a
+  # shard is a one-number change. Splitting them across a literal list and a
+  # literal denominator lets the two drift, and a denominator larger than the
+  # number of jobs silently leaves snippets unvalidated.
+  plan-terraform-shards:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SHARD_TOTAL: 6
+    outputs:
+      indices: ${{ steps.plan.outputs.indices }}
+      total: ${{ steps.plan.outputs.total }}
+    steps:
+      - id: plan
+        run: |
+          echo "total=$SHARD_TOTAL" >> "$GITHUB_OUTPUT"
+          echo "indices=$(jq -nc --argjson n "$SHARD_TOTAL" '[range($n)]')" >> "$GITHUB_OUTPUT"
+
+  validate-terraform:
+    needs: plan-terraform-shards
+    runs-on: ubuntu-latest
+    # A shard validates ~260 snippets. Each one costs a `terraform init` plus a
+    # `terraform validate` against the provider schema, roughly 12 seconds of
+    # wall time, and the script runs 8 of them at a time: about 7 minutes of
+    # work per shard. Twenty minutes leaves room for the provider mirror and a
+    # slow runner without letting a stuck shard hold the run open.
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.plan-terraform-shards.outputs.indices) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Load the pinned tool versions
+        # Bumped by a bot, so declared in a data file rather than here: an
+        # installation token cannot push a change under .github/workflows/,
+        # which made every weekly bump of these pins unlandable. See
+        # content/validation/upstream/tool-pins.env for the full argument.
+        run: grep -E '^[A-Z0-9_]+=' content/validation/upstream/tool-pins.env >> "$GITHUB_ENV"
+
+      - name: Set up tflint
+        uses: terraform-linters/setup-tflint@6ffdbaa3be476b3431f7275c26966ef32ff60337 # v6.3.2
+        with:
+          # TFLINT_VERSION comes from tool-pins.env, without the `v` this
+          # action wants.
+          tflint_version: v${{ env.TFLINT_VERSION }}
+
+      - name: Set up terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          # The wrapper replaces `terraform` with a shell script that re-emits
+          # the run's stdout and stderr as step outputs. The validator reads
+          # `terraform validate -json` back and parses it, so the extra framing
+          # would break every diagnostic it is here to collect.
+          terraform_wrapper: false
+
+      - name: Validate terraform remediation blocks (shard ${{ matrix.shard }})
+        env:
+          # `tflint --init` downloads ruleset plugins from GitHub releases.
+          # Without an authenticated token it uses the 60-request/hour
+          # anonymous GitHub API limit, which is exhausted partway through
+          # plugin init and fails the google/azurerm rulesets. The token
+          # raises the limit to 5000/hour.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Both values come from plan-terraform-shards, which produces them
+        # from integers, so no untrusted input reaches the shell. The validator
+        # rejects an index outside [0, total) rather than validating nothing.
+        run: |
+          python3 content/validation/remediation/code/terraform.py \
+            --github-actions \
+            --shard ${{ matrix.shard }}/${{ needs.plan-terraform-shards.outputs.total }}
+
+  validate-cloudformation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Load the pinned tool versions
+        # Bumped by a bot, so declared in a data file rather than here: an
+        # installation token cannot push a change under .github/workflows/,
+        # which made every weekly bump of these pins unlandable. See
+        # content/validation/upstream/tool-pins.env for the full argument.
+        run: grep -E '^[A-Z0-9_]+=' content/validation/upstream/tool-pins.env >> "$GITHUB_ENV"
+
+      - name: Install cfn-lint
+        # cfn-lint bundles the AWS resource specification, so the pinned
+        # version determines which resource types and properties are known.
+        # CFN_LINT_VERSION comes from tool-pins.env.
+        run: pipx install "cfn-lint==${CFN_LINT_VERSION}"
+
+      - name: Validate cloudformation remediation blocks
+        run: python3 content/validation/remediation/code/cloudformation.py --github-actions
+
+  validate-bicep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Load the pinned tool versions
+        # Bumped by a bot, so declared in a data file rather than here: an
+        # installation token cannot push a change under .github/workflows/,
+        # which made every weekly bump of these pins unlandable. See
+        # content/validation/upstream/tool-pins.env for the full argument.
+        run: grep -E '^[A-Z0-9_]+=' content/validation/upstream/tool-pins.env >> "$GITHUB_ENV"
+
+      - name: Install Bicep CLI
+        # Pinned release binary; BICEP_VERSION and BICEP_SHA256 come from
+        # tool-pins.env, where the pinned version decides which resource types
+        # and apiVersions are known.
+        #
+        # Installed directly rather than via `az bicep install`, which puts the
+        # binary under the Azure CLI's config directory (AZURE_CONFIG_DIR, not
+        # always ~/.azure on a runner) and gives nothing to checksum.
+        run: |
+          curl --fail --retry 5 --retry-delay 5 --retry-all-errors -sSL \
+            "https://github.com/Azure/bicep/releases/download/v${BICEP_VERSION}/bicep-linux-x64" \
+            -o /tmp/bicep
+          echo "${BICEP_SHA256}  /tmp/bicep" | sha256sum -c -
+          chmod +x /tmp/bicep
+          sudo mv /tmp/bicep /usr/local/bin/bicep
+          bicep --version
+
+      - name: Validate bicep remediation blocks
+        run: python3 content/validation/remediation/code/bicep.py --github-actions
+
+  validate-ansible:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Load the pinned tool versions
+        # Bumped by a bot, so declared in a data file rather than here: an
+        # installation token cannot push a change under .github/workflows/,
+        # which made every weekly bump of these pins unlandable. See
+        # content/validation/upstream/tool-pins.env for the full argument.
+        run: grep -E '^[A-Z0-9_]+=' content/validation/upstream/tool-pins.env >> "$GITHUB_ENV"
+
+      - name: Install ansible-lint
+        run: pipx install "ansible-lint==${ANSIBLE_LINT_VERSION}"
+
+      - name: Test Ansible remediation validator
+        run: python3 -m unittest discover -s content/validation/remediation/code -p '*_test.py'
+
+      - name: Validate ansible remediation blocks
+        run: python3 content/validation/remediation/code/ansible.py --github-actions
+
+  validate-powershell:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Verify pwsh
+        # PowerShell ships preinstalled on the ubuntu-latest runner image. The
+        # validator only needs the parser and Get-Command/Get-Verb, so no
+        # modules are installed: Az and Microsoft.Graph are large and slow, and
+        # the checks that would need them are handled by name shape instead.
+        run: pwsh -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+
+      - name: Validate powershell remediation blocks
+        run: python3 content/validation/remediation/code/powershell.py --github-actions
+
+  validate-bash:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Install shellcheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: Validate bash remediation blocks
+        run: python3 content/validation/remediation/code/bash.py --github-actions
+
+  validate-chef:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Load the pinned tool versions
+        # Bumped by a bot, so declared in a data file rather than here: an
+        # installation token cannot push a change under .github/workflows/,
+        # which made every weekly bump of these pins unlandable. See
+        # content/validation/upstream/tool-pins.env for the full argument.
+        run: grep -E '^[A-Z0-9_]+=' content/validation/upstream/tool-pins.env >> "$GITHUB_ENV"
+
+      - name: Install cookstyle
+        # cookstyle is Chef's RuboCop distribution. The runner image ships a
+        # system Ruby, so no separate toolchain setup is needed.
+        run: sudo gem install cookstyle -v "${COOKSTYLE_VERSION}" --no-document
+
+      - name: Validate chef remediation blocks
+        run: python3 content/validation/remediation/code/chef.py --github-actions
+
+  # The pin resolvers that decide what every job above validates against.
+  # They run on a schedule from validation-dependency-updates.yaml, where a
+  # wrong answer is a pull request bumping a pin to a version that does not
+  # exist -- so the only place to catch one is here, on the change that
+  # introduces it. Recorded payloads, no network, no tooling.
+  upstream-resolvers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Test the upstream pin resolvers
+        run: make test/content/upstream/unit
+
+  # The extraction every command validator above reads policies with. Its
+  # failure mode is the one the validators cannot report: a command the
+  # extraction misses is not validated and not mentioned, so the run stays
+  # green. Offline, no CLI, no grammar.
+  command-extraction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Test command extraction
+        run: make test/content/commands/unit

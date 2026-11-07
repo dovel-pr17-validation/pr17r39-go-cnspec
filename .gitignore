@@ -1,0 +1,48 @@
+/mql/
+# "./cnspec" never matched anything: gitignore rejects a "./" prefix, so the
+# built binary was only ever untracked by luck. Three test suites build their
+# own copy next to the tests they run, each from setup() in the suite.
+/cnspec
+/test/providers/cnspec
+/test/serve/cnspec
+/test/sbom/cnspec
+/test/integration/cnspec
+# Reports of failing integration scenarios, uploaded by CI on failure.
+/test/integration/artifacts/
+# Anchored. Unanchored, this matches a `data/` directory at any depth, which
+# silently swallowed every new file added to content/validation/data — the
+# checked-in CLI grammars and API specs. Files already tracked kept working,
+# so the breakage only showed up on the next addition.
+/data/
+.DS_Store
+gha-creds-*.json
+./vendor
+.DS_Store
+.vscode
+
+# goreleaser build folder
+dist/
+
+# generated Windows version resource (see `make cnspec/winres`)
+apps/cnspec/rsrc_windows_*.syso
+
+# claude local config. .claude/settings.json is shared team config and is
+# tracked; everything else under .claude/ is personal. Note this must be
+# ".claude/*" and not ".claude/": git does not descend into an ignored
+# directory, so a trailing-slash rule cannot be un-ignored per file.
+settings.local.json
+.claude/*
+!.claude/settings.json
+
+# python
+__pycache__/
+
+# git worktrees
+.worktrees/
+
+# vim swap files
+*.swp
+*.swo
+
+# xgrep local analysis cache
+.xgrep/

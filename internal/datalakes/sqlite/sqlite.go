@@ -1,0 +1,287 @@
+// Copyright Mondoo, Inc. 2024, 2026
+// SPDX-License-Identifier: BUSL-1.1
+
+package sqlite
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"strconv"
+	"time"
+
+	"github.com/rs/zerolog/log"
+	"go.mondoo.com/cnspec"
+	"go.mondoo.com/cnspec/internal/datalakes/inmemory"
+	"go.mondoo.com/cnspec/policy"
+	"go.mondoo.com/cnspec/policy/scandb"
+	"go.mondoo.com/cnspec/policy/scanstats"
+	"go.mondoo.com/cnspec/upload"
+	mql "go.mondoo.com/mql"
+	"go.mondoo.com/mql/llx"
+	"go.mondoo.com/mql/providers-sdk/v1/inventory"
+	"go.mondoo.com/mql/providers-sdk/v1/upstream"
+	"go.mondoo.com/mql/providers-sdk/v1/upstream/health"
+)
+
+// outputDirCtxKey is the unexported key used to thread the
+// `cnspec scan --output-scan-db` directory through the scan ctx so the
+// SQLite datalake knows where to keep the captured scan database. Set on
+// the scan command's ctx via WithOutputDir; consumed inside withSqliteDataStore.
+type outputDirCtxKey struct{}
+
+// WithOutputDir returns a copy of ctx that, when threaded through the scan
+// pipeline into WithServices, makes the SQLite datalake write its scan
+// database to dir and keep it after upload (instead of using a temp file
+// that gets deleted). Pass "" to restore the default behavior.
+func WithOutputDir(ctx context.Context, dir string) context.Context {
+	if dir == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, outputDirCtxKey{}, dir)
+}
+
+func outputDirFromCtx(ctx context.Context) string {
+	if v, ok := ctx.Value(outputDirCtxKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// recordResourceStats folds the run's memory tracker into this asset's collector.
+// Extracted so the wiring is testable without standing up a scan. A nil
+// tracker (no tracker on ctx) is a no-op — ResourceTracker methods are nil-safe.
+func recordResourceStats(ctx context.Context, stats *scanstats.Collector) {
+	scanstats.ResourceTrackerFromContext(ctx).Record(stats)
+}
+
+func WithServices(ctx context.Context, runtime llx.Runtime, asset *inventory.Asset, upstreamClient *upstream.UpstreamClient, f func(context.Context, *policy.LocalServices) error) error {
+	assetMrn := ""
+	if asset != nil {
+		assetMrn = asset.Mrn
+	}
+	// Write-time scan-content checksums: every row is hashed as it is
+	// written (no second pass over the database). Gated by the
+	// server-activated ScanContentMode* features (layered onto ctx from
+	// ScanParameters.enabled_features) — zero checksum work when the scope
+	// hasn't opted in — and on the file having somewhere to go: a temp
+	// database with no upstream and no --output-scan-db directory is
+	// deleted moments later, so checksumming it is pure waste. Checksum
+	// work can never fail a scan: hash errors are counted (and leave the
+	// file unstamped, fail-open), reported below, never propagated.
+	checksumsEnabled := (upstreamClient != nil || outputDirFromCtx(ctx) != "") &&
+		mql.GetFeatures(ctx).ScanContentChecksumsActive()
+
+	err := withSqliteDataStore(ctx, assetMrn, checksumsEnabled, func(scanDataStore *scandb.SqliteScanDataStore) error {
+		// Persist the inventory.Asset proto so the scan database is self-contained
+		// (consumed by the cnspec loadtest tool to replay against SynchronizeAssets).
+		if asset != nil {
+			if err := scanDataStore.WriteAsset(ctx, asset); err != nil {
+				log.Warn().Err(err).Msg("failed to persist asset to scan data store")
+			}
+		}
+
+		wrapper := scandb.NewScanDataStoreWrapper(scanDataStore, assetMrn)
+		_, ls, err := inmemory.NewServices(runtime, inmemory.WithDataWriter(wrapper))
+		if err != nil {
+			return err
+		}
+
+		stats := scanstats.New()
+
+		var upstream *policy.Services
+		if upstreamClient != nil {
+			var err error
+			upstream, err = policy.NewRemoteServices(upstreamClient.ApiEndpoint, upstreamClient.Plugins, upstreamClient.HttpClient)
+			if err != nil {
+				return err
+			}
+			upstream.PolicyResolver = &policy.NoStoreResults{
+				PolicyResolver: upstream.PolicyResolver,
+			}
+		}
+
+		ls.Upstream = upstream
+		// Carry the collector so the graph executor records per-kind scan
+		// metrics into it during execution (see policy/executor countingCollector).
+		scanCtx := scanstats.ContextWithCollector(ctx, stats)
+		scanStart := time.Now()
+		if err := f(scanCtx, ls); err != nil {
+			return err
+		}
+		stats.AddDuration(scanstats.MetricScanDuration, time.Since(scanStart))
+
+		// Report the write-time checksum activity. The cost rides the
+		// uploaded statistics — shadow mode exists to measure exactly this,
+		// so a local log line is not enough — and so does the failure count:
+		// hash errors never fail a scan (the row is stored without a
+		// checksum and Finalize leaves the file unstamped, fail-open), which
+		// makes the uploaded error metric the only way a silent hashing
+		// problem becomes visible fleet-wide.
+		if checksumsEnabled {
+			// The one stamp call: this seam runs for every scan — with an
+			// upstream (before Finalize/upload) and without one (kept
+			// --output-scan-db files never see Finalize) — so stamping here,
+			// and only here, covers both paths.
+			scanDataStore.StampChecksums()
+			cs := scanDataStore.WriteChecksumStats()
+			stats.AddDuration(scanstats.MetricChecksumDuration, cs.Duration)
+			stats.AddInt(scanstats.MetricChecksumErrors, "count", cs.Errors)
+			evt := log.Info()
+			if cs.Errors > 0 {
+				evt = log.Warn()
+			}
+			evt.
+				Str("checksummedRows", cs.Counts.String()).
+				Int64("failures", cs.Errors).
+				Dur("hashDuration", cs.Duration).
+				Msg("scan content checksums computed at write time")
+		}
+
+		// Snapshot process memory and CPU as of this asset's completion —
+		// after the checksum pass, so the pass's cost shows up in the
+		// snapshot instead of hiding behind it. The values are process-wide,
+		// not this asset's cost — see ADR-0004.
+		recordResourceStats(scanCtx, stats)
+
+		if upstream != nil {
+			scanDataPath, err := scanDataStore.Finalize()
+			if err != nil {
+				return err
+			}
+			stats.AddInt(scanstats.MetricUploadSize, "bytes", fileSizeBytes(scanDataPath))
+
+			return uploadScanDataStore(ctx, upstream, assetMrn, scanDataPath, stats)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func withSqliteDataStore(ctx context.Context, assetMrn string, enableChecksums bool, f func(scanDataStore *scandb.SqliteScanDataStore) error) error {
+	// When the scan ctx carries an output dir (set via WithOutputDir from the
+	// `cnspec scan --output-scan-db` flag), write the scan db there and keep
+	// it after upload. Otherwise create a temp file we delete.
+	dir := outputDirFromCtx(ctx)
+	keep := dir != ""
+	if keep {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			log.Error().Err(err).Str("dir", dir).Msg("failed to create scan-db output directory")
+			return err
+		}
+	}
+
+	tmpFile, err := os.CreateTemp(dir, "cnspec-scan-*.db")
+	if err != nil {
+		log.Error().Err(err).Msg("failed to create file for scan data store")
+		return err
+	}
+	tmpFile.Close() // nolint: errcheck
+	debugMem := os.Getenv("DEBUG_PROVIDER_MEMORY") != ""
+	if debugMem {
+		log.Info().Str("path", tmpFile.Name()).Bool("keep", keep).Msg("created scan database")
+	}
+	defer func() {
+		if keep {
+			log.Info().Str("path", tmpFile.Name()).Msg("scan database saved")
+			return
+		}
+		if debugMem {
+			if info, err := os.Stat(tmpFile.Name()); err == nil {
+				log.Info().Str("path", tmpFile.Name()).Int64("size_bytes", info.Size()).Msg("removing scan database")
+			}
+		}
+		if err := os.Remove(tmpFile.Name()); err != nil {
+			log.Warn().Err(err).Msg("failed to remove temporary scan data store file")
+		}
+	}()
+
+	var opts []scandb.StoreOption
+	if enableChecksums {
+		opts = append(opts, scandb.WithWriteTimeChecksums())
+	}
+	scanDataStore, err := scandb.NewSqliteScanDataStore(tmpFile.Name(), assetMrn, opts...)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to create scan data store")
+		return err
+	}
+	defer scanDataStore.Close()
+
+	return f(scanDataStore)
+}
+
+// fileSizeBytes returns the size of the file at path, or 0 if it cannot be stat'd.
+func fileSizeBytes(path string) int64 {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	return info.Size()
+}
+
+// uploadFailureTags builds the tags shared by every upload report. It does not
+// set reportKind — uploadOutcomeTags owns that, since the same fields describe
+// both a failure and a recovery. Numeric values are rendered as strings because
+// health.SendError tags are map[string]string; httpStatus and uploadSessionId
+// are omitted rather than sent as zero/empty so the server can tell "absent"
+// from "actually zero".
+func uploadFailureTags(sessionID, assetMrn string, kind upload.FailureKind, httpStatus int, res upload.Result, bytesTotal int64) map[string]string {
+	tags := map[string]string{
+		"failureKind": string(kind),
+		"bytesSent":   strconv.FormatInt(res.BytesSent, 10),
+		"bytesTotal":  strconv.FormatInt(bytesTotal, 10),
+		"durationMs":  strconv.FormatInt(res.Duration.Milliseconds(), 10),
+	}
+	if sessionID != "" {
+		tags["uploadSessionId"] = sessionID
+	}
+	if assetMrn != "" {
+		tags["assetMrn"] = assetMrn
+	}
+	if httpStatus != 0 {
+		tags["httpStatus"] = strconv.Itoa(httpStatus)
+	}
+	return tags
+}
+
+// sendUploadReport sends one client upload report — a failure or a recovery,
+// discriminated by the reportKind tag. Best-effort by construction:
+// health.ReportError swallows its own errors and returns nothing, so a
+// reporting problem can never fail the scan.
+func sendUploadReport(msg string, tags map[string]string) {
+	health.ReportError("cnspec", cnspec.Version, cnspec.Build, msg, health.WithTags(tags))
+}
+
+func uploadScanDataStore(ctx context.Context, services *policy.Services, assetMrn string, scanDataPath string, stats *scanstats.Collector) error {
+	out, err := doScanUpload(ctx, services, scanDataPath, assetMrn, stats)
+	if err != nil {
+		// Every attempt is spent; this scan is lost. One report, carrying how
+		// many attempts it took to get here, so an upload-failure report keeps
+		// meaning "a scan was lost" rather than "an attempt failed".
+		sendUploadReport(out.lastErrMsg, uploadOutcomeTags(uploadReportKindFailure, out, assetMrn))
+		return err
+	}
+
+	// Succeeded, but not on the first try: this is a scan that would have been
+	// discarded before the retry existed. Reported separately so it does not
+	// inflate the failure counts.
+	if out.recovered() {
+		sendUploadReport(
+			fmt.Sprintf("upload recovered after %d attempts: %s", out.attempts, out.lastErrMsg),
+			uploadOutcomeTags(uploadReportKindRecovered, out, assetMrn))
+	}
+
+	log.Info().
+		Str("session", out.sessionID).
+		Int64("bytes", out.okRes.BytesSent).
+		Dur("duration", out.okRes.Duration).
+		Int("attempts", out.attempts).
+		Msg("uploaded scan data store")
+
+	return nil
+}

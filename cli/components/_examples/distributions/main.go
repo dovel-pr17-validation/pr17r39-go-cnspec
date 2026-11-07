@@ -1,0 +1,31 @@
+// Copyright Mondoo, Inc. 2024, 2026
+// SPDX-License-Identifier: BUSL-1.1
+
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"go.mondoo.com/cnspec/cli/components"
+	"go.mondoo.com/cnspec/policy"
+	"go.mondoo.com/mql/providers-sdk/v1/inventory"
+)
+
+func main() {
+	assetsByPlatform := map[string][]*inventory.Asset{
+		"Ubuntu 16.04.7 LTS": {
+			{Name: "ubuntu-1"}, {Name: "ubuntu-2"}, {Name: "ubuntu-3"},
+		},
+		"Alpine Linux v3.21": {{Name: "alpine-1"}},
+		"macOS":              {{Name: "mac-1"}},
+	}
+	assetsByScore := map[string]int{
+		policy.ScoreRatingTextCritical: 0,
+		policy.ScoreRatingTextHigh:     1,
+		policy.ScoreRatingTextMedium:   0,
+		policy.ScoreRatingTextLow:      4,
+	}
+	model := components.NewDistributions(assetsByScore, assetsByPlatform)
+	fmt.Fprint(os.Stdout, model.View())
+}

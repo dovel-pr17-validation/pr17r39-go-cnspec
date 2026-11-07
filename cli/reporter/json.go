@@ -1,0 +1,286 @@
+// Copyright Mondoo, Inc. 2024, 2026
+// SPDX-License-Identifier: BUSL-1.1
+
+package reporter
+
+import (
+	"encoding/json"
+	"errors"
+	"slices"
+	"sort"
+	"strconv"
+	"strings"
+
+	"go.mondoo.com/cnspec/policy"
+	"go.mondoo.com/cnspec/reports/reportdoc"
+	cr "go.mondoo.com/mql/cli/reporter"
+	"go.mondoo.com/mql/llx"
+	"go.mondoo.com/mql/providers-sdk/v1/inventory"
+	"go.mondoo.com/mql/utils/iox"
+	"google.golang.org/protobuf/encoding/protojson"
+)
+
+func printScore(score *policy.Score, mrn string, out iox.OutputHelper, prefix string) bool {
+	if score == nil {
+		return false
+	}
+
+	status := score.TypeLabel()
+	if score.Type == policy.ScoreType_Result {
+		if score.Value == 100 {
+			status = "pass"
+		} else {
+			status = "fail"
+		}
+	}
+
+	_ = out.WriteString(prefix + llx.PrettyPrintString(mrn) +
+		":{\"score\":" + strconv.FormatUint(uint64(score.Value), 10) + "," +
+		"\"riskScore\":" + strconv.FormatUint(uint64(100-score.Value), 10) + "," +
+		"\"status\":\"" + status + "\"")
+	if len(score.ErrorDetails) != 0 {
+		details := make([]errorDetailJSON, len(score.ErrorDetails))
+		for i, d := range score.ErrorDetails {
+			details[i] = toErrorDetailJSON(d)
+		}
+		if raw, err := json.Marshal(details); err == nil {
+			_ = out.WriteString(",\"errorDetails\":" + string(raw))
+		}
+	}
+	_ = out.WriteString("}")
+	return true
+}
+
+// errorDetailJSON is an ErrorDetail as JSON output writes it (mql ADR-46), in the
+// spelling mql uses for coverage gaps: kind and scope by their machine names,
+// permissions sorted.
+type errorDetailJSON struct {
+	Kind         string   `json:"kind"`
+	Scope        string   `json:"scope,omitempty"`
+	ScopeID      string   `json:"scopeId,omitempty"`
+	Permissions  []string `json:"permissions,omitempty"`
+	RetryAfterMs int64    `json:"retryAfterMs,omitempty"`
+}
+
+func toErrorDetailJSON(d *llx.ErrorDetail) errorDetailJSON {
+	res := errorDetailJSON{
+		Kind:         d.GetKind().Name(),
+		ScopeID:      d.GetScopeId(),
+		RetryAfterMs: d.GetRetryAfterMs(),
+	}
+	if scope := d.GetScope(); scope != llx.ErrorScope_ERROR_SCOPE_UNSPECIFIED {
+		res.Scope = scope.Name()
+	}
+	if len(d.GetPermissions()) != 0 {
+		// A copy: the detail belongs to the report.
+		res.Permissions = slices.Clone(d.GetPermissions())
+		slices.Sort(res.Permissions)
+	}
+	return res
+}
+
+// assetPrintable is a snapshot of the fields that get exported
+// when doing things like JSON output
+type assetPrintable struct {
+	Mrn          string `protobuf:"bytes,1,opt,name=mrn,proto3" json:"mrn,omitempty"`
+	Name         string `protobuf:"bytes,18,opt,name=name,proto3" json:"name,omitempty"`
+	Url          string `protobuf:"bytes,19,opt,name=url,proto3" json:"url,omitempty"`
+	PlatformName string `protobuf:"bytes,20,opt,name=platformName,proto3" json:"platformName,omitempty"`
+}
+
+func prepareAssetsForPrinting(assets map[string]*inventory.Asset) map[string]*assetPrintable {
+	printableAssets := map[string]*assetPrintable{}
+	for k, a := range assets {
+		pAsset := &assetPrintable{
+			Mrn:          a.Mrn,
+			Name:         a.Name,
+			Url:          a.Url,
+			PlatformName: reportdoc.PlatformName(a),
+		}
+		printableAssets[k] = pAsset
+	}
+
+	return printableAssets
+}
+
+// queryMrns returns the queries a code id stands for on one asset. Queries with
+// identical MQL compile to the same code id and run once, so a code id can
+// stand for several queries of the bundle, but only those in the asset's
+// resolved policy (with a reporting job there) were resolved for it: a bundle
+// can hold the same MQL under a Linux and a Windows query. Without reporting
+// jobs to go by, every query of the bundle with the code id is returned.
+func queryMrns(bundleMrns []string, reportingJobByQrId map[string]*policy.ReportingJob) []string {
+	if len(reportingJobByQrId) == 0 {
+		return bundleMrns
+	}
+	res := make([]string, 0, len(bundleMrns))
+	for _, mrn := range bundleMrns {
+		if _, ok := reportingJobByQrId[mrn]; ok {
+			res = append(res, mrn)
+		}
+	}
+	return res
+}
+
+func ConvertToJSON(data *policy.ReportCollection, out iox.OutputHelper) error {
+	if data == nil {
+		return nil
+	}
+
+	// Queries with identical MQL compile to the same code id and run once, so a
+	// code id can stand for several queries; each of them gets an entry.
+	qid2mrns := map[string][]string{}
+	aggregateQueries := []string{}
+	if data.Bundle != nil {
+		for i := range data.Bundle.Queries {
+			query := data.Bundle.Queries[i]
+			if query.CodeId == "" {
+				aggregateQueries = append(aggregateQueries, query.Mrn)
+			} else {
+				qid2mrns[query.CodeId] = append(qid2mrns[query.CodeId], query.Mrn)
+			}
+		}
+	}
+
+	_ = out.WriteString(
+		"{" +
+			"\"assets\":")
+	// preserve json output to ignore recently introduced fields
+	printableAssets := prepareAssetsForPrinting(data.Assets)
+	// assets, err := json.Marshal(data.Assets)
+	assets, err := json.Marshal(printableAssets)
+	if err != nil {
+		return err
+	}
+	_ = out.WriteString(string(assets))
+
+	_ = out.WriteString("," +
+		"\"data\":" +
+		"{")
+	pre := ""
+	for id, report := range data.Reports {
+		_ = out.WriteString(pre + llx.PrettyPrintString(id) + ":{")
+		pre = ","
+
+		resolved, ok := data.ResolvedPolicies[id]
+		if !ok {
+			return errors.New("cannot find resolved pack for " + id + " in report")
+		}
+
+		reportingJobByQrId := map[string]*policy.ReportingJob{}
+		for _, job := range resolved.CollectorJob.ReportingJobs {
+			reportingJobByQrId[job.QrId] = job
+		}
+
+		results := report.RawResults()
+		pre2 := ""
+		for qid, query := range resolved.ExecutionJob.Queries {
+			// policies and other stuff have no query mrn
+			for _, mrn := range queryMrns(qid2mrns[qid], reportingJobByQrId) {
+				// checks
+				if rj, ok := reportingJobByQrId[mrn]; ok {
+					if rj.Type != policy.ReportingJob_DATA_QUERY && rj.Type != policy.ReportingJob_CHECK_AND_DATA_QUERY {
+						continue
+					}
+				}
+
+				_ = out.WriteString(pre2 + llx.PrettyPrintString(mrn) + ":")
+				pre2 = ","
+
+				err := cr.CodeBundleToJSON(query.Code, results, out)
+				if err != nil {
+					return err
+				}
+			}
+		}
+		_ = out.WriteString("}")
+	}
+
+	_ = out.WriteString("}," +
+		"\"scores\":" +
+		"{")
+	pre = ""
+	for id, report := range data.Reports {
+		_ = out.WriteString(pre + llx.PrettyPrintString(id) + ":{")
+		pre = ","
+
+		resolved, ok := data.ResolvedPolicies[id]
+		if !ok {
+			return errors.New("cannot find resolved pack for " + id + " in report")
+		}
+
+		reportingJobByQrId := map[string]*policy.ReportingJob{}
+		for _, job := range resolved.GetCollectorJob().GetReportingJobs() {
+			reportingJobByQrId[job.QrId] = job
+		}
+
+		pre2 := ""
+		// try to get the policy first
+		if printScore(report.Scores[id], id, out, pre2) {
+			pre2 = ","
+		}
+
+		for qid := range resolved.ExecutionJob.Queries {
+			// policies and other stuff have no query mrn
+			for _, mrn := range queryMrns(qid2mrns[qid], reportingJobByQrId) {
+				if printScore(reportdoc.CheckRating(report.Scores, mrn, report.Scores[qid]), mrn, out, pre2) {
+					pre2 = ","
+				}
+			}
+		}
+
+		for _, mrn := range aggregateQueries {
+			if printScore(report.Scores[mrn], mrn, out, pre2) {
+				pre2 = ","
+			}
+		}
+
+		_ = out.WriteString("}")
+	}
+
+	_ = out.WriteString("}," +
+		"\"errors\":" +
+		"{")
+	pre = ""
+	for id, err := range data.Errors {
+		_ = out.WriteString(pre + llx.PrettyPrintString(id) + ":" + llx.PrettyPrintString(err))
+		pre = ","
+	}
+	_ = out.WriteString("}")
+
+	// Asset errors that were classified, beside the messages above. A scan
+	// without any writes nothing here, so its output keeps today's shape.
+	if len(data.ErrorDetails) != 0 {
+		ids := make([]string, 0, len(data.ErrorDetails))
+		for id := range data.ErrorDetails {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		_ = out.WriteString(",\"errorDetails\":{")
+		for i, id := range ids {
+			raw, err := json.Marshal(toErrorDetailJSON(data.ErrorDetails[id]))
+			if err != nil {
+				return err
+			}
+			if i != 0 {
+				_ = out.WriteString(",")
+			}
+			_ = out.WriteString(llx.PrettyPrintString(id) + ":" + string(raw))
+		}
+		_ = out.WriteString("}")
+	}
+
+	// What became of the exceptions read from config files (ADR-0006). A scan
+	// without any writes nothing here, so its output keeps today's shape.
+	if decisions := convertExceptionDecisions(data.ExceptionDecisions); decisions != nil {
+		raw, err := protojson.Marshal(&Report{Exceptions: decisions})
+		if err != nil {
+			return err
+		}
+		// {"exceptions":{...}} without its braces
+		_ = out.WriteString("," + strings.TrimSuffix(strings.TrimPrefix(string(raw), "{"), "}"))
+	}
+	_ = out.WriteString("}")
+
+	return nil
+}

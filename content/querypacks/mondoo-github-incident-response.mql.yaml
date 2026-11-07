@@ -1,0 +1,140 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+
+packs:
+  - uid: mondoo-incident-response-github-org
+    name: GitHub Organization Incident Response Pack
+    version: 1.1.1
+    license: BUSL-1.1
+    require:
+      - provider: github
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    tags:
+      mondoo.com/platform: github,scm
+      mondoo.com/category: security
+      mondoo.com/icon: github
+    summary: Gather GitHub evidence for security incident response
+    docs:
+      desc: |
+        Gathers evidence from a GitHub organization during a security incident: organization settings, MFA enforcement, owners, members, teams, repositories, and published packages.
+
+        Enable this query pack in [Mondoo Platform](https://mondoo.com/platform) to automatically gather this evidence from your GitHub organizations, or scan one manually with cnspec. Manual scans need a [GitHub personal access token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) with read access:
+
+        ```bash
+        export GITHUB_TOKEN=<your personal access token>
+        cnspec scan github org <org_name> -f mondoo-github-incident-response.mql.yaml
+        ```
+    groups:
+      - uid: mondoo-incident-response-github-profile-group
+        title: Organization Profile
+        filters: asset.platform == "github-org"
+        queries:
+          - uid: mondoo-incident-response-github-org-name
+            title: GitHub Organization Name
+            docs:
+              desc: |
+                Returns the display name of the GitHub organization.
+            mql: |
+              github.organization.name
+          - uid: mondoo-incident-response-github-org-login
+            title: GitHub Organization Login
+            docs:
+              desc: The organization's login handle, its URL slug.
+            mql: |
+              github.organization.login
+          - uid: mondoo-incident-response-github-org-description
+            title: GitHub Organization description
+            docs:
+              desc: Description configured on the organization profile.
+            mql: |
+              github.organization.description
+      - uid: mondoo-incident-response-github-access-group
+        title: Access & Membership
+        filters: asset.platform == "github-org"
+        queries:
+          - uid: mondoo-incident-response-github-org-mfa-status
+            title: GitHub Organization MFA status
+            docs:
+              desc: |
+                Whether the org requires multi-factor authentication.
+
+                A null value means the API token lacks the owner permissions needed to read this setting.
+            mql: |
+              github.organization.twoFactorRequirementEnabled
+          - uid: mondoo-incident-response-github-org-owners
+            title: GitHub Organization Owners
+            docs:
+              desc: Organization owners, who hold full administrative control.
+            mql: |
+              github.organization.owners.length
+              github.organization {
+                owners {
+                  name
+                  email
+                  login
+                }
+              }
+          - uid: mondoo-incident-response-github-org-members
+            title: GitHub Organization Members
+            docs:
+              desc: All organization members with name, login, and email.
+            mql: |
+              github.organization.members.length
+              github.organization {
+                members {
+                  name
+                  login
+                  email
+                }
+              }
+          - uid: mondoo-incident-response-github-org-teams
+            title: GitHub Organization Teams
+            docs:
+              desc: Teams with privacy, default permission, and members.
+            mql: |
+              github.organization {
+                teams {
+                  slug
+                  privacy
+                  defaultPermission
+                  members {
+                    login
+                    email
+                    name
+                  }
+                }
+              }
+      - uid: mondoo-incident-response-github-repos-group
+        title: Repositories & Packages
+        filters: asset.platform == "github-org"
+        queries:
+          - uid: mondoo-incident-response-github-private-repos
+            title: GitHub Organization private repositories
+            docs:
+              desc: Public repos and whether their default branch is protected.
+            mql: |
+              github.organization.repositories.
+                where( private == false ) {
+                  name
+                  branches.
+                    where( isDefault ) {
+                      isProtected
+                    }
+                }
+          - uid: mondoo-incident-response-github-packages
+            title: GitHub Organization private repositories
+            docs:
+              desc: Published packages with visibility, type, and owner.
+            mql: |
+              github.organization {
+                packages {
+                  name
+                  visibility
+                  packageType
+                  owner {
+                    name
+                  }
+                }
+              }

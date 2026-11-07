@@ -1,0 +1,2182 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+policies:
+  - uid: mondoo-nutanix-security
+    name: Mondoo Nutanix Security
+    version: 1.0.5
+    license: BUSL-1.1
+    tags:
+      mondoo.com/category: security
+      mondoo.com/platform: nutanix,cloud
+      mondoo.com/icon: nutanix
+    authors:
+      - name: Tim Smith
+        email: tim@mondoo.com
+    require:
+      - provider: nutanix
+    summary: Secure Nutanix clusters, hosts, virtual machines, identity, and storage managed through Prism Central
+    docs:
+      desc: |
+        The Mondoo Nutanix Security policy identifies misconfigurations across a Nutanix environment managed through Prism Central that could leave your virtualization platform exposed to attackers, data loss, or compliance gaps. It evaluates the registered clusters, the hypervisor hosts that make up those clusters, the virtual machines running on them, the identity and access configuration of Prism Central, and the storage layer.
+
+        This policy provides security checks across key Nutanix areas:
+
+        - **Cluster hardening**: Data-at-rest and data-in-transit encryption, external key management, password SSH login, remote support tunnel, redundancy factor, fault tolerance, NTP and DNS, SMTP transport security, and the NFS allowlist
+        - **Host security**: UEFI Secure Boot, IPMI/BMC default credentials, and degraded-state monitoring
+        - **Virtual machine security**: Host CPU passthrough, Nutanix Guest Tools presence and currency, and backup/disaster-recovery protection
+        - **Identity and access management**: LDAPS for directory services, directory group allowlists, SAML signed authn requests, inactive account removal, and stale account review
+        - **Storage security**: CHAP authentication on volume groups, storage-container encryption, per-container NFS allowlists, and replication factor
+
+        ## References
+
+        - [Nutanix Security Guide](https://portal.nutanix.com/page/documents/details?targetId=Nutanix-Security-Guide:Nutanix-Security-Guide)
+        - [Nutanix Hardening Guide](https://portal.nutanix.com/page/documents/details?targetId=Nutanix-Security-Guide:wc-security-hardening-wc-c.html)
+        - [Nutanix v4 API Reference](https://developers.nutanix.com/)
+        - [BSI IT-Grundschutz SYS.1.5 Virtualisation](https://www.bsi.bund.de/DE/Home/home_node.html)
+
+        Learn more about scanning Nutanix in the [cnspec documentation](https://mondoo.com/docs/cnspec).
+
+        Have suggestions for new checks in this policy? Visit our [cnspec repository](https://github.com/mondoohq/cnspec).
+    scoring_system: highest impact
+
+    groups:
+      - title: "Cluster Security"
+        filters: |
+          asset.platform == "nutanix-prism-central"
+        checks:
+          - uid: mondoo-nutanix-security-cluster-data-at-rest-encryption-enabled
+          - uid: mondoo-nutanix-security-cluster-encryption-in-transit-enabled
+          - uid: mondoo-nutanix-security-cluster-external-key-management
+          - uid: mondoo-nutanix-security-cluster-ssh-password-login-disabled
+          - uid: mondoo-nutanix-security-cluster-remote-support-disabled
+          - uid: mondoo-nutanix-security-cluster-redundancy-factor
+          - uid: mondoo-nutanix-security-cluster-fault-tolerance-ready
+          - uid: mondoo-nutanix-security-cluster-ntp-configured
+          - uid: mondoo-nutanix-security-cluster-dns-configured
+          - uid: mondoo-nutanix-security-cluster-smtp-encrypted
+          - uid: mondoo-nutanix-security-cluster-nfs-allowlist-restricted
+          - uid: mondoo-nutanix-security-cluster-runs-lts-release
+
+      - title: "Host Security"
+        filters: |
+          asset.platform == "nutanix-prism-central"
+        checks:
+          - uid: mondoo-nutanix-security-host-secure-boot-enabled
+          - uid: mondoo-nutanix-security-host-ipmi-not-default-user
+          - uid: mondoo-nutanix-security-host-not-degraded
+
+      - title: "Virtual Machine Security"
+        filters: |
+          asset.platform == "nutanix-prism-central"
+        checks:
+          - uid: mondoo-nutanix-security-vm-cpu-passthrough-disabled
+          - uid: mondoo-nutanix-security-vm-guest-tools-installed
+          - uid: mondoo-nutanix-security-vm-guest-tools-current
+          - uid: mondoo-nutanix-security-vm-protected
+
+      - title: "Identity and Access Management"
+        filters: |
+          asset.platform == "nutanix-prism-central"
+        checks:
+          - uid: mondoo-nutanix-security-directory-service-uses-ldaps
+          - uid: mondoo-nutanix-security-directory-service-group-allowlist
+          - uid: mondoo-nutanix-security-saml-signed-authn-requests
+          - uid: mondoo-nutanix-security-inactive-local-users-removed
+          - uid: mondoo-nutanix-security-no-stale-user-accounts
+
+      - title: "Storage Security"
+        filters: |
+          asset.platform == "nutanix-prism-central"
+        checks:
+          - uid: mondoo-nutanix-security-volume-group-chap-auth
+          - uid: mondoo-nutanix-security-storage-container-encrypted
+          - uid: mondoo-nutanix-security-storage-container-nfs-allowlist
+          - uid: mondoo-nutanix-security-storage-container-replication-factor
+
+queries:
+  # =================================================================
+  # Cluster Security
+  # =================================================================
+
+  - uid: mondoo-nutanix-security-cluster-data-at-rest-encryption-enabled
+    title: Ensure data-at-rest encryption is enabled on clusters
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a28
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-2-iv-access-control-encryption-and-decryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-1
+      compliance/nist-csf-2: nist-csf-2-pr-ds-01
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-28
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-3-5-1
+      compliance/soc2-2017: soc2-control-cc6-1-10
+      compliance/vda-isa-5: vda-isa-5-5-1-1
+    mql: |
+      nutanix.clusters.where(clusterType == "AOS").all(encryptionScopes.length > 0)
+    docs:
+      desc: |
+        This check verifies that each AOS storage cluster has data-at-rest encryption turned on with a configured scope.
+
+        Encryption is enabled under Settings, then Data-at-Rest Encryption, where you choose the key manager and then the scope, either the whole cluster or individual storage containers. The cluster can use software encryption, self-encrypting drives, or hardware encryption depending on what the hardware supports. There is no command that enables it; `ncli data-at-rest-encryption get-status` on a Controller VM only reports the result.
+
+        **Why this matters**
+
+        Everything the cluster stores ends up on physical drives that eventually leave your control. Drives fail and are returned to the vendor under warranty, nodes are decommissioned and resold, and disks are pulled during a hardware swap and set aside. Any of those drives, read outside the cluster with ordinary tools, yields the extents that made up guest virtual disks: databases, credential files, and whatever the workloads on this cluster hold.
+
+        Theft is the sharper version of the same exposure. A drive removed from a rack in a shared or remote facility travels easily, and a plaintext drive gives the person holding it access to data from every VM whose disks touched it, without any credential and without ever appearing in a log.
+
+        Encryption also changes what decommissioning costs. Destroying the keys makes the media unreadable, so drives can be retired without physical destruction and without a chain-of-custody argument about who handled them.
+
+        Plan this before you enable it. Software encryption cannot be turned off once it is on, and switching key managers afterward means rekeying the cluster, so decide first whether keys will live with the cluster's local key manager or with an external key management server, which a companion check in this policy requires.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to Prism Central or Prism Element.
+        2. Open Settings, then Data-at-Rest Encryption.
+        3. Confirm encryption is enabled for the cluster or for each storage container.
+
+        A passing result shows encryption enabled with a configured scope; a failing result shows encryption disabled.
+
+        ### Audit via CLI
+
+        Run on a Controller VM:
+
+        ```bash
+        ncli data-at-rest-encryption get-status
+        ```
+
+        A passing result reports encryption as enabled; a failing result reports it as disabled.
+      remediation:
+        - id: console
+          desc: |
+            Software data-at-rest encryption cannot be disabled after it is enabled. Configure key management first and confirm the choice of software, SED, or hardware encryption before proceeding.
+
+            To enable data-at-rest encryption using Prism:
+
+            1. Open Settings, then Data-at-Rest Encryption.
+            2. Click Edit Configuration and select the key management option, either the cluster's local key manager or an external key management server with the required certificates.
+            3. Choose the encryption scope, click Enable Encryption, and confirm.
+
+            Enabling encryption is performed in Prism; there is no CLI command to enable it. To confirm the resulting status afterward, run `ncli data-at-rest-encryption get-status` on a Controller VM. A status of enabled with the expected scope confirms the change.
+
+  - uid: mondoo-nutanix-security-cluster-encryption-in-transit-enabled
+    title: Ensure encryption-in-transit is enabled on clusters
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a11
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-2-ii-transmission-security-encryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: |
+      nutanix.clusters.where(clusterType == "AOS").all(encryptionInTransitStatus == "ENABLED")
+    docs:
+      desc: |
+        This check verifies that each AOS cluster encrypts the traffic that moves between its nodes.
+
+        The setting is enabled in Prism Element for the cluster, under Settings, then Data-in-Transit Encryption, or with `ncli cluster edit-params enable-intransit-encryption=true` on a Controller VM. Either way the cluster applies it to every node in a rolling change, and the clustermgmt v4 API reports the result as `encryptionInTransitStatus` with a value of ENABLED.
+
+        **Why this matters**
+
+        A Nutanix cluster is a distributed storage system, so a guest's write does not stay on the node that received it. It is replicated to another node over the backplane network, and reads are served across the same path. With in-transit encryption off, that traffic is the contents of guest disks in the clear on the wire: database pages, files, and anything the workload wrote.
+
+        Anyone with a capture point on that network reads it. A mirrored switch port, a compromised host that shares the segment, or a device plugged into the storage VLAN gives an attacker a stream of live guest data without touching any VM, authenticating to Prism, or leaving a trace in the cluster's own logs. Because the traffic is unauthenticated as well as unencrypted, a well-positioned attacker can alter replicated data in flight, so the second copy quietly differs from the first.
+
+        The backplane is usually a dedicated network, and that is why the encryption gets skipped. The assumption holds only until something else appears on the same VLAN, which a mis-tagged guest interface or a flat management network does routinely.
+
+        The rolling apply means the cluster works through every node, so run it during a window where you can tolerate node-by-node change, and confirm data resiliency is healthy before you start.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to Prism Element for the cluster.
+        2. Open Settings, then Data-in-Transit Encryption.
+        3. Confirm that encryption-in-transit is enabled.
+
+        A passing result shows in-transit encryption enabled; a failing result shows it disabled.
+
+        ### Audit via API
+
+        Query the clustermgmt v4 API and review `encryptionInTransitStatus`:
+
+        ```bash
+        curl -fsS -u admin \
+          "https://prism-central.example.com:9440/api/clustermgmt/v4.0/config/clusters"
+        ```
+
+        A passing result reports `encryptionInTransitStatus` as ENABLED.
+      remediation:
+        - id: console
+          desc: |
+            To enable encryption-in-transit using Prism Element:
+
+            1. Log in to Prism Element for the cluster.
+            2. Open Settings, then Data-in-Transit Encryption.
+            3. Select Enable Encryption and save, then allow the cluster to apply the setting to all nodes.
+
+            To confirm the setting afterward using the clustermgmt v4 API, query the cluster configuration and review `encryptionInTransitStatus`; a value of ENABLED confirms the change:
+
+            ```bash
+            curl -fsS -u admin \
+              "https://prism-central.example.com:9440/api/clustermgmt/v4.0/config/clusters"
+            ```
+        - id: cli
+          desc: |
+            To enable encryption-in-transit using the CLI, run on a Controller VM. The cluster applies the setting to every node, so expect a rolling change:
+
+            ```bash
+            ncli cluster edit-params enable-intransit-encryption=true
+            ```
+
+            Confirm the result with `ncli cluster get-params` on a Controller VM.
+
+  - uid: mondoo-nutanix-security-cluster-external-key-management
+    title: Ensure clusters use an external key management server
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a28
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-08
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-2-iv-access-control-encryption-and-decryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-1
+      compliance/nist-csf-2: nist-csf-2-pr-ds-01
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-10
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-12
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-3-6-1-2
+      compliance/soc2-2017: soc2-control-cc6-1-11
+      compliance/vda-isa-5: vda-isa-5-5-1-1
+    mql: |
+      nutanix.clusters.where(clusterType == "AOS").all(network.keyManagementServerType == "EXTERNAL")
+    docs:
+      desc: |
+        This check verifies that each AOS cluster protects its encryption keys with an external key management server rather than its own local key manager.
+
+        The server is registered under Settings, then Key Management Server, with its address and KMIP port, the default being 5696, along with a client certificate and the CA certificate. Registering it is not enough: under Settings, then Data-at-Rest Encryption, the key manager must also be switched from the local key manager to the external one and the cluster rekeyed. From a Controller VM the equivalent is `ncli key-management-server add` followed by `ncli key-management-server change-key-management-server-type key-management-server-type=ekm`, where `ekm` selects the external manager and `lkm` the local one.
+
+        **Why this matters**
+
+        Encryption at rest only helps if the keys are somewhere the attacker does not already stand. With the local key manager, the ciphertext and the key that opens it live on the same cluster, so an attacker who reaches a Controller VM with sufficient privilege obtains both at once and the encryption has cost them nothing. The same is true of a stolen node rather than a stolen drive, since the node carries its share of the key material with it.
+
+        Separating them means the cluster must ask a system it does not control for the key every time it needs one, and that system can refuse. When you discover a compromise, revoking at the key management server renders the cluster's data unreadable immediately, which is a containment action you do not otherwise have.
+
+        It also produces an independent record. Key requests are logged where the cluster cannot alter them, so an unusual pattern of key access is visible even if the cluster's own logs have been tampered with.
+
+        Confirm the server speaks KMIP before you start, and treat its availability as a dependency: a cluster whose key manager is unreachable at boot cannot bring encrypted storage online.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to Prism.
+        2. Open Settings, then Key Management Server.
+        3. Confirm an external KMS is configured and used for encryption.
+
+        A passing result shows an external KMS; a failing result shows local key management only.
+
+        ### Audit via CLI
+
+        Run on a Controller VM:
+
+        ```bash
+        ncli key-management-server list
+        ```
+
+        A passing result lists an external key management server in use.
+      remediation:
+        - id: console
+          desc: |
+            The external key management server must speak the Key Management Interoperability Protocol (KMIP); Nutanix integrates with KMS solutions over KMIP, whose default port is 5696. Confirm your KMS supports KMIP before starting.
+
+            To switch the cluster to an external key management server using Prism:
+
+            1. Open Settings, then Key Management Server, and add the external KMS with its address and its KMIP port, the default being 5696.
+            2. Upload the client certificate and the CA certificate for the KMS and verify the connection test passes.
+            3. Open Settings, then Data-at-Rest Encryption, click Edit Configuration, and change the key manager from the local key manager to the external KMS.
+            4. Rekey the cluster so the data encryption keys are protected by the external KMS.
+
+            Adding a server alone does not change the key manager type; the cluster must also be switched to the external KMS in the Data-at-Rest Encryption settings. To confirm the configured key management servers afterward, run `ncli key-management-server list` on a Controller VM.
+        - id: cli
+          desc: |
+            To register the external key management server and switch the cluster to it using the CLI, run on a Controller VM. Addresses take the form `<ipaddress>` or `<ipaddress:port>`, and port 5696 is used when no port is given:
+
+            ```bash
+            ncli key-management-server add name=<kms-name> address-list=kms.example.com:5696
+            ncli key-management-server change-key-management-server-type key-management-server-type=ekm
+            ```
+
+            The `ekm` value selects the external key manager; `lkm` is the cluster's local key manager. Upload the client and CA certificates for the server in Prism before switching, then confirm the result with `ncli key-management-server list`.
+
+  - uid: mondoo-nutanix-security-cluster-ssh-password-login-disabled
+    title: Ensure password-based SSH login to clusters is disabled
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a5
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-3
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-12
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-17
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-2-2-6
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-2
+    mql: |
+      nutanix.clusters.all(isPasswordRemoteLoginEnabled == false)
+    docs:
+      desc: |
+        This check verifies that SSH access to the cluster requires a key rather than a password.
+
+        The control is Cluster Lockdown, found under Settings in Prism, where you add the SSH public keys that should have administrative access and then turn off Remote Login With Password. From a Controller VM the same change is `ncli cluster edit-params enable-password-remote-login=false`, and `ncli cluster get-params` reports the current state. Add your keys and confirm they work before disabling passwords.
+
+        **Why this matters**
+
+        SSH on a Nutanix cluster reaches the Controller VMs, which are the storage stack. An account there does not manage one machine; it sits underneath every VM the cluster runs, with access to the storage containers holding their virtual disks and to the cluster's own configuration and key material.
+
+        Password authentication exposes that to guessing at whatever rate an attacker chooses. The usernames are not secret, they are the documented Nutanix defaults, and a password reused from another system or weak enough to appear in a wordlist gets tried and works without any exploit being involved. Automated credential-stuffing runs find management interfaces on any network they can route to, and there is nothing to slow them down.
+
+        The consequence lands where the guests cannot see it. An attacker on a Controller VM reads guest data from the storage layer directly, and none of the operating systems running above notice anything, because from inside a VM the storage controller is invisible.
+
+        Key-based access removes the guessable path entirely and, when each administrator has their own key, ties every session to a person instead of a shared secret. Keep a documented recovery route through the node console or IPMI before you make the change, since a cluster with no working keys and no passwords is reachable only out of band.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to Prism.
+        2. Open Settings, then Cluster Lockdown.
+        3. Confirm that Remote Login With Password is disabled (only key-based access is allowed).
+
+        A passing result shows password remote login disabled; a failing result shows it enabled.
+
+        ### Audit via CLI
+
+        Run on a Controller VM:
+
+        ```bash
+        ncli cluster get-params
+        ```
+
+        A passing result reports remote login with password as disabled.
+      remediation:
+        - id: console
+          desc: |
+            To disable password SSH login using Prism:
+
+            1. Open Settings, then Cluster Lockdown.
+            2. Add your SSH public keys for administrative access.
+            3. Disable Remote Login With Password.
+        - id: cli
+          desc: |
+            To disable password SSH login using the CLI, run on a Controller VM after adding your SSH keys:
+
+            ```bash
+            ncli cluster edit-params enable-password-remote-login=false
+            ```
+
+  - uid: mondoo-nutanix-security-cluster-remote-support-disabled
+    title: Ensure the remote support tunnel is disabled
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a5
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ma-2
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-12
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ma-4
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-2-2-4
+      compliance/soc2-2017: soc2-control-cc6-1-6
+      compliance/vda-isa-5: vda-isa-5-5-2-7
+    mql: |
+      nutanix.clusters.all(isRemoteSupportEnabled == false)
+    docs:
+      desc: |
+        This check verifies that the remote support tunnel is closed.
+
+        Remote support is switched off under Settings, then Remote Support in Prism, or with `ncli cluster stop-remote-support` on a Controller VM, and `ncli cluster get-params` reports its state. The tunnel opens an outbound connection from the cluster that lets Nutanix support reach it, which is intended to be turned on for the duration of a case and turned off again afterward.
+
+        **Why this matters**
+
+        While the tunnel is open, there is a live inbound path to the Controller VMs that your own network controls do not govern. It is outbound-initiated, so the firewall rules you wrote to restrict who may reach the cluster do not apply to it, and the authentication that gates the far end belongs to the vendor rather than to you. Your identity provider, your second factor, and your access reviews are all outside the loop.
+
+        That makes it an attractive target rather than a theoretical one. An attacker who compromises the vendor's support tooling or a support engineer's credentials arrives at the cluster through a channel you are not watching, with privileges appropriate to fixing storage problems, which means access to the containers holding every guest's disks. Sessions through the tunnel also do not necessarily land in the logs you review, so the first sign of misuse may be the effect rather than the access.
+
+        Left on permanently, the tunnel is a standing entry point that exists for the convenience of a support case that closed months ago.
+
+        The control is procedural as much as technical. Enable it when a case genuinely needs it, agree with the engineer when the work is finished, and disable it the same day, so vendor access is a deliberate, time-boxed act rather than a background condition of running the cluster.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to Prism.
+        2. Open Settings, then Remote Support.
+        3. Confirm remote support is disabled.
+
+        A passing result shows remote support disabled; a failing result shows it enabled.
+
+        ### Audit via CLI
+
+        Run on a Controller VM:
+
+        ```bash
+        ncli cluster get-params
+        ```
+
+        A passing result reports remote support as disabled.
+      remediation:
+        - id: console
+          desc: |
+            To disable the remote support tunnel using Prism:
+
+            1. Open Settings, then Remote Support.
+            2. Set remote support to disabled.
+            3. Re-enable it only for the duration of an active support case.
+        - id: cli
+          desc: |
+            To disable the remote support tunnel using the CLI, run on a Controller VM:
+
+            ```bash
+            ncli cluster stop-remote-support
+            ```
+
+  - uid: mondoo-nutanix-security-cluster-redundancy-factor
+    title: Ensure clusters use a redundancy factor of at least 2
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a20
+      compliance/csa-cloud-controls-matrix-4: false
+      compliance/dora: dora-art-11
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-14
+      compliance/nis-2: nis-2-21-2-c
+      compliance/nist-csf-1: nist-csf-1-pr-pt-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-03
+      compliance/nist-sp-800-171: false
+      compliance/nist-sp-800-53-rev5: false
+      compliance/owasp-top-10-2025: false
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: vda-isa-5-3-1-2
+    mql: |
+      nutanix.clusters.where(clusterType == "AOS").all(redundancyFactor >= 2)
+    docs:
+      desc: |
+        This check verifies that each AOS cluster keeps at least two copies of the data it stores.
+
+        The redundancy factor is set when a cluster is created and is reported by `ncli cluster get-redundancy-state` on a Controller VM or on the cluster details page in Prism Element. A factor of 2 means every write is committed to two nodes before it is acknowledged; a factor of 1 means a single copy exists anywhere in the cluster.
+
+        **Why this matters**
+
+        At redundancy factor 1 the cluster has no answer to ordinary hardware failure. A single drive failure permanently destroys the only copy of whatever extents lived on it, and those extents belong to guest virtual disks scattered across the cluster, so the damage is not confined to one VM. A node failure takes out everything it held at once. There is no rebuild, no degraded mode, and no recovery short of restoring from a backup, if one exists and is recent.
+
+        The metadata layer is affected the same way. Cassandra and Zookeeper hold the cluster's own state, and without a second copy the loss of one node can leave the cluster unable to assemble a consistent view of where data lives, which turns a single component failure into a cluster-wide outage rather than a degraded one.
+
+        Redundancy is also what makes routine maintenance safe. Patching a node, replacing a disk, and upgrading AOS all involve taking a node out of service, and at factor 1 each of those is a window in which data is unavailable rather than merely less protected.
+
+        Raising the factor on an existing cluster is not a setting toggle. It requires enough nodes for the target, enough free capacity for the extra copy, and on many AOS releases it is not offered as an in-place edit at all. Treat it as a planned change, and coordinate with Nutanix Support where the release does not expose it.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to Prism Element for the cluster.
+        2. Open the cluster details (gear icon, then Cluster Details, or the home dashboard).
+        3. Confirm the redundancy factor is 2 or higher.
+
+        A passing result shows a redundancy factor of 2 or more; a failing result shows 1.
+
+        ### Audit via CLI
+
+        Run on a Controller VM:
+
+        ```bash
+        ncli cluster get-redundancy-state
+        ```
+
+        A passing result reports a desired redundancy factor of 2 or higher.
+      remediation:
+        - id: console
+          desc: |
+            The redundancy factor is chosen when the cluster is created and is not freely editable afterward. Raising the redundancy factor on an existing cluster is heavily constrained: it requires enough nodes to support the target factor, sufficient free capacity to store the extra copy, and on many AOS versions it is not exposed as an in-place edit at all and must be coordinated with Nutanix Support. Treat this as a planned change rather than a setting toggle.
+
+            To attempt the change using Prism, where the target AOS supports it:
+
+            1. Confirm the cluster has enough nodes for the target redundancy factor, at least 3 nodes for RF2.
+            2. Confirm there is enough free capacity for the additional data copy.
+            3. Open the cluster details and raise the redundancy factor if the option is offered.
+            4. Apply the change and allow the cluster to re-protect data.
+
+            If Prism does not offer the change for your AOS release, open a case with Nutanix Support to plan the conversion.
+        - id: cli
+          desc: |
+            To attempt raising the redundancy factor using the CLI, run on a Controller VM. This command only succeeds when the cluster already meets the node and capacity prerequisites and the AOS release permits the conversion; otherwise it is rejected and the change must be coordinated with Nutanix Support:
+
+            ```bash
+            ncli cluster set-redundancy-state desired-redundancy-factor=2
+            ```
+
+  - uid: mondoo-nutanix-security-cluster-fault-tolerance-ready
+    title: Ensure cluster fault-tolerance ensembles are ready
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a20
+      compliance/csa-cloud-controls-matrix-4: false
+      compliance/dora: dora-art-11
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-14
+      compliance/nis-2: nis-2-21-2-c
+      compliance/nist-csf-1: nist-csf-1-pr-pt-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-03
+      compliance/nist-sp-800-171: false
+      compliance/nist-sp-800-53-rev5: false
+      compliance/owasp-top-10-2025: false
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: vda-isa-5-3-1-2
+    mql: |
+      nutanix.clusters.where(clusterType == "AOS").all(
+        faultTolerance.cassandraPreparationDone == true &&
+        faultTolerance.zookeeperPreparationDone == true &&
+        faultTolerance.currentClusterFaultTolerance != "CFT_0N_AND_0D"
+      )
+    docs:
+      desc: |
+        This check verifies that each AOS cluster can currently deliver the fault tolerance it is configured for.
+
+        Three conditions have to hold together: the Cassandra metadata ring and the Zookeeper configuration ensemble both report their preparation complete, and the cluster's current fault tolerance is above zero rather than the state meaning no node and no disk failure can be absorbed. Prism Element shows this in the Data Resiliency Status widget on the cluster dashboard, and `ncli cluster get-domain-fault-tolerance-status type=node` reports it from a Controller VM.
+
+        **Why this matters**
+
+        Configured redundancy and delivered redundancy are different things, and the gap between them is invisible from the configuration. A cluster set to keep two copies is only keeping two copies when the rebuild that follows a disk replacement has finished, the metadata ring has re-formed after a node was added or removed, and there is enough free capacity to place the second copy at all. While any of those is outstanding, the cluster is running on one effective copy of some of its data while reporting the policy that says otherwise.
+
+        A failure during that window is unrecoverable in exactly the way redundancy exists to prevent, and the window is not short. Rebuilds on a large cluster run for hours, and a cluster near its capacity limit can sit unable to complete one indefinitely without anyone noticing, because nothing is failing yet.
+
+        The metadata ensembles carry the sharper risk. Cassandra and Zookeeper hold where every extent lives and what the cluster believes about itself, and losing quorum there takes the whole cluster offline rather than degrading one workload.
+
+        This check reports a condition, not a misconfiguration. Resolve the underlying cause, which is usually a failed component to replace, capacity to free, or a rebuild still in progress, rather than looking for a setting to change.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to Prism Element for the cluster.
+        2. Review the cluster resiliency status on the home dashboard (Data Resiliency Status widget).
+        3. Confirm the cluster reports OK resiliency with the desired fault tolerance met.
+
+        A passing result shows resiliency met and ensembles prepared; a failing result shows a degraded or rebuilding state.
+
+        ### Audit via CLI
+
+        Run on a Controller VM:
+
+        ```bash
+        ncli cluster get-domain-fault-tolerance-status type=node
+        ```
+
+        A passing result reports the current fault tolerance as met with ensembles prepared.
+      remediation:
+        - id: console
+          desc: |
+            To restore fault-tolerance readiness using Prism:
+
+            1. Open the Data Resiliency Status widget on the cluster dashboard.
+            2. Resolve the underlying condition. Replace failed disks or nodes, free space if the cluster is over capacity, or wait for an in-progress rebuild to complete.
+            3. Confirm the cluster returns to an OK resiliency state.
+
+            To investigate the same condition from a Controller VM, run `ncli cluster get-domain-fault-tolerance-status type=node`, address any failed components it reports, then re-check until the ensembles report prepared. Readiness is restored by fixing the underlying hardware or capacity problem rather than by a configuration command.
+
+  - uid: mondoo-nutanix-security-cluster-ntp-configured
+    title: Ensure NTP servers are configured on clusters
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a7
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-17
+      compliance/nis-2: nis-2-21-2-b
+      compliance/nist-csf-1: false
+      compliance/nist-csf-2: false
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-7
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-45
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-6-2
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: false
+    mql: |
+      nutanix.clusters.all(network.ntpServers.length > 0)
+    docs:
+      desc: |
+        This check verifies that each cluster has at least one NTP server configured.
+
+        Time sources are added under Settings, then NTP Servers in Prism, or with `ncli cluster add-to-ntp-servers servers=<hosts>` on a Controller VM, and `ncli cluster get-ntp-servers` lists what is configured. Add at least two reachable sources so a single unavailable server does not leave the cluster unsynchronized.
+
+        **Why this matters**
+
+        Time is a security dependency here, not just an operational nicety. Certificate validation compares notBefore and notAfter against the local clock, so a cluster whose time has drifted rejects valid certificates or, worse, accepts expired ones. Kerberos refuses tickets outside a tight skew, so directory authentication to Prism stops working when the clock moves. A cluster that cannot reach its key management server because the TLS handshake fails on a clock error cannot bring encrypted storage online.
+
+        The investigative cost is just as concrete. When you are reconstructing an incident, you correlate Prism events against guest logs, firewall logs, and directory logs, and that correlation is only possible if the timestamps agree. A cluster running minutes or hours off puts its own events in the wrong place in the sequence, which can hide the causal order entirely and makes the record hard to rely on if it is ever questioned.
+
+        An attacker who can influence unauthenticated time also gains something directly, since moving a clock can revive an expired credential or certificate and can push their activity out of the window a responder is examining.
+
+        Point the cluster at sources you control or trust rather than arbitrary public servers, keep every node in the cluster and the surrounding infrastructure on the same sources, and confirm the cluster actually synchronizes rather than only that the addresses were accepted.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to Prism.
+        2. Open Settings, then NTP Servers.
+        3. Confirm one or more reachable NTP servers are configured.
+
+        A passing result shows configured NTP servers; a failing result shows none.
+
+        ### Audit via CLI
+
+        Run on a Controller VM:
+
+        ```bash
+        ncli cluster get-ntp-servers
+        ```
+
+        A passing result lists one or more NTP servers.
+      remediation:
+        - id: console
+          desc: |
+            To configure NTP servers using Prism:
+
+            1. Open Settings, then NTP Servers.
+            2. Add at least two reachable NTP server addresses.
+            3. Save and confirm the cluster synchronizes.
+        - id: cli
+          desc: |
+            To add NTP servers using the CLI, run on a Controller VM:
+
+            ```bash
+            ncli cluster add-to-ntp-servers servers=time1.example.com,time2.example.com
+            ```
+
+  - uid: mondoo-nutanix-security-cluster-dns-configured
+    title: Ensure name servers are configured on clusters
+    impact: 50
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: false
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: false
+      compliance/nis-2: false
+      compliance/nist-csf-1: false
+      compliance/nist-csf-2: false
+      compliance/nist-sp-800-171: false
+      compliance/nist-sp-800-53-rev5: false
+      compliance/owasp-top-10-2025: false
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: false
+    mql: |
+      nutanix.clusters.all(network.nameServers.length > 0)
+    docs:
+      desc: |
+        This check verifies that each cluster has at least one DNS name server configured.
+
+        Resolvers are added under Settings, then Name Servers in Prism, or with `ncli cluster add-to-name-servers servers=<addresses>` on a Controller VM, and `ncli cluster get-name-servers` lists them. Configure at least two reachable resolvers so the loss of one does not stop resolution.
+
+        **Why this matters**
+
+        Nearly every external dependency the cluster has is referenced by name. Directory servers for authentication, the key management server that holds encryption keys, NTP sources, the SMTP relay that carries alerts, and the upgrade and support endpoints are all configured as hostnames. Without a working resolver, each of those fails, and they fail in ways that do not point at DNS.
+
+        The security consequences are the visible ones. Directory authentication stops, which pushes operators onto local accounts that bypass your identity provider and its second factor. The key management server becomes unreachable, so encrypted storage cannot be brought online after a restart. Alert email stops being delivered, so the cluster continues to detect problems and nobody hears about them, which is indistinguishable from a healthy cluster right up until something fails hard.
+
+        Partial resolution is worse than none, because it produces intermittent failures that get attributed to the dependent service rather than to name resolution, and the investigation goes to the wrong place.
+
+        Use resolvers you control, and treat them as part of the cluster's availability chain. A resolver that is itself hosted as a VM on this cluster creates a circular dependency that only shows up when you are trying to restart the cluster after an outage, which is exactly the moment you need name resolution to work.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to Prism.
+        2. Open Settings, then Name Servers.
+        3. Confirm one or more DNS servers are configured.
+
+        A passing result shows configured name servers; a failing result shows none.
+
+        ### Audit via CLI
+
+        Run on a Controller VM:
+
+        ```bash
+        ncli cluster get-name-servers
+        ```
+
+        A passing result lists one or more DNS name servers.
+      remediation:
+        - id: console
+          desc: |
+            To configure name servers using Prism:
+
+            1. Open Settings, then Name Servers.
+            2. Add at least two reachable DNS server addresses.
+            3. Save the configuration.
+        - id: cli
+          desc: |
+            To add name servers using the CLI, run on a Controller VM:
+
+            ```bash
+            ncli cluster add-to-name-servers servers=10.0.0.10,10.0.0.11
+            ```
+
+  - uid: mondoo-nutanix-security-cluster-smtp-encrypted
+    title: Ensure cluster SMTP is not configured in plaintext
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-2-ii-transmission-security-encryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: |
+      nutanix.clusters.where(network.smtpEmailAddress != "").all(network.smtpType != "PLAIN")
+    docs:
+      desc: |
+        This check verifies that a cluster configured to send email does so over an encrypted connection.
+
+        The SMTP relay is configured under Settings, then SMTP Server in Prism, where the security mode must be STARTTLS or SSL rather than none, with the matching port. From a Controller VM the equivalent is `ncli cluster set-smtp-server address=<host> port=587 security-mode=STARTTLS from-email-address=<address>`, and `ncli cluster get-smtp-server` reports the configured mode. Clusters with no sending address configured are out of scope, since they send nothing.
+
+        **Why this matters**
+
+        Cluster alert email is a running commentary on your infrastructure. Each message carries node names, management IP addresses, the AOS version in use, which component has failed, and how far a rebuild has progressed. Sent in plaintext, that stream is readable by anyone on the path between the cluster and the relay, which on a corporate network is a larger set of people and devices than it appears.
+
+        It is genuinely useful to an attacker. Knowing the version tells them which published vulnerabilities apply, knowing the node addresses tells them where the management plane lives, and knowing that a node is degraded or a rebuild is running tells them when the cluster is least able to absorb another problem and when operators are already distracted.
+
+        If the relay requires authentication, plaintext SMTP also puts those credentials on the wire, and a relay account is frequently reused across other systems.
+
+        The messages can be altered as well as read. An attacker who can modify them in transit can suppress the alerts describing what they are doing while leaving normal traffic intact, so the cluster reports a problem and the operators never see it.
+
+        Set the mode and the port together, and send a test message afterward, since a mismatched port silently fails rather than falling back.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to Prism.
+        2. Open Settings, then SMTP Server.
+        3. Confirm the security mode is STARTTLS or SSL, not None/Plain.
+
+        A passing result shows an encrypted SMTP mode; a failing result shows a plaintext connection.
+
+        ### Audit via CLI
+
+        Run on a Controller VM:
+
+        ```bash
+        ncli cluster get-smtp-server
+        ```
+
+        A passing result reports the SMTP security mode as STARTTLS or SSL.
+      remediation:
+        - id: console
+          desc: |
+            To secure SMTP using Prism:
+
+            1. Open Settings, then SMTP Server.
+            2. Set the security mode to STARTTLS or SSL and the matching port.
+            3. Save and send a test email to confirm delivery.
+        - id: cli
+          desc: |
+            To configure encrypted SMTP using the CLI, run on a Controller VM:
+
+            ```bash
+            ncli cluster set-smtp-server address=smtp.example.com port=587 security-mode=STARTTLS from-email-address=alerts@example.com
+            ```
+
+  - uid: mondoo-nutanix-security-cluster-nfs-allowlist-restricted
+    title: Ensure the cluster NFS allowlist is not wide-open
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a9
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-3
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-5-2-7
+    mql: |
+      nutanix.clusters.all(network.nfsSubnetWhitelist.all(_ != "0.0.0.0/0" && _ != "0.0.0.0" && _ != "0.0.0.0/0.0.0.0"))
+    docs:
+      desc: |
+        This check verifies that the cluster-wide filesystem allowlist does not contain a wide-open entry.
+
+        The allowlist is maintained under Settings, then Filesystem Whitelists in Prism, and it controls which client addresses may mount cluster storage over NFS. This check fails when it contains `0.0.0.0`, `0.0.0.0/0`, or `0.0.0.0/0.0.0.0`, all of which mean every address. Remove an open entry with `ncli cluster remove-from-nfs-whitelist` and add the specific subnets that genuinely need access with `ncli cluster add-to-nfs-whitelist`, both on a Controller VM.
+
+        **Why this matters**
+
+        The allowlist is the only authentication in front of these mounts. NFS as the cluster exposes it does not ask the client to prove anything; it trusts the source address and then trusts the client's own idea of which user is making each request. An open entry therefore means that any host able to route to the data services IP can mount the export and, by claiming to be root locally, read and write the files it contains.
+
+        Those files are guest virtual disks. An attacker who has compromised any machine on a network with a path to the cluster mounts the export from there and copies a database VM's disk image, or writes into one, without needing a Prism credential, without touching the VM, and without the guest operating system being able to detect it. The read looks like ordinary storage traffic.
+
+        Writes are the sharper risk. Modifying a running guest's disk from underneath it corrupts data or plants content the workload will later execute, and the cluster has no way to distinguish that from legitimate client activity.
+
+        Restrict the list to the specific subnets that mount cluster storage, review it when networks change, and remember that per-container allowlists can reopen access independently, which a companion check in this policy covers.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to Prism.
+        2. Open Settings, then Filesystem Whitelists.
+        3. Confirm no entry is `0.0.0.0/0` (or `0.0.0.0/0.0.0.0`).
+
+        A passing result shows only specific trusted subnets; a failing result shows an open allowlist.
+
+        ### Audit via CLI
+
+        Run on a Controller VM:
+
+        ```bash
+        ncli cluster get-params
+        ```
+
+        A passing result shows the filesystem allowlist limited to specific subnets.
+      remediation:
+        - id: console
+          desc: |
+            To restrict the NFS allowlist using Prism:
+
+            1. Open Settings, then Filesystem Whitelists.
+            2. Remove any open entry such as `0.0.0.0/0.0.0.0`.
+            3. Add only the specific subnets that require storage access.
+        - id: cli
+          desc: |
+            To remove an open entry and allow only specific subnets using the CLI, run on a Controller VM:
+
+            ```bash
+            ncli cluster remove-from-nfs-whitelist ip-subnet-masks="0.0.0.0/0.0.0.0"
+            ncli cluster add-to-nfs-whitelist ip-subnet-masks="10.20.0.0/255.255.0.0"
+            ```
+
+  - uid: mondoo-nutanix-security-cluster-runs-lts-release
+    title: Ensure clusters run a long-term-support release
+    impact: 50
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-12
+      compliance/nist-csf-2: nist-csf-2-pr-ps-02
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-1
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sa-22
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a03
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: soc2-control-cc7-1-5
+      compliance/vda-isa-5: vda-isa-5-5-2-5
+    mql: |
+      nutanix.clusters.where(clusterType == "AOS").all(isLts == true)
+    docs:
+      desc: |
+        This check verifies that each AOS cluster runs a long-term-support release.
+
+        Nutanix publishes AOS in two streams. Long-term-support releases receive maintenance and security fixes over an extended window; short-term-support releases carry newer features and reach end of maintenance quickly. The running version is on the cluster details page in Prism Element and from `ncli cluster version` on a Controller VM, and which stream it belongs to is stated on the Nutanix support portal. Upgrades are applied through the Life Cycle Manager after running an inventory and the pre-upgrade checks.
+
+        **Why this matters**
+
+        Once a release stops receiving maintenance, its known vulnerabilities stop being fixed but do not stop being published. Advisories continue to describe flaws in that code, so an attacker reading them has an accurate, dated list of what works against your cluster and you have no patch to apply. The only remedy at that point is an upgrade, which is a larger and riskier operation than the one you avoided.
+
+        What is exposed is the storage layer for every workload on the cluster. Controller VM services and the Prism interface are what these advisories concern, and a flaw there reaches guest data directly, underneath the operating systems that would otherwise be your line of defense.
+
+        Running an unsupported release also removes your escalation path. When something does go wrong, the vendor's first request is that you upgrade to a supported version, and doing that in the middle of an incident is far worse than doing it on a schedule.
+
+        The short-term stream exists for a reason and is a legitimate choice when you need a specific feature and have the operational capacity to keep upgrading on its faster cadence. Choose it deliberately, and do not select a version by copying a number out of documentation, since the current supported release moves and a stale value mis-targets the download.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to Prism Element for the cluster.
+        2. Open the cluster details and note the AOS version.
+        3. Confirm the version is a long-term-support release on the Nutanix support portal.
+
+        A passing result shows an LTS release; a failing result shows an STS or end-of-life release.
+
+        ### Audit via CLI
+
+        Run on a Controller VM:
+
+        ```bash
+        ncli cluster version
+        ```
+
+        Confirm the reported AOS version corresponds to an LTS branch on the Nutanix support portal.
+      remediation:
+        - id: console
+          desc: |
+            To move to a long-term-support release using Prism:
+
+            1. Open the Life Cycle Manager from the Prism menu.
+            2. Run an inventory, then select a long-term-support AOS target version.
+            3. Run the pre-upgrade checks and apply the upgrade.
+        - id: cli
+          desc: |
+            To stage a long-term-support release using the CLI, run on a Controller VM. List the available releases first, identify the long-term-support entry you want to move to, and download that exact version. Do not copy a literal version number from this example, because the current supported release changes over time and a stale value will mis-target the download:
+
+            ```bash
+            ncli software ls software-type=nos
+            ncli software download software-type=nos name="<lts-version-from-ncli-software-ls>"
+            ```
+
+            Confirm the chosen version is a long-term-support release on the Nutanix support portal before downloading. Current AOS releases apply upgrades through the Life Cycle Manager. After the download completes, open the Life Cycle Manager in Prism, run the pre-upgrade checks, and apply the upgrade.
+
+  # =================================================================
+  # Host Security
+  # =================================================================
+
+  - uid: mondoo-nutanix-security-host-secure-boot-enabled
+    title: Ensure Secure Boot is enabled on hosts
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a22
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ds-6
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-2
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a08
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-8-2
+      compliance/vda-isa-5: false
+    mql: |
+      nutanix.hosts.all(isSecureBooted == true)
+    docs:
+      desc: |
+        This check verifies that UEFI Secure Boot is enabled on every hypervisor host.
+
+        Secure Boot is a firmware feature, so it is enabled in each host's own firmware setup rather than in Prism, and Prism Central then reports the resulting state per host under Hardware. Enabling it requires UEFI firmware and host downtime: place the host in maintenance mode so its VMs migrate off, shut down the Controller VM running on it, reboot into firmware setup, turn on UEFI and Secure Boot, and bring the host back before moving to the next one.
+
+        **Why this matters**
+
+        Secure Boot checks the signature of each stage of the boot chain before handing control to it, so firmware only starts a signed bootloader and that bootloader only starts a signed kernel. Without it, nothing verifies what the machine loads, and an attacker who has gained sufficient access to write to the boot device installs their own code beneath the hypervisor.
+
+        That position is the worst one available. A bootkit runs before the kernel, so it can modify the kernel as it loads and remain invisible to everything running afterward, including any security tooling on the host and every guest above it. It survives reinstalling the hypervisor, because reinstallation replaces the operating system and not the compromised boot path, so the usual response to a suspected compromise leaves it in place.
+
+        A hypervisor host is where that matters most. Code running underneath the kernel sits underneath the memory of every VM on the node and can read guest data, alter what the storage layer writes, and lie to the management plane about all of it. The guests have no means of detecting any of it.
+
+        Work one host at a time and confirm the cluster reports healthy data resiliency before each, since the procedure removes a node from service.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to Prism Central.
+        2. Open Hardware, then select each host.
+        3. Confirm the host reports Secure Boot as enabled.
+
+        A passing result shows Secure Boot enabled on every host; a failing result shows it disabled.
+
+        ### Audit via CLI
+
+        Run on a Controller VM:
+
+        ```bash
+        acli host.list
+        ```
+
+        Inspect each host's UEFI/Secure Boot status; a passing result reports Secure Boot enabled.
+      remediation:
+        - id: console
+          desc: |
+            Enabling Secure Boot requires UEFI firmware support and host downtime. Work on one host at a time and confirm the cluster reports OK data resiliency before starting each host. Using Prism and the host firmware:
+
+            1. Confirm the Data Resiliency Status widget reports OK.
+            2. Place the host into maintenance mode so its VMs migrate off.
+            3. Shut down the Controller VM on that host, then reboot the host into its firmware setup.
+            4. Enable UEFI and Secure Boot in the firmware settings and boot the host.
+            5. Exit maintenance mode and confirm Prism reports Secure Boot as enabled before moving to the next host.
+        - id: cli
+          desc: |
+            To place a host into maintenance mode for the firmware change, run on a Controller VM:
+
+            ```bash
+            acli host.enter_maintenance_mode "<host-uuid>" wait=true
+            ```
+
+            Then shut down the Controller VM that runs on the affected host by running this command on that Controller VM:
+
+            ```bash
+            cvm_shutdown -P now
+            ```
+
+            Enable Secure Boot in the host firmware, boot the host, confirm the Controller VM is back up and resiliency is OK, then exit maintenance mode:
+
+            ```bash
+            acli host.exit_maintenance_mode "<host-uuid>"
+            ```
+
+  - uid: mondoo-nutanix-security-host-ipmi-not-default-user
+    title: Ensure host IPMI does not use a default username
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a5
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-2
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-2-2-2
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      nutanix.hosts.all(ipmi.username != "ADMIN" && ipmi.username != "admin" && ipmi.username != "root" && ipmi.username != "")
+    docs:
+      desc: |
+        This check verifies that no host's IPMI interface still uses a vendor default account name such as `ADMIN`, `admin`, or `root`.
+
+        IPMI, the baseboard management controller, is administered from the host's own BMC web interface rather than from Prism, though Prism Central shows the configured username under Hardware. Create a new administrative account with a unique name and a strong password, verify you can log in with it, and only then disable or rename the default. Changing the default account's password is not sufficient; the default name must no longer be in use.
+
+        **Why this matters**
+
+        The BMC is a separate computer inside the server with its own processor, its own network connection, and complete authority over the machine. Whoever logs into it can power the host off, attach a virtual CD image and boot the host from it, watch and drive the console, and reflash firmware, all without the hypervisor or any guest being aware.
+
+        Default BMC credentials are the most scanned-for thing in a datacenter. The vendor defaults are published in the manual, mass scanners look for them continuously, and a management network that is reachable at all will be found. An attacker who logs in boots the host from their own image, which gives them the contents of the local drives and the Controller VM that serves guest storage, and the guests running above see only that a node restarted.
+
+        Because the BMC sits below the hypervisor, nothing running on the host can observe or prevent it. Host-based tooling, hypervisor logging, and guest security agents are all above the layer where the compromise happens.
+
+        Take care with the account slots. Slot numbers vary by BMC vendor, so read the current list before disabling anything, confirm the new account works first, and keep the BMC network segregated from general traffic regardless of which accounts exist on it.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to Prism Central.
+        2. Open Hardware, then select each host and review the IPMI configuration.
+        3. Confirm the IPMI username is not a vendor default such as `ADMIN`.
+
+        A passing result shows a non-default IPMI username on every host; a failing result shows a default.
+
+        ### Audit via CLI
+
+        From a Controller VM, query the BMC of each host:
+
+        ```bash
+        ipmitool -I lanplus -H "<ipmi-ip>" -U "<user>" -P "<password>" user list 1
+        ```
+
+        A passing result shows no default `ADMIN` account in active use.
+      remediation:
+        - id: console
+          desc: |
+            To replace the default IPMI username using the BMC web interface:
+
+            1. Log in to the host's IPMI/BMC web interface.
+            2. Create a new administrative user with a unique name and a strong password.
+            3. Log out and confirm you can log in with the new account.
+            4. Disable or rename the default `ADMIN` account.
+
+            Changing only the password of the default account is not sufficient; the default username must no longer be in use.
+        - id: cli
+          desc: |
+            To replace the default IPMI account using ipmitool, list the user slots first because slot numbers vary by BMC vendor, then create the new account:
+
+            ```bash
+            ipmitool -I lanplus -H "<ipmi-ip>" -U ADMIN -P "<password>" user list 1
+            ipmitool -I lanplus -H "<ipmi-ip>" -U ADMIN -P "<password>" user set name 3 nutanixadmin
+            ipmitool -I lanplus -H "<ipmi-ip>" -U ADMIN -P "<password>" user set password 3
+            ipmitool -I lanplus -H "<ipmi-ip>" -U ADMIN -P "<password>" user priv 3 4
+            ```
+
+            Verify the new account works before touching the default, so you cannot lock yourself out of the BMC. Re-run `user list 1` and read the slot number of the default account from the Name column; do not assume it is slot 2, because the default account occupies a different slot on different BMC vendors. Disabling the wrong slot can lock out the operator. Substitute the real slot number for `<default-slot>` below:
+
+            ```bash
+            ipmitool -I lanplus -H "<ipmi-ip>" -U nutanixadmin -P "<new-password>" user list 1
+            ipmitool -I lanplus -H "<ipmi-ip>" -U nutanixadmin -P "<new-password>" user disable <default-slot>
+            ```
+
+  - uid: mondoo-nutanix-security-host-not-degraded
+    title: Ensure no host is in a degraded state
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a17
+      compliance/csa-cloud-controls-matrix-4: false
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-16
+      compliance/nis-2: false
+      compliance/nist-csf-1: false
+      compliance/nist-csf-2: nist-csf-2-de-cm-09
+      compliance/nist-sp-800-171: false
+      compliance/nist-sp-800-53-rev5: false
+      compliance/owasp-top-10-2025: false
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: false
+    mql: |
+      nutanix.hosts.all(isDegraded == false)
+    docs:
+      desc: |
+        This check verifies that no host in the cluster is flagged as degraded.
+
+        AOS marks a node degraded when it detects persistent misbehavior rather than outright failure: intermittent network connectivity, hardware errors, or services that respond slowly or not at all. The state appears in the Hardware view and the alerts dashboard in Prism Element, and `ncli host list` reports it from a Controller VM. Clearing it is a two-step job: resolve the underlying cause, then mark the node as fixed in the Hardware view.
+
+        **Why this matters**
+
+        A degraded node is worse than a failed one because the cluster cannot cleanly route around it. It still holds a copy of data and still claims a share of the fault tolerance budget, so the cluster believes it is protected while one of the copies it is counting on lives somewhere that responds unpredictably. A second failure elsewhere then finds the cluster with less real redundancy than its status suggests, and that is how a single hardware problem turns into data loss.
+
+        The effect spreads beyond the node itself. Distributed storage waits on its slowest participant, so a node with a flapping link or a failing disk stalls operations for guests running elsewhere, and the symptom shows up as unexplained latency across unrelated workloads.
+
+        Degradation is also a reliable precursor. Nodes marked degraded frequently fail outright soon afterward, so the flag is the warning that lets you replace a component during a maintenance window instead of during an outage.
+
+        Because clearing the flag is manual, a node can sit degraded long after the cause was fixed, and a persistently degraded node can also be a symptom of something in the surrounding network rather than the hardware. If a node returns to the degraded state repeatedly, involve Nutanix Support before putting it back into service.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to Prism Element for the cluster.
+        2. Review the Hardware view and the alerts dashboard.
+        3. Confirm no host is flagged as degraded.
+
+        A passing result shows all hosts healthy; a failing result shows one or more degraded nodes.
+
+        ### Audit via CLI
+
+        Run on a Controller VM:
+
+        ```bash
+        ncli host list | grep -i degraded
+        ```
+
+        A passing result shows no host reporting a degraded state.
+      remediation:
+        - id: console
+          desc: |
+            To resolve a degraded host using Prism:
+
+            1. Open the alert for the degraded node and review the root cause.
+            2. Address the underlying issue such as a failing network link, hardware component, or unresponsive service.
+            3. Open Hardware, select the degraded node, and choose Mark as Fixed to clear the degraded state.
+        - id: cli
+          desc: |
+            To identify the degraded node using the CLI, run on a Controller VM:
+
+            ```bash
+            ncli host ls
+            ```
+
+            Resolve the root cause, then clear the degraded state from the Prism Hardware view with Mark as Fixed. If the node repeatedly returns to a degraded state, engage Nutanix Support before returning it to service.
+
+  # =================================================================
+  # Virtual Machine Security
+  # =================================================================
+
+  - uid: mondoo-nutanix-security-vm-cpu-passthrough-disabled
+    title: Ensure host CPU passthrough is disabled on VMs
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a23
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: false
+      compliance/nist-csf-1: nist-csf-1-pr-pt-3
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-2
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-39
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: false
+    mql: |
+      nutanix.vms.all(isCpuPassthroughEnabled == false)
+    docs:
+      desc: |
+        This check verifies that no virtual machine is configured with host CPU passthrough.
+
+        Passthrough presents the physical host's exact processor model and full feature set to the guest instead of an abstracted CPU. It is reviewed per VM in the Prism Central VM list and changed with `acli vm.update <vm-name> cpu_passthrough=false` on a Controller VM, with the VM powered off, since the CPU configuration is fixed while it runs.
+
+        **Why this matters**
+
+        The virtualized CPU model is part of the boundary between a guest and the hardware underneath it. Passing the real one through hands the guest an exact description of the silicon it is running on: the specific model, stepping, and every instruction set extension the host supports. That is precisely the information a microarchitectural attack needs, because those attacks depend on the details of a particular processor generation's cache structure, branch predictor, and speculation behavior.
+
+        An attacker inside a guest that would otherwise have to work blind can instead select the technique that matches the hardware and target the cores it shares with its neighbors. The other guests on that host have no visibility into it and no way to opt out.
+
+        There is an availability cost as well. A VM pinned to the host's exact CPU cannot live migrate to a node with a different processor, so it stops being movable across a mixed-generation cluster. That removes it from the maintenance and evacuation paths the cluster relies on, and the workload ends up staying on a node that needs patching or replacement.
+
+        Passthrough is sometimes required by a workload that needs an instruction set the abstracted model does not expose. Where it is, keep those VMs on nodes whose other guests belong to the same trust domain, and accept that they are not migratable.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to Prism Central.
+        2. Open the VM list and review each VM's CPU configuration.
+        3. Confirm host CPU passthrough is not enabled.
+
+        A passing result shows passthrough disabled on every VM; a failing result shows it enabled.
+
+        ### Audit via CLI
+
+        Run on a Controller VM:
+
+        ```bash
+        acli vm.get <vm-name>
+        ```
+
+        A passing result shows `cpu_passthrough` absent or set to false.
+      remediation:
+        - id: console
+          desc: |
+            CPU passthrough changes require the VM to be powered off. Using Prism:
+
+            1. Power off the affected VM.
+            2. Edit the VM and disable host CPU passthrough.
+            3. Power the VM back on.
+        - id: cli
+          desc: |
+            To disable CPU passthrough using the CLI, run on a Controller VM with the VM powered off:
+
+            ```bash
+            acli vm.update <vm-name> cpu_passthrough=false
+            ```
+
+  - uid: mondoo-nutanix-security-vm-guest-tools-installed
+    title: Ensure Nutanix Guest Tools is installed and reachable
+    impact: 50
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: false
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-5-9
+      compliance/nis-2: false
+      compliance/nist-csf-1: false
+      compliance/nist-csf-2: false
+      compliance/nist-sp-800-171: false
+      compliance/nist-sp-800-53-rev5: false
+      compliance/owasp-top-10-2025: false
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: false
+    mql: |
+      nutanix.vms.where(powerState == "ON").all(guestTools.isInstalled == true && guestTools.isReachable == true)
+    docs:
+      desc: |
+        This check verifies that every powered-on virtual machine has Nutanix Guest Tools installed and communicating with the cluster.
+
+        NGT is enabled per VM from Prism Central through Manage Guest Tools, which mounts the installer ISO; the installer then has to be run inside the guest. On a Controller VM the equivalent is `ncli ngt enable vm-id=<id>` followed by `ncli ngt mount vm-id=<id>`, and `ncli ngt list` reports whether each VM's agent is installed and reachable. Both conditions are required, since an installed agent that cannot reach the cluster provides nothing.
+
+        **Why this matters**
+
+        Without the in-guest agent, a snapshot is a copy of the disk taken at an arbitrary instant while the workload is mid-write. A database captured that way is in the state it would be in after a power cut, and whether it recovers depends on its own crash recovery. Some do; some come back with a corrupt index or a truncated transaction, and you discover which during the restore, at the point where you needed the backup to work.
+
+        NGT is what turns that into a consistent snapshot. It coordinates with the guest, using the Volume Shadow Copy Service on Windows or filesystem quiescing elsewhere, so the workload flushes and pauses briefly and the resulting image is one the application can open cleanly. Self-service file restore depends on it as well, so without it the only recovery unit is the whole VM.
+
+        The reachability half matters for visibility. The agent is how the platform learns the guest operating system and its configuration, so a VM without it is an inventory gap: nobody can answer what it runs or whether it is affected by a given advisory without logging into it.
+
+        The agent runs privileged inside every guest, so keep it current, which a companion check in this policy covers, and treat an unreachable agent as a real finding rather than noise.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to Prism Central.
+        2. Open the VM list and add the NGT columns, or open each VM's details.
+        3. Confirm NGT is installed and shows as reachable for powered-on VMs.
+
+        A passing result shows NGT installed and reachable; a failing result shows it missing or unreachable.
+
+        ### Audit via CLI
+
+        Run on a Controller VM:
+
+        ```bash
+        ncli ngt list
+        ```
+
+        A passing result shows NGT installed and communicating for each powered-on VM.
+      remediation:
+        - id: console
+          desc: |
+            To install Nutanix Guest Tools using Prism:
+
+            1. Select the VM and choose Manage Guest Tools.
+            2. Enable NGT and mount the NGT ISO.
+            3. Inside the guest, run the NGT installer and confirm the agent connects.
+        - id: cli
+          desc: |
+            To enable and mount NGT using the CLI, run on a Controller VM, then complete installation inside the guest:
+
+            ```bash
+            ncli ngt enable vm-id=<vm-id>
+            ncli ngt mount vm-id=<vm-id>
+            ```
+
+  - uid: mondoo-nutanix-security-vm-guest-tools-current
+    title: Ensure Nutanix Guest Tools is up to date
+    impact: 50
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: false
+      compliance/nist-csf-2: nist-csf-2-pr-ps-02
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-1
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a03
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: soc2-control-cc7-1-5
+      compliance/vda-isa-5: vda-isa-5-5-2-5
+    mql: |
+      nutanix.vms.where(guestTools.isInstalled == true).all(guestTools.version == guestTools.availableVersion)
+    docs:
+      desc: |
+        This check verifies that, where Nutanix Guest Tools is installed, it matches the version the cluster has available.
+
+        Prism Central lists the installed NGT version alongside the available one for each VM, and `ncli ngt list` reports both from a Controller VM. Updating is done from the Prism Element VM table by selecting the VMs with outdated agents and choosing Upgrade NGT, or by mounting the current installer with `ncli ngt mount` and rerunning it inside the guest.
+
+        **Why this matters**
+
+        NGT is a privileged agent running inside every guest that has it. It holds a communication channel to the cluster, and on Windows it participates in the Volume Shadow Copy Service, which means it runs with rights an ordinary application does not have. A vulnerability in that agent is a vulnerability inside each guest, reachable from the cluster side, and patching it is patch management for software you deployed to every workload rather than an optional refresh.
+
+        Old agents also fail at the job they exist for. Quiescing and snapshot coordination are the parts that get fixed between releases, and a stale agent that reports success while failing to quiesce produces a snapshot that looks fine in the interface and turns out to be crash-consistent when you restore it. That failure is only discovered during a recovery.
+
+        Version drift between the agent and the cluster causes the same outcome by another route. When the cluster is upgraded and the agents are not, the protocol between them can mismatch, so the agent stops responding and the VMs it covers quietly lose application-consistent protection.
+
+        Upgrading NGT touches every guest, so stage it rather than doing the fleet at once, and confirm afterward that the agents report both the new version and a reachable state.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to Prism Central.
+        2. Open the VM list and review the NGT version column against the available version.
+        3. Confirm installed NGT matches the version available on the cluster.
+
+        A passing result shows NGT at the available version; a failing result shows an older version.
+
+        ### Audit via CLI
+
+        Run on a Controller VM:
+
+        ```bash
+        ncli ngt list
+        ```
+
+        Compare each VM's installed NGT version against the cluster's available version.
+      remediation:
+        - id: console
+          desc: |
+            To update Nutanix Guest Tools using Prism:
+
+            1. In the Prism Element VM table, select the VMs with outdated NGT.
+            2. Choose Upgrade NGT from the actions menu and confirm.
+            3. Confirm the agent reports the current version after the upgrade.
+        - id: cli
+          desc: |
+            To update NGT from the CLI, mount the current NGT installer on the VM, then rerun the installer inside the guest:
+
+            ```bash
+            ncli ngt mount vm-id="<vm-id>"
+            ```
+
+            After the installer completes inside the guest, confirm the reported version:
+
+            ```bash
+            ncli ngt list vm-names="<vm-name>"
+            ```
+
+  - uid: mondoo-nutanix-security-vm-protected
+    title: Ensure virtual machines are protected
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-bcr-08
+      compliance/dora: dora-art-12
+      compliance/hipaa: hipaa-security-ss164-308-a-7-ii-a-contingency-plan-data-backup-plan
+      compliance/iso-27001-2022: iso-27001-2022-a-8-13
+      compliance/nis-2: nis-2-21-2-c
+      compliance/nist-csf-1: nist-csf-1-pr-ip-4
+      compliance/nist-csf-2: nist-csf-2-pr-ds-11
+      compliance/nist-sp-800-171: false
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cp-9
+      compliance/owasp-top-10-2025: false
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc9-1-1
+      compliance/vda-isa-5: vda-isa-5-3-1-2
+    mql: |
+      nutanix.vms.all(protectionType != "UNPROTECTED")
+    docs:
+      desc: |
+        This check verifies that virtual machines are covered by a protection policy rather than left unprotected.
+
+        Protection is assigned in Prism Central under Data Protection, where a policy defines a snapshot schedule and, where applicable, a replication target, and VMs are attached to it individually or by category. The older equivalent is a protection domain, managed with `ncli protection-domain protect name=<pd> vm-names=<vms>` on a Controller VM. A VM covered by neither has no scheduled recovery point at all.
+
+        **Why this matters**
+
+        An unprotected VM has no restorable copy anywhere. If its disks are encrypted by ransomware, deleted by mistake, or corrupted by a storage fault, the workload is gone in the sense that matters: there is nothing to restore from and no earlier point to return to.
+
+        Ransomware is what makes this a security control rather than an operations one. Modern intrusions deliberately look for backups first and destroy or encrypt them before touching production, because a victim who can restore does not pay. Scheduled snapshots held by the cluster, and replicated to another site, are the thing that decides whether an incident is an expensive weekend or an extortion negotiation. Recovering also requires a recovery point from before the intrusion, which means the schedule has to reach back far enough that you can pick a clean one.
+
+        Replication addresses the case the local snapshots do not, where the site or the cluster itself is lost.
+
+        Assign policies by category rather than per VM where you can, so that a newly created workload inherits protection instead of waiting for someone to remember it. Not every VM warrants the same schedule, and a deliberately excluded scratch or test workload is a legitimate exception; make that exception explicit rather than leaving it as an oversight, and test a restore, because a policy that has never been exercised is an assumption.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to Prism Central.
+        2. Open Data Protection, then review protection policies and the VM list's protection status.
+        3. Confirm every business-critical VM is associated with a protection policy.
+
+        A passing result shows VMs protected by a policy; a failing result shows unprotected VMs.
+
+        ### Audit via CLI
+
+        Run on a Controller VM:
+
+        ```bash
+        ncli protection-domain list
+        ```
+
+        A passing result lists each protection domain with the VMs it protects
+        under **VM Names**. A failing result shows a business-critical VM that
+        appears under no protection domain.
+      remediation:
+        - id: console
+          desc: |
+            To protect virtual machines using Prism Central:
+
+            1. Open Data Protection, then Protection Policies.
+            2. Create or edit a policy with a snapshot schedule and, where needed, replication target.
+            3. Assign the VMs (directly or by category) to the policy.
+        - id: cli
+          desc: |
+            To add VMs to a protection domain using the CLI, run on a Controller VM:
+
+            ```bash
+            ncli protection-domain protect name=<pd-name> vm-names=<vm1>,<vm2>
+            ```
+
+  # =================================================================
+  # Identity and Access Management
+  # =================================================================
+
+  - uid: mondoo-nutanix-security-directory-service-uses-ldaps
+    title: Ensure directory services use LDAPS
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a11
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-2-ii-transmission-security-encryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-aa-04
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-7
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-8-3-2
+      compliance/soc2-2017: soc2-control-cc6-6-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: |
+      nutanix.directoryServices.all(usesLdaps && secondaryUrls.all(_ == /^ldaps:\/\//i))
+    docs:
+      desc: |
+        This check verifies that every configured directory service connects over LDAPS rather than plaintext LDAP.
+
+        Directories are configured in Prism Central under Settings, then Authentication, then Directory List. The URL must begin with `ldaps://` and use a secure port, typically 636 for the directory itself or 3269 for a global catalog, and the directory's CA certificate has to be trusted by the cluster. From a Controller VM the equivalent is `ncli authconfig edit-directory` with a `directory-url` of the `ldaps://` form, and `ncli authconfig list-directory` shows what is configured.
+
+        **Why this matters**
+
+        Every login to Prism that uses a directory account crosses this connection. Over plaintext LDAP, the simple bind carries the user's password in the clear, so anyone with a capture point between the cluster and the domain controller collects administrator credentials as they are used, without touching either system.
+
+        The service account is the bigger prize. The cluster binds with it constantly to look up users and groups, so its password crosses the wire repeatedly and predictably. That account typically has directory-wide read access, which turns a single capture into a complete map of your users, groups, and privileged accounts, useful far beyond this cluster.
+
+        The responses are equally exposed. Group membership arrives over the same unauthenticated channel, so an attacker positioned to modify it can add a group to a reply and grant themselves whatever role your mapping assigns to it. The cluster has no way to detect the change, because there is no signature to verify.
+
+        Switching requires the cluster to trust the directory's issuing CA, so upload the certificate before you change the URL and test a login immediately afterward. Pair this with the group allowlist that a companion check in this policy requires, since encrypting the channel does not by itself limit who may authenticate through it.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to Prism Central.
+        2. Open Settings, then Authentication, then Directory List.
+        3. Confirm each directory URL uses `ldaps://` and a secure port (typically 636 or 3269).
+
+        A passing result shows all directory URLs using LDAPS; a failing result shows a plaintext `ldap://` URL.
+
+        ### Audit via CLI
+
+        Run on a Controller VM:
+
+        ```bash
+        ncli authconfig list-directory
+        ```
+
+        A passing result shows directory URLs beginning with `ldaps://`.
+      remediation:
+        - id: console
+          desc: |
+            To switch a directory service to LDAPS using Prism Central:
+
+            1. Open Settings, then Authentication, then Directory List.
+            2. Edit the directory and change the URL to `ldaps://<server>:636` (or `:3269` for the global catalog).
+            3. Upload the directory's CA certificate if required, then save and test login.
+        - id: cli
+          desc: |
+            To update a directory service to LDAPS using the CLI, run on a Controller VM:
+
+            ```bash
+            ncli authconfig edit-directory name=<directory-name> directory-type=ACTIVE_DIRECTORY connection-type=LDAP domain=<domain> directory-url=ldaps://ad.example.com:636
+            ```
+
+  - uid: mondoo-nutanix-security-directory-service-group-allowlist
+    title: Ensure directory services restrict access with a group allowlist
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a12
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-16
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-3
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-1
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-3
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: |
+      nutanix.directoryServices.all(whiteListedGroups.length > 0)
+    docs:
+      desc: |
+        This check verifies that each directory service names the groups permitted to authenticate.
+
+        The allowlist is set per directory in Prism Central under Settings, then Authentication, alongside the Role Mapping that grants those groups their privileges. It is the set of directory groups whose members may authenticate to Prism at all, and it is enforced before role mapping is consulted. The same field is available through the IAM v4 API as `whiteListedGroups`.
+
+        **Why this matters**
+
+        Without an allowlist, the population that can attempt to authenticate to your hypervisor management plane is everyone in the directory. That is typically every employee and contractor, plus service accounts and any stale account nobody has removed. Whether they get anywhere then depends entirely on the role mappings being exactly right, and role mappings drift: a mapping written against a broad group such as Domain Users, or a nested group that later acquired members nobody reviewed, silently widens access without any change being made to the cluster.
+
+        The attacker's version of this is simpler. They do not need a hypervisor administrator's credentials, only any directory credential plus a mapping that is looser than intended, and phishing an ordinary employee is far easier than phishing the storage team. An allowlist means that credential is refused at the door regardless of what the mapping says.
+
+        It also gives you something reviewable. Answering the question of who can log into this cluster becomes reading a short list of named groups rather than reasoning about nested directory membership.
+
+        Keep the groups purpose-built for cluster access rather than reusing broad organizational ones, and review the membership on the same cadence as your other privileged access, since the allowlist is only as narrow as the groups it names.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to Prism Central.
+        2. Open Settings, then Role Mapping (and the directory configuration).
+        3. Confirm access is granted to specific allowlisted groups rather than left open.
+
+        A passing result shows one or more allowlisted groups per directory; a failing result shows no group restriction.
+
+        ### Audit via CLI
+
+        Run on a Controller VM:
+
+        ```bash
+        ncli authconfig list-directory
+        ```
+
+        A passing result shows allowlisted groups configured for each directory.
+      remediation:
+        - id: console
+          desc: |
+            To restrict directory access to specific groups using Prism Central:
+
+            1. Open Settings, then Authentication, and edit the directory service.
+            2. Add the directory groups that should be allowed to authenticate to the directory's allowed groups.
+            3. Open Role Mapping and confirm roles are granted only to those named groups, removing any broad or default mappings.
+        - id: api
+          desc: |
+            To set the group allowlist on the directory service using the IAM v4 API, read the directory service, add the allowed groups to `whiteListedGroups`, and update it. First obtain the directory's `extId` by listing the directory services; the value is in the `extId` field of each entry in the response:
+
+            ```bash
+            curl -fsS -u admin \
+              "https://prism-central.example.com:9440/api/iam/v4.0/authn/directory-services"
+            ```
+
+            Read that directory service. The `-D -` flag dumps the response headers to the terminal so you can read the `ETag` header; the update later must echo it back. Save the body to a file:
+
+            ```bash
+            curl -fsS -u admin -D - -o directory.json \
+              "https://prism-central.example.com:9440/api/iam/v4.0/authn/directory-services/<directory-ext-id>"
+            ```
+
+            Edit `directory.json` so the object under `data` lists the allowed groups in `whiteListedGroups`, then send that object back as the request body. Set the `If-Match` header to the `ETag` value from the headers dumped above; this concurrency check rejects the update if the object changed since you read it:
+
+            ```bash
+            curl -fsS -u admin -X PUT \
+              "https://prism-central.example.com:9440/api/iam/v4.0/authn/directory-services/<directory-ext-id>" \
+              -H "If-Match: <etag-from-get-response>" \
+              -H "Content-Type: application/json" \
+              -d @directory.json
+            ```
+
+  - uid: mondoo-nutanix-security-saml-signed-authn-requests
+    title: Ensure SAML identity providers sign authn requests
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-14
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-04
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-15
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-23
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-2
+    mql: |
+      nutanix.samlIdentityProviders.all(isSignedAuthnReqEnabled == true)
+    docs:
+      desc: |
+        This check verifies that each SAML identity provider used for single sign-on requires the authentication request to be signed.
+
+        The option is set per provider in Prism Central under Settings, then Authentication, then Identity Providers, and appears as `isSignedAuthnReqEnabled` in the IAM v4 API. Enabling it makes Prism Central sign the authentication request it sends to the identity provider, and the identity provider's metadata may need updating so it holds the certificate to verify against.
+
+        **Why this matters**
+
+        An unsigned authentication request is one anyone can compose. The identity provider receiving it has no cryptographic evidence of where it came from, so it treats a request forged by an attacker exactly as it treats one Prism Central actually sent.
+
+        That opens the parameters of the request to manipulation. The relay state, which is where the user is sent after authenticating, and the assertion consumer service location, which is where the identity provider returns the signed response, both travel inside the request. An attacker who crafts one and lures an already-authenticated administrator into following it can have the identity provider issue a genuine, valid assertion and deliver it somewhere of their choosing, or return the user to a location the attacker controls after a real login. The user sees their own identity provider, authenticates normally, and nothing looks wrong.
+
+        Signing removes the ambiguity: the identity provider verifies that the request came from the registered service provider and rejects anything else, so forged and replayed requests are refused before an assertion is ever issued.
+
+        Enable it on the identity provider side at the same time, since a provider that does not check the signature gains nothing from Prism Central adding one, and confirm a login works immediately afterward, because a certificate mismatch between the two sides breaks single sign-on for everyone.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to Prism Central.
+        2. Open Settings, then Authentication, then the SAML / Identity Providers configuration.
+        3. Confirm signed authn requests are enabled for each identity provider.
+
+        A passing result shows signed authn requests enabled; a failing result shows them disabled.
+
+        ### Audit via CLI
+
+        Query the IAM v4 API from a host with API access:
+
+        ```bash
+        curl -fsS -u admin \
+          "https://prism-central.example.com:9440/api/iam/v4.0/authn/saml-identity-providers"
+        ```
+
+        A passing result shows `isSignedAuthnReqEnabled` set to true for each provider.
+      remediation:
+        - id: console
+          desc: |
+            To enable signed authn requests using Prism Central:
+
+            1. Open Settings, then Authentication, then Identity Providers.
+            2. Edit the SAML identity provider.
+            3. Enable signed authn requests and save, updating the IdP metadata if required.
+        - id: api
+          desc: |
+            To enable signed authn requests using the IAM v4 API, read the identity provider, set `isSignedAuthnReqEnabled` to true in the returned object, and update it. First obtain the identity provider's `extId` by listing the SAML identity providers; the value is in the `extId` field of each entry in the response:
+
+            ```bash
+            curl -fsS -u admin \
+              "https://prism-central.example.com:9440/api/iam/v4.0/authn/saml-identity-providers"
+            ```
+
+            Read that identity provider. The `-D -` flag dumps the response headers to the terminal so you can read the `ETag` header; the update later must echo it back. Save the body to a file:
+
+            ```bash
+            curl -fsS -u admin -D - -o idp.json \
+              "https://prism-central.example.com:9440/api/iam/v4.0/authn/saml-identity-providers/<idp-ext-id>"
+            ```
+
+            Edit `idp.json` so the object under `data` has `isSignedAuthnReqEnabled` set to true, then send that object back as the request body. Set the `If-Match` header to the `ETag` value from the headers dumped above; this concurrency check rejects the update if the object changed since you read it:
+
+            ```bash
+            curl -fsS -u admin -X PUT \
+              "https://prism-central.example.com:9440/api/iam/v4.0/authn/saml-identity-providers/<idp-ext-id>" \
+              -H "If-Match: <etag-from-get-response>" \
+              -H "Content-Type: application/json" \
+              -d @idp.json
+            ```
+
+  - uid: mondoo-nutanix-security-inactive-local-users-removed
+    title: Ensure inactive local users are removed
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-07
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-308-a-3-ii-c-workforce-security-establish-termination-procedures
+      compliance/iso-27001-2022: iso-27001-2022-a-5-18
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-1
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-2-6
+      compliance/soc2-2017: soc2-control-cc6-2-2
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      nutanix.users.where(userType == "LOCAL").all(status != "INACTIVE")
+    docs:
+      desc: |
+        This check verifies that local user accounts left in an inactive state have been deleted.
+
+        Local accounts are managed in Prism Central under Settings, then Users, and the IAM v4 API reports each one's `userType` and status. An account marked inactive is disabled but still present, with its identity, its group memberships, and its role assignments intact. This check requires those accounts to be removed rather than left in place.
+
+        **Why this matters**
+
+        A disabled account is a live account with a switch. Re-enabling it is a single change that any administrative credential can make, which means an attacker who has obtained one, or an insider who still has one, gains an identity that already carries permissions nobody re-approved. That is a quieter path than creating a new account, because the account already exists in the directory of users, its presence raises no questions, and its role assignments look established rather than new.
+
+        Inactive accounts also go unwatched precisely because they are inactive. Nobody reviews the permissions of an account that is switched off, so it drifts out of scope for access reviews while retaining whatever it was granted, and its password sits unchanged in whatever breach dumps it may have appeared in since.
+
+        Local accounts are worth more on this platform than they look. They authenticate directly to Prism, outside the directory service and outside whatever second factor and conditional access your identity provider enforces, so a re-enabled local account bypasses those controls entirely.
+
+        Confirm each account is genuinely unneeded before deleting it, because a local account is sometimes retained deliberately as a break-glass path for when directory authentication is unavailable. Where that is the intent, document it, keep it active with a credential you manage, and monitor its use rather than leaving it disabled and forgotten.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to Prism Central.
+        2. Open Settings, then Users (Local User Management).
+        3. Confirm there are no local users in an inactive state.
+
+        A passing result shows no inactive local users; a failing result shows one or more.
+
+        ### Audit via CLI
+
+        Query the IAM v4 API from a host with API access and review the local users:
+
+        ```bash
+        curl -fsS -u admin \
+          "https://prism-central.example.com:9440/api/iam/v4.0/authn/users"
+        ```
+
+        A passing result shows no user with a `userType` of LOCAL and a status of INACTIVE.
+      remediation:
+        - id: console
+          desc: |
+            To remove inactive local users using Prism Central:
+
+            1. Open Settings, then Users.
+            2. Review each local account flagged as inactive and confirm it is no longer required.
+            3. Delete the account.
+        - id: api
+          desc: |
+            To delete an inactive local user using the IAM v4 API, first obtain the user's `extId` by listing the users; the value is in the `extId` field of each entry in the response:
+
+            ```bash
+            curl -fsS -u admin \
+              "https://prism-central.example.com:9440/api/iam/v4.0/authn/users"
+            ```
+
+            Read that user to obtain its ETag, then delete it. The `-D -` flag dumps the response headers to the terminal so you can read the `ETag` header; pass that value in the `If-Match` header of the delete, where it acts as a concurrency check that rejects the delete if the user changed since you read it:
+
+            ```bash
+            curl -fsS -u admin -D - -o /dev/null \
+              "https://prism-central.example.com:9440/api/iam/v4.0/authn/users/<user-ext-id>"
+            curl -fsS -u admin -X DELETE \
+              "https://prism-central.example.com:9440/api/iam/v4.0/authn/users/<user-ext-id>" \
+              -H "If-Match: <etag-from-get-response>"
+            ```
+
+  - uid: mondoo-nutanix-security-no-stale-user-accounts
+    title: Ensure active local accounts are not stale
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-08
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-308-a-3-ii-c-workforce-security-establish-termination-procedures
+      compliance/iso-27001-2022: iso-27001-2022-a-5-18
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-1
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-2-6
+      compliance/soc2-2017: soc2-control-cc6-2-3
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      nutanix.users.where(userType == "LOCAL" && status == "ACTIVE").where(lastLoginTime != null).all(lastLoginTime > time.now - 90 * time.day)
+    docs:
+      desc: |
+        This check verifies that active local accounts that have logged in have done so within the last 90 days.
+
+        Prism Central shows the last login time for each local account under Settings, then Users, and the IAM v4 API reports it as `lastLoginTime`. This check compares that timestamp against a 90 day window. Where an account has not been used in that time, confirm whether it is still required and delete it if not; disabling it leaves an inactive account that a companion check in this policy will then flag.
+
+        **Why this matters**
+
+        A stale account is a working credential nobody is watching. It usually belongs to someone who changed roles or left, or to an integration that was decommissioned, and the reason nobody removed it is the same reason nobody would notice it being used: it is off everyone's mental map. An attacker using it draws no attention, because there is no baseline of normal activity for that account to deviate from.
+
+        The credential is also more likely to be exposed than an active one. It has probably not been rotated since it was created, it may sit in an old runbook, a script, a password manager belonging to a former employee, or a breach dump, and none of those routes leave any trace on the cluster.
+
+        What it opens is Prism, which is administration of the storage layer beneath every VM the cluster runs. Local accounts authenticate directly, outside your directory and outside whatever second factor your identity provider applies, so a stale one is a route in that your central identity controls never see.
+
+        Ninety days is a review cadence, not a security boundary. Accounts used for genuinely infrequent tasks, such as an annual audit or a break-glass path, will fail this legitimately; keep those few, name them for what they are, and rotate their credentials on a schedule rather than leaving them idle.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to Prism Central.
+        2. Open Settings, then Users (Local User Management).
+        3. Review the last-login time for each active local account.
+
+        A passing result shows all active local accounts used within 90 days; a failing result shows accounts idle longer.
+
+        ### Audit via CLI
+
+        Query the IAM v4 API from a host with API access and review the local users:
+
+        ```bash
+        curl -fsS -u admin \
+          "https://prism-central.example.com:9440/api/iam/v4.0/authn/users"
+        ```
+
+        Review `lastLoginTime` for each active local account; a passing result shows recent activity within 90 days.
+      remediation:
+        - id: console
+          desc: |
+            To remediate stale local accounts using Prism Central:
+
+            1. Open Settings, then Users.
+            2. Identify active accounts with no login in the last 90 days.
+            3. Confirm whether each is still required and delete those that are not. Disabled accounts remain on the system as inactive local accounts and still require removal, so prefer deletion for accounts that are no longer needed.
+        - id: api
+          desc: |
+            To delete a stale local user using the IAM v4 API after confirming it is unneeded, first obtain the user's `extId` by listing the users; the value is in the `extId` field of each entry in the response:
+
+            ```bash
+            curl -fsS -u admin \
+              "https://prism-central.example.com:9440/api/iam/v4.0/authn/users"
+            ```
+
+            Read that user to obtain its ETag, then delete it. The `-D -` flag dumps the response headers to the terminal so you can read the `ETag` header; pass that value in the `If-Match` header of the delete, where it acts as a concurrency check that rejects the delete if the user changed since you read it:
+
+            ```bash
+            curl -fsS -u admin -D - -o /dev/null \
+              "https://prism-central.example.com:9440/api/iam/v4.0/authn/users/<user-ext-id>"
+            curl -fsS -u admin -X DELETE \
+              "https://prism-central.example.com:9440/api/iam/v4.0/authn/users/<user-ext-id>" \
+              -H "If-Match: <etag-from-get-response>"
+            ```
+
+  # =================================================================
+  # Storage Security
+  # =================================================================
+
+  - uid: mondoo-nutanix-security-volume-group-chap-auth
+    title: Ensure volume groups require CHAP authentication
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-14
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-2
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-3
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-2
+    mql: |
+      nutanix.volumeGroups.where(usageType == "USER").all(enabledAuthentications == "CHAP")
+    docs:
+      desc: |
+        This check verifies that user-facing volume groups require CHAP authentication from the initiators that attach to them.
+
+        A volume group presents block storage over iSCSI to clients outside the cluster. CHAP is enabled per volume group in Prism under Storage, then Volume Groups, along with a secret of 12 to 16 characters, and `acli vg.get "<volume-group-name>"` on a Controller VM shows whether the target's external attachment requires it. Every connecting initiator has to be given the matching secret.
+
+        **Why this matters**
+
+        Without CHAP, the target accepts whoever connects to it. iSCSI discovery against the cluster's data services IP lists the available targets, and an initiator can then log in and attach with no credential at all. The only thing standing between an attacker and the volume is network reachability.
+
+        What they attach to is raw block storage, which is why this is worse than a file share. Volume groups typically hold database volumes, application data volumes, and cluster shared storage, and attaching gives read and write access to the block device itself. The filesystem permissions, database access controls, and application authorization that protect that data all live above the block layer and are bypassed entirely. An attacker copies the volume and reads the database offline, or writes to it while the real owner has it mounted, which corrupts it.
+
+        None of this touches a VM, an operating system, or Prism, so nothing in the guests or the management plane records an access that should not have happened. It looks like a storage client doing storage things.
+
+        Enabling CHAP disconnects initiators that do not yet have the secret, so plan a window and update every client. Treat the secret as a shared credential, rotate it when someone with access leaves, and keep the data services network segregated as well, since CHAP is authentication and not encryption.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to Prism Element (or Prism Central Storage).
+        2. Open Storage, then Volume Groups, and review each user volume group.
+        3. Confirm CHAP authentication is enabled on each target.
+
+        A passing result shows CHAP required; a failing result shows authentication set to none.
+
+        ### Audit via CLI
+
+        Run on a Controller VM:
+
+        ```bash
+        acli vg.list
+        acli vg.get "<volume-group-name>"
+        ```
+
+        A passing result shows the volume group's external attachment requiring CHAP.
+      remediation:
+        - id: console
+          desc: |
+            Enabling CHAP rejects initiators that have not yet been configured with the secret, so plan a maintenance window and update every connecting client. To require CHAP on a volume group using Prism:
+
+            1. Open Storage, then Volume Groups, and edit the volume group.
+            2. Enable CHAP authentication and set a strong secret of 12 to 16 characters.
+            3. Update the connecting initiators with the matching CHAP credentials and confirm they reconnect.
+        - id: cli
+          desc: |
+            To confirm the volume group requires CHAP using the CLI, run on a Controller VM:
+
+            ```bash
+            acli vg.get "<volume-group-name>"
+            ```
+
+            The target authentication settings show whether CHAP is required. Configure the CHAP secret itself in Prism or through the Volumes API.
+
+  - uid: mondoo-nutanix-security-storage-container-encrypted
+    title: Ensure storage containers are encrypted
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a28
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-2-iv-access-control-encryption-and-decryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-1
+      compliance/nist-csf-2: nist-csf-2-pr-ds-01
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-28
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-3-5-1
+      compliance/soc2-2017: soc2-control-cc6-1-10
+      compliance/vda-isa-5: vda-isa-5-5-1-1
+    mql: |
+      nutanix.storageContainers.where(isInternal == false).all(isEncrypted == true)
+    docs:
+      desc: |
+        This check verifies that every user-facing storage container reports encryption as enabled.
+
+        Containers are reviewed under Storage, then Storage Containers in Prism, and `ncli container list` on a Controller VM shows each one's encryption state. Enabling it requires the cluster to have an encryption capability first, either self-encrypting drives or the AOS software encryption feature, together with a key management configuration; on clusters that support per-container scope it is then set per container, and `ncli container edit name=<container> enable-software-encryption=true` does the same from the command line.
+
+        **Why this matters**
+
+        A storage container is where guest virtual disks physically live, so its encryption state is the encryption state of the workloads placed in it. Checking at this level rather than at the cluster level matters because the scope can differ: a cluster that reports encryption enabled may have containers created afterward, or created with a different scope, that are storing data in the clear.
+
+        What plaintext exposes is the media rather than the cluster. Drives leave the building routinely, returned to the vendor under warranty, pulled during a capacity upgrade, or carried out of a decommissioned rack, and any of them read on another machine yields the extents of the guest disks that lived there. That path requires no credential, no network access, and produces no log entry anywhere.
+
+        Encryption also changes what retiring hardware costs. Destroying the keys makes the media unreadable, so drives can be retired without physical destruction and without depending on a chain of custody being followed.
+
+        Encryption cannot be turned off once enabled, so confirm which capability the cluster actually has before you start. On a cluster with neither self-encrypting drives nor software encryption available, no container can be encrypted until that capability and a key configuration are in place, which a companion check in this policy covers at the cluster level.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to Prism Element (or Prism Central Storage).
+        2. Open Storage, then Storage Containers.
+        3. Confirm encryption is enabled on each user container.
+
+        A passing result shows encryption enabled per container; a failing result shows an unencrypted container.
+
+        ### Audit via CLI
+
+        Run on a Controller VM:
+
+        ```bash
+        ncli container list
+        ```
+
+        A passing result shows each user container with encryption enabled.
+      remediation:
+        - id: console
+          desc: |
+            Encryption cannot be disabled on a container after it is enabled. This check is per container: each user-facing container must report encryption as enabled. Per-container encryption requires the cluster to have an encryption capability, either self-encrypting drives (SED) for hardware encryption or the AOS software-encryption capability. Confirm which the cluster has under Settings, then Data-at-Rest Encryption, before proceeding. Clusters without SEDs must use software encryption, and where neither is available no container can be encrypted until a key management configuration and software encryption are enabled.
+
+            To enable encryption for storage containers using Prism:
+
+            1. Ensure a key management configuration is in place under Settings, then Key Management Server, or use the local key manager.
+            2. Open Settings, then Data-at-Rest Encryption, and click Edit Configuration.
+            3. Enable encryption at the level the cluster supports: cluster-wide where only that scope is offered, or per container on clusters whose capability allows it, then save.
+            4. Confirm each user container reports encryption as enabled. On a Controller VM, `ncli container ls` lists each container with its encryption state.
+        - id: cli
+          desc: |
+            To enable software encryption on a single storage container using the CLI, run on a Controller VM. A key management configuration must already be in place, and encryption cannot be turned off again once it is enabled:
+
+            ```bash
+            ncli container edit name=<container-name> enable-software-encryption=true
+            ```
+
+            Confirm the result with `ncli container ls`, which lists each container with its encryption state.
+
+  - uid: mondoo-nutanix-security-storage-container-nfs-allowlist
+    title: Ensure storage container NFS allowlists are restricted
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a9
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-3
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-5-2-7
+    mql: |
+      nutanix.storageContainers.where(isInternal == false).all(nfsWhitelistAddresses.all(_ != "0.0.0.0" && _ != "0.0.0.0/0" && _ != "0.0.0.0/0.0.0.0"))
+    docs:
+      desc: |
+        This check verifies that no user-facing storage container carries a wide-open entry in its own NFS allowlist.
+
+        Each container can have a filesystem allowlist independent of the cluster-wide one, edited under Storage, then Storage Containers in Prism. This check fails when a container's list contains `0.0.0.0`, `0.0.0.0/0`, or `0.0.0.0/0.0.0.0`. Remove the open entry with `ncli container remove-from-nfs-whitelist name=<container>` and either add the specific subnets that need access or clear the per-container list entirely, which leaves the container inheriting the restricted cluster-wide allowlist.
+
+        **Why this matters**
+
+        The per-container list is the one that decides access to that container, and a permissive entry here overrides a careful cluster-wide posture. An administrator who has locked down the global allowlist can be entirely unaware that one container was opened during a migration or a troubleshooting session and never closed, because the two lists are reviewed in different places.
+
+        The consequence is direct. NFS as the cluster exposes it authenticates on source address alone and then trusts the client's own claim about which user is making a request, so any host that can route to the data services IP mounts the container and, by claiming to be root locally, reads and writes everything in it. That content is the virtual disks of the VMs placed in that container.
+
+        An attacker who has compromised any machine with a network path to the cluster therefore copies a database VM's disk without touching the VM, without a Prism credential, and without the guest operating system seeing anything. Writing into a running guest's disk is the sharper version, corrupting data or planting content the workload will later read as its own.
+
+        Prefer inheritance over per-container entries so there is one list to review, and re-check after any migration or restore, which is where these entries usually come from.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to Prism Element (or Prism Central Storage).
+        2. Open Storage, then Storage Containers, and review each container's filesystem allowlist.
+        3. Confirm no container allowlist contains `0.0.0.0` (or `0.0.0.0/0`).
+
+        A passing result shows only specific trusted subnets; a failing result shows an open container allowlist.
+
+        ### Audit via CLI
+
+        Run on a Controller VM:
+
+        ```bash
+        ncli container list
+        ```
+
+        A passing result shows each container's NFS allowlist limited to specific subnets.
+      remediation:
+        - id: console
+          desc: |
+            To restrict a container's NFS allowlist using Prism:
+
+            1. Open Storage, then Storage Containers, and update the container's advanced settings.
+            2. Remove any open entry such as `0.0.0.0/0.0.0.0` from the container's filesystem allowlist.
+            3. Add only the specific subnets that require access, or clear the per-container list so the container inherits the restricted global allowlist.
+        - id: cli
+          desc: |
+            To remove an open entry from a container's NFS allowlist and replace it with the specific subnets that need access, run on a Controller VM:
+
+            ```bash
+            ncli container remove-from-nfs-whitelist name=<container-name> ip-subnet-masks="0.0.0.0/0.0.0.0"
+            ncli container add-to-nfs-whitelist name=<container-name> ip-subnet-masks="10.20.0.0/255.255.0.0"
+            ```
+
+            Removing every per-container entry leaves the container inheriting the restricted global allowlist. Confirm the result with `ncli container ls`, which lists each container with its NFS allowlist.
+
+  - uid: mondoo-nutanix-security-storage-container-replication-factor
+    title: Ensure storage containers use a replication factor of at least 2
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a20
+      compliance/csa-cloud-controls-matrix-4: false
+      compliance/dora: dora-art-11
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-14
+      compliance/nis-2: nis-2-21-2-c
+      compliance/nist-csf-1: nist-csf-1-pr-pt-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-03
+      compliance/nist-sp-800-171: false
+      compliance/nist-sp-800-53-rev5: false
+      compliance/owasp-top-10-2025: false
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: vda-isa-5-3-1-2
+    mql: |
+      nutanix.storageContainers.where(isInternal == false).all(replicationFactor >= 2)
+    docs:
+      desc: |
+        This check verifies that each user-facing storage container keeps at least two copies of its data.
+
+        The replication factor is shown per container under Storage, then Storage Containers in Prism and is set with `ncli container edit name=<container> rf=2` on a Controller VM. It is a per-container setting, so a container created with a replication factor of 1 stores a single copy even on a cluster whose redundancy factor allows two. The cluster must have the node count and redundancy factor to support the target before a container can use it.
+
+        **Why this matters**
+
+        With one copy, there is no recovery from ordinary hardware failure. A drive failure permanently destroys whatever extents lived on it, and those extents belong to the virtual disks of every VM placed in that container, so a single component failure damages multiple unrelated workloads at once rather than one. A node failure removes everything it held. There is no rebuild to wait for, because there is nothing to rebuild from.
+
+        The reach is what makes the per-container setting worth checking separately from the cluster one. Anyone can create a container, and a container built for a workload someone considered unimportant frequently ends up holding VMs that matter, because placement decisions are made later and by different people than the container was.
+
+        Single-copy storage also removes the cluster's ability to maintain itself safely. Replacing a disk, patching a node, and upgrading AOS all take a node out of service, and each of those becomes an availability event for that container instead of a routine operation.
+
+        Raising the factor requires free capacity for the additional copy, and the cluster has to be able to support it, so confirm both before changing it and expect the cluster to spend time writing the second copy afterward.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to Prism Element (or Prism Central Storage).
+        2. Open Storage, then Storage Containers.
+        3. Confirm each user container's replication factor is 2 or higher.
+
+        A passing result shows a replication factor of 2 or more; a failing result shows 1.
+
+        ### Audit via CLI
+
+        Run on a Controller VM:
+
+        ```bash
+        ncli container list
+        ```
+
+        A passing result shows each user container with a replication factor of 2 or higher.
+      remediation:
+        - id: console
+          desc: |
+            To raise a container's replication factor using Prism:
+
+            1. Ensure the cluster has the redundancy factor and node count to support RF2.
+            2. Open Storage, then Storage Containers, and edit the container.
+            3. Set the replication factor to 2 or higher and save.
+        - id: cli
+          desc: |
+            To set a container's replication factor using the CLI, run on a Controller VM:
+
+            ```bash
+            ncli container edit name=<container-name> rf=2
+            ```

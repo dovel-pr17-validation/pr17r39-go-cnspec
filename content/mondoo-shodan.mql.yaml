@@ -1,0 +1,407 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+policies:
+  - uid: mondoo-shodan
+    name: Mondoo Shodan Security
+    version: 1.2.2
+    license: BUSL-1.1
+    tags:
+      mondoo.com/category: security
+      mondoo.com/platform: shodan,saas
+      mondoo.com/icon: shodan
+    require:
+      - provider: shodan
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    summary: Detect open ports and known vulnerabilities on Shodan-scanned hosts and domains
+    docs:
+      desc: |-
+        The Mondoo Shodan Security policy provides security guidelines for hosts, networks, and IP addresses that are scanned by Shodan, a search engine for internet-connected devices. It confirms Shodan membership status and checks Shodan findings for vulnerabilities and open ports.
+
+        ## Join the community!
+
+        Our goal is to build policies that are simple to deploy, accurate, and actionable.
+
+        If you have any suggestions for how to improve this policy, or if you need support, [join the community](https://github.com/orgs/mondoohq/discussions) in GitHub Discussions.
+    groups:
+      - title: IP address checks
+        filters: asset.platform == "shodan-host"
+        checks:
+          - uid: mondoo-shodan-no-port
+          - uid: mondoo-shodan-vulnerabilities
+      - title: Shodan organization checks
+        filters: asset.platform == "shodan-org"
+        checks:
+          - uid: mondoo-shodan-membership
+      - title: Domain checks
+        filters: asset.platform == "shodan-domain"
+        checks:
+          - uid: mondoo-shodan-domain-no-vulnerable-hosts
+          - uid: mondoo-shodan-domain-ns-redundancy
+    scoring_system: average
+queries:
+  - uid: mondoo-shodan-membership
+    title: Verify Shodan membership
+    impact: 50
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: false
+      compliance/dora: false
+      compliance/hipaa: false
+      compliance/iso-27001-2022: false
+      compliance/nis-2: false
+      compliance/nist-csf-1: false
+      compliance/nist-csf-2: false
+      compliance/nist-sp-800-53-rev5: false
+      compliance/nist-sp-800-171: false
+      compliance/owasp-top-10-2025: false
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: false
+    filters: asset.platform == "shodan-org"
+    mql: shodan.profile.member == true
+    docs:
+      desc: |
+        This check verifies that the account used to observe the organization's internet-facing estate holds the entitlements that external exposure monitoring depends on.
+
+        Shodan sells access in tiers. A free account can look up a handful of addresses and run a small number of searches. A paid membership adds API access, on-demand scan submission, network monitoring, and the query and scan credits that make it practical to sweep an entire address range. Membership status appears on the account overview page of the Shodan website, and this check requires that the account report an active membership.
+
+        **Why this matters**
+
+        The rest of this policy is only as good as the account behind it. Every other check here asks Shodan what the internet can already see about a host or a domain, and the answers arrive through the API. When a membership lapses, those queries stop returning data rather than returning wrong data, so the failure is quiet. A scan that used to enumerate open ports and known vulnerabilities across an estate reports nothing, and nothing looks a great deal like clean.
+
+        Credits matter as much as access. Query and scan credits are what let an operator re-scan an address after closing a port instead of waiting days for the next crawl, and what let a sweep cover every address in a range rather than the first few. An estate assessed on a sampled subset produces a picture that is accurate about what it examined and silent about the rest, and the addresses that go unexamined are exactly the ones an attacker enumerating the range will reach.
+
+        Membership also decides whether monitoring is continuous or occasional. Network monitoring alerts on newly opened ports and newly published vulnerabilities against registered addresses, which is the difference between learning about an exposed management interface within a day and learning about it from whoever found it first.
+
+        This check reports on the assessing account rather than on anything the organization operates, so a failure belongs to whoever owns the tooling rather than to a system owner. If external exposure monitoring is deliberately handled by another product, this policy is not the right one to run against the organization.
+      audit: |-
+        Verify your organization's Shodan membership status using Shodan's own tooling:
+
+        ### Audit via the Shodan website
+
+        1. Log in to your account at [shodan.io](https://www.shodan.io/).
+        2. Open your [account overview](https://account.shodan.io/).
+        3. Review the **Account Type** and any displayed query and scan credits.
+
+        A passing account shows an active membership tier; a failing account shows a free or expired plan.
+
+        ### Audit via the Shodan API
+
+        1. Run the following command with your API key:
+
+        ```bash
+        curl -s "https://api.shodan.io/account/profile?key=$SHODAN_API_KEY"
+        ```
+
+        2. Review the `member` field in the JSON response.
+
+        A passing account returns `"member": true`; a failing account returns `"member": false`.
+      remediation:
+        - id: console
+          desc: |
+            **Using the Shodan website**
+
+            Verify and maintain your organization's Shodan membership:
+
+            1. Log in to your Shodan account at [shodan.io](https://www.shodan.io/).
+            2. Navigate to your account settings and verify that your membership is active.
+            3. Confirm that the membership tier provides the features your organization requires, such as API access, scanning credits, and network monitoring.
+            4. If the membership has expired, renew it through the Shodan billing portal.
+            5. If no membership exists, purchase an appropriate plan based on your organization's security monitoring needs.
+    refs:
+      - url: https://www.shodan.io/
+        title: Shodan
+  - uid: mondoo-shodan-no-port
+    title: Ensure no ports are open
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: false
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-2-2-4
+      compliance/soc2-2017: soc2-control-cc6-6-1
+      compliance/vda-isa-5: false
+    filters: |
+      asset.platform == "shodan-host" &&
+      shodan.host.ip == regex.ipv4
+    mql: shodan.host.ports == empty
+    docs:
+      desc: |
+        This check verifies that the host presents no internet-reachable service, by confirming that Shodan's index holds no open ports for its public address.
+
+        Shodan crawls the public address space continuously, connects to every port that answers, and publishes what came back along with the address, the software and version named in the banner, the hosting provider, and the country. The record for a single address is browsable on the Shodan website and searchable by anyone. This check requires that the record list no ports at all.
+
+        **Why this matters**
+
+        An open port here is not a theoretical exposure. It is a published one. Shodan's search syntax lets anyone select hosts by port, product, version, organization, and country in a single query, so an attacker who wants every reachable instance of a particular database or remote-access product does not scan for it. They ask for the list and receive it already fingerprinted. Reconnaissance that once cost an internet-wide scan now costs a search.
+
+        That inverts the usual assumption about obscure services. A management interface on an unusual port, a database someone opened for an afternoon, a camera or a printer that was racked and forgotten: none of these are hard to find, because the finding was done in advance by a crawler that visits everything. The gap between exposing a service and appearing in someone's target list is a crawl interval, not a discovery effort.
+
+        The port is also where an attacker's options begin. Every answering service is an authentication surface to spray credentials against, a protocol implementation to send malformed input to, and a version string that says which published exploits are worth trying. A host with nothing listening offers none of that and is skipped for the next entry in the list.
+
+        The fix is usually network placement rather than a setting on the host. Withdraw the address, move the service behind a VPN or a source allowlist, or decommission it. Be careful about what a pass means. It means Shodan has no ports on record, which may be because the host genuinely accepts no connections or because the crawler has not reached it recently. An absent finding is not proof that a host is unreachable, and a present finding may describe a port that has since been closed, because the record carries the time of the last observation rather than the state right now.
+      audit: |-
+        Check the ports Shodan has observed on the host using Shodan's own tooling:
+
+        ### Audit via the Shodan website
+
+        1. Browse to `https://www.shodan.io/host/<ip-address>`, replacing `<ip-address>` with the host's public IP address.
+        2. Review the **Ports** panel for any reachable services.
+
+        A passing host shows no record or no listed ports; a failing host lists one or more reachable services.
+
+        ### Audit via the Shodan CLI
+
+        1. Run `shodan host <ip-address>`.
+        2. Review the `Ports:` line in the output.
+
+        A passing host shows no ports; a failing host lists one or more ports reachable from the internet.
+      remediation:
+        - id: host
+          desc: |
+            **On the affected host**
+
+            Review the open ports identified by Shodan and close any exposure that is not required:
+
+            1. Identify the service listening on each open port, for example with `ss -tlnp` on Linux.
+            2. Stop and disable services that are not required, and block their ports at the host or network firewall so they are no longer reachable from the internet.
+            3. For required services, restrict access to trusted source networks using firewall rules or a VPN, and enforce authentication and encryption.
+            4. Verify from an external network that the ports no longer accept connections.
+            5. Request an on-demand Shodan re-scan, which consumes a scan credit, or wait for Shodan's next crawl:
+
+            ```bash
+            shodan scan submit 198.51.100.7
+            ```
+
+            This check reads Shodan's cached view of the host, so it continues to fail until Shodan re-scans the host and its records reflect the closed ports.
+    refs:
+      - url: https://www.shodan.io/
+        title: Shodan
+  - uid: mondoo-shodan-vulnerabilities
+    title: Ensure no vulnerabilities are detected
+    impact: 90
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-id-ra-1
+      compliance/nist-csf-2: nist-csf-2-id-ra-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a03
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: soc2-control-cc7-1-5
+      compliance/vda-isa-5: vda-isa-5-5-2-5
+    filters: |
+      asset.platform == "shodan-host" &&
+      shodan.host.ip == regex.ipv4
+    mql: shodan.host.vulns == empty
+    docs:
+      desc: |
+        This check verifies that the host's internet-facing software carries no publicly indexed vulnerability, by confirming that Shodan associates no CVE with its public address.
+
+        When Shodan connects to a port it records the service banner, and where that banner names a product and a version it matches the pair against published CVE data and attaches the result to the host record. The list appears on the host's page on the Shodan website and in the command line output for that address. This check requires the list to be empty.
+
+        **Why this matters**
+
+        A CVE on a host record is a finished piece of attacker research. Finding a reachable instance, fingerprinting what it runs, and deciding which published exploit applies has already been done and published, and Shodan's search syntax returns every indexed host carrying a given CVE. Within hours of a widely exploited vulnerability being disclosed, that query is how mass exploitation campaigns assemble their target list, and a host on it is attacked because it is on the list rather than because anyone chose it.
+
+        Timing is what makes the exposure expensive. The interval between a proof of concept appearing and opportunistic scanning arriving is routinely measured in days, and an internet-facing service that lags a patch cycle spends that interval visible to everyone running the query. The perimeter is the worst place to carry that lag, because a foothold there needs no phishing, no insider, and no prior access.
+
+        A flagged CVE is also frequently the visible part of a larger gap. Version-derived findings usually indicate a service that has not been updated in some time, so the named CVE sits alongside every other issue fixed in the releases that were skipped, including ones with no banner-visible signature at all.
+
+        Confirm a finding against the installed software before acting on it, and confirm a clean result before trusting it. Shodan reads the version a service advertises, so a distribution that backports a fix without changing that string leaves the CVE listed against a host that is genuinely patched, while a host whose banner has been suppressed or rewritten shows nothing and remains vulnerable. A clean result is also only as fresh as the last crawl. After patching, request a re-scan rather than waiting for the record to catch up on its own.
+      audit: |-
+        Check the vulnerabilities Shodan has associated with the host using Shodan's own tooling:
+
+        ### Audit via the Shodan website
+
+        1. Browse to `https://www.shodan.io/host/<ip-address>`, replacing `<ip-address>` with the host's public IP address.
+        2. Review the **Vulnerabilities** section for any listed CVEs.
+
+        A passing host shows no Vulnerabilities section; a failing host lists one or more CVEs.
+
+        ### Audit via the Shodan CLI
+
+        1. Run `shodan host <ip-address>`.
+        2. Review the output for a `Vulnerabilities:` section.
+
+        A passing host shows no `Vulnerabilities:` section; a failing host lists one or more CVEs.
+      remediation:
+        - id: host
+          desc: |
+            **On the affected host**
+
+            Review the vulnerabilities identified by Shodan and remediate them at the source:
+
+            1. Cross-reference the detected CVEs with vendor advisories and the National Vulnerability Database (NVD).
+            2. Apply available patches or upgrade the affected services to a fixed release. Shodan derives most findings from the version string in the service banner, so the fix must change the version the service reports. Backported fixes that keep the old version string can leave Shodan reporting the CVE even after the host is patched.
+            3. If patches are not available, implement compensating controls such as restricting the service to trusted networks or placing it behind a web application firewall.
+            4. If the vulnerable service is not required, stop and disable it and block its port at the firewall.
+            5. Request an on-demand Shodan re-scan, which consumes a scan credit, or wait for Shodan's next crawl:
+
+            ```bash
+            shodan scan submit 198.51.100.7
+            ```
+
+            This check reads Shodan's cached view of the host, so it continues to fail until Shodan re-scans the host and its records reflect the remediated services.
+    refs:
+      - url: https://www.shodan.io/
+        title: Shodan
+      - url: https://nvd.nist.gov/
+        title: National Vulnerability Database (NVD)
+  - uid: mondoo-shodan-domain-no-vulnerable-hosts
+    title: Ensure no hosts the domain resolves to have known vulnerabilities
+    impact: 90
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-id-ra-1
+      compliance/nist-csf-2: nist-csf-2-id-ra-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a03
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: soc2-control-cc7-1-5
+      compliance/vda-isa-5: vda-isa-5-5-2-5
+    filters: asset.platform == "shodan-domain"
+    mql: shodan.domain.hosts.all(vulns == empty)
+    docs:
+      desc: |
+        This check verifies that everything reachable under the domain is free of publicly indexed vulnerabilities, by confirming that Shodan associates no CVE with any address the domain and its subdomains resolve to.
+
+        Shodan keeps DNS records alongside its host index, so a domain lookup returns the subdomains it knows about and the addresses behind them, and each of those addresses carries its own record of observed services and the CVEs matched against their banners. This check walks that resolved set and requires every host in it to be clean.
+
+        **Why this matters**
+
+        A domain is where enumeration starts. An attacker choosing a target does not begin with an address. They begin with a name, expand it into subdomains using certificate transparency logs and passive DNS, and resolve each one. What comes back is the estate as it actually stands, including the parts nobody on the defending side has an inventory entry for. Reviewing addresses one at a time only ever covers the addresses someone remembered to list.
+
+        The hosts that fail here are rarely the flagship ones. Production is patched because production is watched. It is the staging copy behind a name from a project that ended, the vendor demo someone pointed a subdomain at, the legacy application kept alive for a single customer, that run software years behind and carry the CVEs. Those hosts are equally resolvable and equally indexed, and are often trusted by internal systems in a way an anonymous address on the internet is not, so a foothold there tends to land inside rather than outside.
+
+        Shared naming compounds it. A subdomain still pointing at an address someone else now controls, or at a host in another team's account, extends the domain's standing to infrastructure the domain's owner does not administer. Cookies scoped to a parent domain, certificates issued against a wildcard, and internal allowlists written against the name all follow the delegation wherever it now leads.
+
+        Remediation here frequently means removing a record rather than patching a host. Where a name resolves to something nobody intends to operate, deleting the DNS entry both clears the finding and shrinks the surface permanently. Where the host must stay, patch it and request a re-scan rather than waiting for the crawl, and read a pass narrowly: it says nothing vulnerable was found among the addresses Shodan has observed for this domain, not that the domain publishes nothing else.
+      audit: |-
+        Check the vulnerabilities Shodan associates with the hosts the domain resolves to using Shodan's own tooling:
+
+        ### Audit via the Shodan website
+
+        1. Browse to `https://www.shodan.io/domain/<domain>`, replacing `<domain>` with the domain name, and note the IP addresses listed in the **DNS** records.
+        2. For each address, browse to `https://www.shodan.io/host/<ip-address>` and review the **Vulnerabilities** section for any listed CVEs.
+
+        A passing domain resolves only to hosts that show no Vulnerabilities section; a failing domain resolves to one or more hosts that list CVEs.
+
+        ### Audit via the Shodan CLI
+
+        1. Run `shodan domain <domain>` to list the domain's DNS records and the IP addresses it resolves to.
+        2. For each address, run `shodan host <ip-address>` and review the output for a `Vulnerabilities:` section.
+
+        A passing domain resolves only to hosts with no `Vulnerabilities:` section; a failing domain resolves to one or more hosts that list CVEs.
+      remediation:
+        - id: host
+          desc: |
+            **On the affected hosts**
+
+            Review the vulnerabilities Shodan identified on each host the domain resolves to and remediate them at the source:
+
+            1. Run `shodan domain <domain>` to enumerate the resolved IP addresses, then `shodan host <ip-address>` to list the CVEs on each.
+            2. Cross-reference the detected CVEs with vendor advisories and the National Vulnerability Database (NVD).
+            3. Apply available patches or upgrade the affected services to a fixed release. Shodan derives most findings from the version string in the service banner, so the fix must change the version the service reports. Backported fixes that keep the old version string can leave Shodan reporting the CVE even after the host is patched.
+            4. If a vulnerable service is not required, stop and disable it and block its port at the firewall. If a subdomain points to a host that should no longer be exposed, remove the DNS record.
+            5. Request an on-demand Shodan re-scan, which consumes a scan credit, or wait for Shodan's next crawl:
+
+            ```bash
+            shodan scan submit 198.51.100.7
+            ```
+
+            This check reads Shodan's cached view of each host, so it continues to fail until Shodan re-scans the hosts and its records reflect the remediated services.
+    refs:
+      - url: https://www.shodan.io/
+        title: Shodan
+      - url: https://nvd.nist.gov/
+        title: National Vulnerability Database (NVD)
+  - uid: mondoo-shodan-domain-ns-redundancy
+    title: Ensure the domain has at least two nameservers
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-bcr-11
+      compliance/dora: false
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-14
+      compliance/nis-2: false
+      compliance/nist-csf-1: nist-csf-1-pr-pt-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cp-8
+      compliance/nist-sp-800-171: false
+      compliance/owasp-top-10-2025: false
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: vda-isa-5-5-3-2
+    filters: asset.platform == "shodan-domain"
+    mql: shodan.domain.nsrecords.where(type == "NS").length >= 2
+    docs:
+      desc: |
+        This check verifies that name resolution for the domain survives the loss of a single server, by confirming that the DNS records Shodan holds for the domain list at least two nameservers.
+
+        Delegation records at the registrar tell every resolver on the internet which servers are authoritative for a domain, and resolvers try them in turn until one answers. Shodan records that delegation alongside its index of the domain. This check requires two or more records of type NS. RFC 2182 sets the same floor and asks further that the servers be genuinely independent of one another in network path and location.
+
+        **Why this matters**
+
+        When a domain has one nameserver, that server is the domain. Not one service under it, all of them. Resolvers with nothing else to try return failure, caches expire within the TTL, and mail delivery, API clients, certificate validation, and the website itself stop together. Nothing on the hosts is broken and nothing in the application changed, which is a large part of why this kind of outage takes so long to diagnose.
+
+        A single delegation is also an inviting target. Denial of service against name resolution is unusually efficient, because DNS servers answer small requests from anyone and taking one host off the air removes an entire organization from the internet. Two servers on the same subnet behind the same transit provider barely improve on this. The attacker still has one target, and so does a fiber cut or a misapplied firewall rule.
+
+        Redundancy is also what keeps ordinary maintenance ordinary. With a second authoritative server, patching the first, rebooting it, or migrating it is invisible to users, because resolvers retry elsewhere within a fraction of a second. With one, every routine change becomes a scheduled outage, gets deferred, and the deferred patching of an internet-facing service carries consequences of its own.
+
+        A second server only helps if the zone data on it is complete and current, so pair the change with replication and confirm that each server answers authoritatively before relying on it. Note also that Shodan reports the delegation as it last observed it, so a newly added nameserver may not appear until the next crawl, and the registrar remains the authority on what is actually published.
+      audit: |-
+        Check the nameservers Shodan has recorded for the domain using Shodan's own tooling:
+
+        ### Audit via the Shodan website
+
+        1. Browse to `https://www.shodan.io/domain/<domain>`, replacing `<domain>` with the domain name.
+        2. Review the **DNS** records for entries of type `NS`.
+
+        A passing domain shows two or more `NS` records; a failing domain shows fewer than two.
+
+        ### Audit via the Shodan CLI
+
+        1. Run `shodan domain <domain>`.
+        2. Count the records whose type is `NS`.
+
+        A passing domain lists two or more `NS` records; a failing domain lists fewer than two.
+      remediation:
+        - id: console
+          desc: |
+            **At your DNS hosting provider**
+
+            Add at least one additional nameserver so the domain is served by two or more:
+
+            1. Sign in to the DNS hosting provider or registrar that manages the domain.
+            2. Provision a second nameserver, ideally on a separate network and in a different location from the first for genuine independence.
+            3. Publish identical zone data on every nameserver so they answer consistently, using zone transfers or your provider's replication.
+            4. Update the domain's delegation (the `NS` records at the registrar) to list all nameservers.
+            5. Confirm each nameserver answers authoritatively for the domain, then allow time for Shodan's next crawl to reflect the change.
+    refs:
+      - url: https://www.shodan.io/
+        title: Shodan
+      - url: https://www.rfc-editor.org/info/rfc2182/
+        title: "RFC 2182: Selection and Operation of Secondary DNS Servers"

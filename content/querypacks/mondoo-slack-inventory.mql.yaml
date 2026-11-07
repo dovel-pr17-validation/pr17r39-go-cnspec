@@ -1,0 +1,65 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+
+packs:
+  - uid: mondoo-slack-inventory
+    name: Slack Inventory Pack
+    version: 1.0.0
+    license: BUSL-1.1
+    require:
+      - provider: slack
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    tags:
+      mondoo.com/platform: slack-team,saas
+      mondoo.com/category: best-practices
+      mondoo.com/icon: slack
+    summary: Inventory Slack teams, channels, and users
+    docs:
+      desc: |
+        Inventories a Slack workspace: team domain and ID, users with their MFA status, owners and admins, and externally shared channels.
+
+        Enable this query pack in [Mondoo Platform](https://mondoo.com/platform) to automatically inventory your Slack workspace, or scan it manually with cnspec. Manual scans need a Slack user OAuth token with read scopes; see the [Slack setup guide](https://mondoo.com/docs/cnspec/saas/slack):
+
+        ```bash
+        export SLACK_TOKEN=xoxp-<your token>
+        cnspec scan slack --token $SLACK_TOKEN -f mondoo-slack-inventory.mql.yaml
+        ```
+    filters: asset.platform == "slack" || asset.platform == "slack-team"
+    queries:
+      - uid: mondoo-slack-inventory-team-domain
+        title: Slack Team Domain
+        docs:
+          desc: Returns the Slack workspace domain name.
+        mql: |
+          slack.team.domain
+      - uid: mondoo-slack-inventory-team-id
+        title: Slack Team ID
+        docs:
+          desc: Returns the Slack workspace's unique ID.
+        mql: |
+          slack.team.id
+      - uid: mondoo-slack-inventory-mfa-status
+        title: Slack Team MFA status
+        docs:
+          desc: Every user with email, bot flag, and two-factor status.
+        mql: |
+          slack.users { id name profile["email"] isBot teamId has2FA }
+      - uid: mondoo-slack-inventory-owners
+        title: Slack Team Owners
+        docs:
+          desc: Users with the Owner privilege, and how many there are.
+        mql: |
+          slack.users.owners.length
+          slack.users.owners { id name profile["email"] isBot teamId has2FA }
+      - uid: mondoo-slack-inventory-admins
+        title: Slack Admins
+        docs:
+          desc: Users with the Admin privilege, with ID and name.
+        mql: slack.users.admins { id name }
+      - uid: mondoo-slack-inventory-external-channels
+        title: Externally shared channels
+        docs:
+          desc: Channels shared with external workspaces.
+        mql: slack.conversations.where(isExtShared == true) { id name }

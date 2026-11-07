@@ -1,0 +1,209 @@
+name: Bump mql
+
+on:
+  repository_dispatch:
+    types: [update-mql]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "mql version"
+        required: true
+        type: string
+      dry-run:
+        description: "Skip Create PR (test the base-branch decision only)"
+        type: boolean
+        default: false
+
+jobs:
+  bump-mql:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Check calling user
+        if: ${{ github.event_name == 'repository_dispatch' && github.event.sender.login != 'mondoo-tools' }}
+        run: |
+          echo "This user is not allowed to trigger the workflow"
+          exit 1
+      - name: Determine Version and Validate
+        id: version
+        env:
+          # Determine which version should be released based on event type
+          VERSION: ${{ (github.event_name == 'workflow_dispatch' && inputs.version) || github.event.client_payload.version }}
+        run: |
+          # Semantic Versioning regex (with optional 'v' prefix and optional
+          # pre-release segment, so 14.0.0-rc.4 is accepted as well as 13.38.1).
+          #
+          # The capture group matters: what lands in $GITHUB_OUTPUT below is
+          # re-emitted from BASH_REMATCH, not from $VERSION, so only the matched
+          # semver can ever reach a workflow environment file. Validating and
+          # then echoing the raw value would leave the output one regex bug away
+          # from an attacker-controlled newline injecting extra step outputs.
+          #
+          # The pre-release group therefore has to sit INSIDE the outer one.
+          # Written as two sibling groups it still validates, and BASH_REMATCH[1]
+          # silently loses the suffix -- v14.0.0-rc.4 would bump cnspec to
+          # v14.0.0, a tag that does not exist, with no error anywhere.
+          if [[ ! "$VERSION" =~ ^(v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$ ]]; then
+            echo "Error: Version is not a valid semantic version: $VERSION"
+            exit 1
+          fi
+          MQL_VERSION="${BASH_REMATCH[1]}"
+          echo "Version: $MQL_VERSION"
+          echo "version=$MQL_VERSION" >> "$GITHUB_OUTPUT"
+      # Sparse-checkout the scripts dir before we know the target branch, so
+      # we can run determine-mql-bump-base.sh to figure out where to open the
+      # bump PR. The full checkout of the target branch happens further down.
+      # It goes in its own directory: dropping it in the workspace root left
+      # the second checkout reusing this repo, and switching a sparse working
+      # tree to another branch fails per file ("not uptodate; will not remove
+      # from working tree") without failing the step, so the base branch was
+      # never materialized and .github/env came up missing.
+      - name: Checkout scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: '.github/scripts'
+          sparse-checkout-cone-mode: false
+          path: .bump-scripts
+      # Route the bump PR to the right branch. When main's go.mod carries a
+      # major-suffixed mql import, the incoming major is compared against
+      # it: matching -> base=main, otherwise -> base=v{major}. mql dropped
+      # the suffix for its v14 line, so when main pins the unversioned
+      # go.mondoo.com/mql there is no major to compare and the v{major}
+      # branches of the two repos decide instead: cnspec has v{major} ->
+      # base=v{major} (an mql v13.36.0 tag while main tracks v14 -> v13);
+      # only mql has it -> error, because the release comes from an mql
+      # maintenance line cnspec has not branched off; neither has it ->
+      # base=main. Logic lives in .github/scripts/determine-mql-bump-base.sh
+      # and is unit-tested via .github/scripts/tests/determine-mql-bump-base.bats.
+      - name: Determine base branch
+        id: base
+        env:
+          MQL_VERSION: ${{ steps.version.outputs.version }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BASE=$(.bump-scripts/.github/scripts/determine-mql-bump-base.sh "$MQL_VERSION")
+          echo "Release major: ${MQL_VERSION%%.*}, resolved base branch: ${BASE}"
+          echo "base=${BASE}" >> "$GITHUB_OUTPUT"
+      # Mint a short-lived installation token from the mondoo-mergebot
+      # GitHub App. App tokens bypass the same "PRs created by GITHUB_TOKEN
+      # don't trigger downstream workflows" limit that motivated the old
+      # CNSPEC_DEPLOY_KEY_PRIV SSH deploy key, so the checkout and the
+      # subsequent peter-evans/create-pull-request can both use it.
+      - name: Generate mergebot token
+        id: generate-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.MONDOO_MERGEBOT_APP_ID }}
+          private-key: ${{ secrets.MONDOO_MERGEBOT_APP_PRIVATE_KEY }}
+          owner: mondoohq
+          repositories: cnspec
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          token: ${{ steps.generate-token.outputs.token }}
+          ref: ${{ steps.base.outputs.base }}
+
+      - name: Import environment variables from file
+        run: cat ".github/env" >> "$GITHUB_ENV"
+      - name: Install Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "${{ env.golang-version }}"
+          check-latest: true
+          cache: false
+      - name: Bump mql
+        env:
+          MQL_VERSION: ${{ steps.version.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Take the module path from the branch we are bumping: support
+          # branches import go.mondoo.com/mql/v{major}, while main tracks
+          # mql's unversioned path. Matching a version after the path skips
+          # the commented-out replace directive at the top of go.mod.
+          MQL_MODULE=$(grep -oE 'go\.mondoo\.com/mql(/v[0-9]+)?[[:space:]]+v[0-9]' go.mod | head -1 | awk '{print $1}')
+          if [ -z "${MQL_MODULE}" ]; then
+            echo "Could not find an mql import in go.mod"
+            exit 1
+          fi
+          # Two cases:
+          #  - mql module path is versioned (e.g. go.mondoo.com/mql/v13):
+          #    go accepts a v13.x.y semver reference directly.
+          #  - mql module path is unversioned (e.g. go.mondoo.com/mql):
+          #    Go rejects v2+ semver references ("major version must be
+          #    compatible: should be v0 or v1"). Resolve the tag to a
+          #    commit SHA and use a pseudo-version instead. This matches
+          #    what cnspec/main is already doing today.
+          if [[ "${MQL_MODULE}" =~ /v[0-9]+$ ]]; then
+            REF="${MQL_VERSION}"
+          else
+            # /commits/<ref>, not /git/refs/tags/<tag>: for an ANNOTATED tag
+            # the latter's .object.sha is the tag object, not the commit, and
+            # `go get` on it fails. Every mql tag is lightweight today, but
+            # nothing enforces that -- a tag created through the releases API,
+            # or with `git tag -m`, is annotated. This endpoint resolves either
+            # kind to the commit.
+            REF=$(gh api "/repos/mondoohq/mql/commits/${MQL_VERSION}" --jq '.sha')
+            if [ -z "${REF}" ]; then
+              echo "Could not resolve ${MQL_VERSION} to a commit SHA on mondoohq/mql"
+              exit 1
+            fi
+            echo "Resolved ${MQL_VERSION} -> ${REF} (unversioned mql module path)"
+          fi
+          go get "${MQL_MODULE}@${REF}"
+          go mod tidy
+          echo "${MQL_VERSION}" > VERSION
+
+      - name: Prepare title and branch name
+        id: branch
+        env:
+          MQL_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          BRANCH_NAME="version/mql_update_${MQL_VERSION}"
+          COMMIT_MSG="🧹 Bump mql to ${MQL_VERSION}"
+          echo "COMMIT_TITLE=${COMMIT_MSG}" >> "$GITHUB_OUTPUT"
+          echo "BRANCH_NAME=${BRANCH_NAME}" >> "$GITHUB_OUTPUT"
+
+      # Dry-run: print what the PR WOULD have looked like, and stop.
+      # Everything above (base decision, go get, VERSION write) still runs
+      # so a workflow_dispatch with dry-run=true exercises the routing end
+      # to end without opening a real PR.
+      - name: Dry run summary
+        if: ${{ inputs.dry-run }}
+        env:
+          MQL_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          echo "::notice::DRY RUN — no PR opened."
+          echo "  version:    ${MQL_VERSION}"
+          echo "  base:       ${{ steps.base.outputs.base }}"
+          echo "  branch:     ${{ steps.branch.outputs.BRANCH_NAME }}"
+          echo "  commit msg: ${{ steps.branch.outputs.COMMIT_TITLE }}"
+          echo
+          echo "Local changes staged for the would-be PR:"
+          git diff --stat
+
+      - name: Create PR
+        id: cpr
+        if: ${{ !inputs.dry-run }}
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ steps.generate-token.outputs.token }}
+          base: ${{ steps.base.outputs.base }}
+          labels: dependencies,go
+          committer: "Mondoo Tools <tools@mondoo.com>"
+          commit-message: ${{ steps.branch.outputs.COMMIT_TITLE }}
+          author: "Mondoo Tools <tools@mondoo.com>"
+          title: ${{ steps.branch.outputs.COMMIT_TITLE }}
+          branch: ${{ steps.branch.outputs.BRANCH_NAME }}
+          body-path: .github/pr-body.md
+
+      - name: PR infos
+        if: ${{ !inputs.dry-run && steps.cpr.outputs.pull-request-number }}
+        env:
+          PR_NUMBER: ${{ steps.cpr.outputs.pull-request-number }}
+          PR_URL: ${{ steps.cpr.outputs.pull-request-url }}
+        run: |
+          echo "Pull Request Number - ${PR_NUMBER}"
+          echo "Pull Request URL - ${PR_URL}"

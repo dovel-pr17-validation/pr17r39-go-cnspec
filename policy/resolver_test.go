@@ -1,0 +1,70 @@
+// Copyright Mondoo, Inc. 2024, 2026
+// SPDX-License-Identifier: BUSL-1.1
+
+package policy_test
+
+import (
+	"context"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+	"go.mondoo.com/cnspec/internal/datalakes/inmemory"
+	"go.mondoo.com/cnspec/policy"
+	"go.mondoo.com/mql/providers-sdk/v1/testutils"
+)
+
+type testAsset struct {
+	asset      string
+	policies   []string
+	frameworks []string
+}
+
+func parseBundle(t *testing.T, data string) *policy.Bundle {
+	res, err := policy.BundleFromYAML([]byte(data))
+	require.NoError(t, err)
+	return res
+}
+
+func initResolver(t *testing.T, assets []*testAsset, bundles []*policy.Bundle) *policy.LocalServices {
+	runtime := testutils.LinuxMock()
+	_, srv, err := inmemory.NewServices(runtime)
+	require.NoError(t, err)
+
+	for i := range bundles {
+		bundle := bundles[i]
+		_, err := srv.SetBundle(context.Background(), bundle)
+		require.NoError(t, err)
+	}
+
+	for i := range assets {
+		asset := assets[i]
+		_, err := srv.Assign(context.Background(), &policy.PolicyAssignment{
+			AssetMrn:      asset.asset,
+			PolicyMrns:    asset.policies,
+			FrameworkMrns: asset.frameworks,
+		})
+		require.NoError(t, err)
+	}
+
+	return srv
+}
+
+func policyMrn(uid string) string {
+	return "//test.sth/policies/" + uid
+}
+
+func frameworkMrn(uid string) string {
+	return "//test.sth/frameworks/" + uid
+}
+
+func controlMrn(uid string) string {
+	return "//test.sth/controls/" + uid
+}
+
+func queryMrn(uid string) string {
+	return "//test.sth/queries/" + uid
+}
+
+func riskFactorMrn(uid string) string {
+	return "//test.sth/risks/" + uid
+}

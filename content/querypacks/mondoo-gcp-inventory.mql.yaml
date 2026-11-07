@@ -1,0 +1,227 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+
+packs:
+  - uid: mondoo-asset-inventory-gcp
+    name: GCP Asset Inventory Pack
+    version: 1.1.0
+    license: BUSL-1.1
+    require:
+      - provider: gcp
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    tags:
+      mondoo.com/platform: gcp,cloud
+      mondoo.com/category: best-practices
+      mondoo.com/icon: gcp
+    summary: Inventory GCP projects, compute, and resources
+    docs:
+      desc: |
+        Inventories a GCP project: project metadata, enabled services, IAM bindings, GKE clusters, Compute Engine instances, and VPC networks.
+
+        Enable this query pack in [Mondoo Platform](https://mondoo.com/platform) to automatically inventory your GCP projects, or scan a project manually with cnspec:
+
+        ```bash
+        cnspec scan gcp project <project_id> -f mondoo-gcp-inventory.mql.yaml
+        ```
+    groups:
+      - uid: mondoo-asset-inventory-gcp-general-group
+        title: GCP General
+        filters: asset.runtime == "gcp"
+        queries:
+          - uid: mondoo-asset-inventory-gcp-project-info
+          - uid: mondoo-asset-inventory-gcp-enabled-services
+      - uid: mondoo-asset-inventory-gcp-iam-group
+        title: Cloud IAM
+        filters: asset.runtime == "gcp"
+        queries:
+          - uid: mondoo-asset-inventory-gcp-project-owners
+          - uid: mondoo-asset-inventory-gcp-project-editors
+          - uid: mondoo-asset-inventory-gcp-iam-roles
+      - uid: mondoo-asset-inventory-gcp-gke-group
+        title: GKE
+        filters: asset.runtime == "gcp"
+        queries:
+          - uid: mondoo-asset-inventory-gcp-gke-clusters-count
+          - uid: mondoo-asset-inventory-gcp-gke-clusters-data
+      - uid: mondoo-asset-inventory-gcp-compute-instances-group
+        title: Compute Engine Instances
+        filters: asset.runtime == "gcp"
+        queries:
+          - uid: mondoo-asset-inventory-gcp-compute-instances-count
+          - uid: mondoo-asset-inventory-gcp-compute-instances-data
+          - uid: mondoo-asset-inventory-gcp-compute-instances-public
+      - uid: mondoo-asset-inventory-gcp-compute-network-group
+        title: Compute Network
+        filters: asset.runtime == "gcp"
+        queries:
+          - uid: mondoo-asset-inventory-gcp-compute-networks-count
+          - uid: mondoo-asset-inventory-gcp-compute-networks-data
+queries:
+  - uid: mondoo-asset-inventory-gcp-project-info
+    title: GCP Project Information
+    filters: asset.platform == "gcp-project"
+    docs:
+      desc: Project name, ID, lifecycle state, and labels.
+    mql: |
+      gcp.project {
+        name
+        id
+        state
+        labels
+      }
+
+  - uid: mondoo-asset-inventory-gcp-project-owners
+    title: GCP project owners
+    filters: asset.platform == "gcp-project"
+    docs:
+      desc: |
+        Lists the IAM members bound to the project owner role.
+    mql: |
+      gcp.project.iamPolicy.where( role == "roles/owner" ) {
+        id
+        members
+      }
+
+  - uid: mondoo-asset-inventory-gcp-project-editors
+    title: GCP project editors
+    filters: asset.platform == "gcp-project"
+    docs:
+      desc: |
+        Lists the IAM members bound to the project editor role.
+    mql: |
+      gcp.project.iamPolicy.where( role == "roles/editors" ) {
+        id
+        members
+      }
+
+  - uid: mondoo-asset-inventory-gcp-iam-roles
+    title: IAM Policy roles
+    filters: asset.platform == "gcp-project"
+    docs:
+      desc: |
+        Lists every IAM role defined in the project's IAM policy.
+    mql: gcp.project.iamPolicy { role }
+
+  - uid: mondoo-asset-inventory-gcp-enabled-services
+    title: Services enabled in the GCP project
+    filters: asset.platform == "gcp-project"
+    docs:
+      desc: Google Cloud APIs and services enabled on the project.
+    mql: gcp.project.services.where( enabled == true )
+
+  - uid: mondoo-asset-inventory-gcp-gke-clusters-count
+    title: GKE clusters count
+    filters: asset.platform == "gcp-project"
+    docs:
+      desc: |
+        Counts the GKE clusters in the project.
+    mql: gcp.project.gke.clusters.length
+
+  - uid: mondoo-asset-inventory-gcp-gke-clusters-data
+    title: GKE clusters configuration
+    docs:
+      desc: Full configuration for each GKE cluster in the project.
+    variants:
+      - uid: mondoo-asset-inventory-gcp-gke-clusters-data-all
+      - uid: mondoo-asset-inventory-gcp-gke-clusters-data-single
+  - uid: mondoo-asset-inventory-gcp-gke-clusters-data-all
+    docs:
+      desc: Every GKE cluster in the project.
+    filters: asset.platform == "gcp-project"
+    mql: |
+      gcp.project.gke.clusters
+  - uid: mondoo-asset-inventory-gcp-gke-clusters-data-single
+    docs:
+      desc: A single GKE cluster asset.
+    filters: asset.platform == "gcp-gke-cluster"
+    mql: |
+      gcp.project.gke.cluster
+
+  - uid: mondoo-asset-inventory-gcp-compute-instances-count
+    title: GCP compute instances count
+    filters: asset.platform == "gcp-project"
+    docs:
+      desc: |
+        Counts running Compute Engine instances.
+    mql: gcp.compute.instances.where( status == "RUNNING" ).length
+
+  - uid: mondoo-asset-inventory-gcp-compute-instances-data
+    title: GCP compute instances
+    docs:
+      desc: Full configuration of every running Compute Engine instance.
+    variants:
+      - uid: mondoo-asset-inventory-gcp-compute-instances-data-all
+      - uid: mondoo-asset-inventory-gcp-compute-instances-data-single
+  - uid: mondoo-asset-inventory-gcp-compute-instances-data-all
+    docs:
+      desc: Every running Compute Engine instance in the project.
+    filters: asset.platform == "gcp-project"
+    mql: |
+      gcp.compute.instances.where( status == "RUNNING" )
+  - uid: mondoo-asset-inventory-gcp-compute-instances-data-single
+    docs:
+      desc: A single Compute Engine instance asset.
+    filters: |
+      asset.platform == "gcp-compute-instance" &&
+      gcp.compute.instance.status == "RUNNING"
+    mql: |
+      gcp.compute.instance
+
+  - uid: mondoo-asset-inventory-gcp-compute-instances-public
+    title: GCP Compute Engine instances
+    docs:
+      desc: Instances with an external NAT IP, reachable from anywhere.
+    variants:
+      - uid: mondoo-asset-inventory-gcp-compute-instances-public-all
+      - uid: mondoo-asset-inventory-gcp-compute-instances-public-single
+  - uid: mondoo-asset-inventory-gcp-compute-instances-public-all
+    docs:
+      desc: Project instances holding an external NAT IP address.
+    filters: asset.platform == "gcp-project"
+    mql: |
+      gcp.compute.instances.where(nics.where(_.accessConfigs.where(_['name'] == "External NAT")))
+  - uid: mondoo-asset-inventory-gcp-compute-instances-public-single
+    docs:
+      desc: External access configuration for a single instance.
+    filters: |
+      asset.platform == "gcp-compute-instance" &&
+      gcp.compute.instance.nics.any(_.accessConfigs.where(_['name'] == "External NAT"))
+    mql: |
+      gcp.compute.instance
+
+  - uid: mondoo-asset-inventory-gcp-compute-networks-count
+    title: GCP Compute Engine networks count
+    filters: asset.platform == "gcp-project"
+    docs:
+      desc: |
+        Counts the VPC networks configured in the project.
+    mql: gcp.compute.networks.length
+
+  - uid: mondoo-asset-inventory-gcp-compute-networks-data
+    title: GCP Compute Engine networks
+    docs:
+      desc: Configuration of every VPC network in the project.
+    variants:
+      - uid: mondoo-asset-inventory-gcp-compute-networks-data-all
+      - uid: mondoo-asset-inventory-gcp-compute-networks-data-single
+      - uid: mondoo-asset-inventory-gcp-compute-networks-data-subnet
+  - uid: mondoo-asset-inventory-gcp-compute-networks-data-all
+    docs:
+      desc: Every VPC network in the project.
+    filters: asset.platform == "gcp-project"
+    mql: |
+      gcp.compute.networks
+  - uid: mondoo-asset-inventory-gcp-compute-networks-data-single
+    docs:
+      desc: A single VPC network asset.
+    filters: asset.platform == "gcp-compute-network"
+    mql: |
+      gcp.compute.network
+  - uid: mondoo-asset-inventory-gcp-compute-networks-data-subnet
+    docs:
+      desc: A single VPC subnetwork asset.
+    filters: asset.platform == "gcp-compute-subnetwork"
+    mql: |
+      gcp.compute.subnetwork

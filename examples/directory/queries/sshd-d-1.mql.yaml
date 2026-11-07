@@ -1,0 +1,7 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+
+queries:
+  - uid: sshd-d-1
+    title: Gather SSH config params
+    query: sshd.config.params

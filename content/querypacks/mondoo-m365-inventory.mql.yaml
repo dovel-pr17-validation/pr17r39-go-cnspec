@@ -1,0 +1,251 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+
+packs:
+  - uid: mondoo-m365-inventory
+    name: Microsoft 365 Inventory Pack
+    version: 1.0.0
+    license: BUSL-1.1
+    require:
+      - provider: ms365
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    tags:
+      mondoo.com/platform: microsoft365,saas
+      mondoo.com/category: best-practices
+      mondoo.com/icon: ms365
+    summary: Inventory Microsoft 365 users, groups, and resources
+    docs:
+      desc: |
+        Inventories a Microsoft 365 tenant: organization and subscription details, users, groups, applications, service principals, directory roles, domains, Intune device management, identity policies, and Secure Score.
+
+        Enable this query pack in [Mondoo Platform](https://mondoo.com/platform) to automatically inventory your Microsoft 365 tenant, or scan it manually with cnspec. Manual scans need app registration credentials; see the [Microsoft 365 setup guide](https://mondoo.com/docs/cnspec/saas/m365):
+
+        ```bash
+        cnspec scan ms365 --certificate-path certificate.pem --tenant-id <tenant_id> --client-id <client_id> -f mondoo-m365-inventory.mql.yaml
+        ```
+    groups:
+      - title: Organization
+        filters: asset.platform == "microsoft365" || asset.runtime == "ms-graph"
+        queries:
+          - uid: mondoo-asset-inventory-m365-tenant-id
+            title: Tenant ID
+            docs:
+              desc: Returns the tenant's unique identifier.
+            mql: |
+              microsoft.tenant.id
+          - uid: mondoo-asset-inventory-m365-tenant-name
+            title: Tenant Name
+            docs:
+              desc: Returns the tenant's display name.
+            mql: |
+              microsoft.tenant.name
+          - uid: mondoo-asset-inventory-m365-tenant-doamin-name
+            title: Organization Tenant Domain Name
+            docs:
+              desc: Returns the tenant's primary domain name.
+            mql: |
+              microsoft.tenantDomainName
+          - uid: mondoo-asset-inventory-m365-tenant-assigned-plans
+            title: Tenant Assigned Plans
+            docs:
+              desc: Lists the service plans assigned to the tenant.
+            mql: |
+              microsoft.tenant.assignedPlans
+          - uid: mondoo-asset-inventory-m365-tenant-provisioned-plans
+            title: Tenant Provisioned Plans
+            docs:
+              desc: Lists the provisioned service plans for the tenant.
+            mql: |
+              microsoft.tenant.provisionedPlans
+          - uid: mondoo-asset-inventory-m365-tenant-created
+            title: Tenant Created
+            docs:
+              desc: Returns the tenant's creation timestamp.
+            mql: |
+              microsoft.tenant.createdAt
+          - uid: mondoo-asset-inventory-m365-organization-subscriptions
+            title: Organization Subscriptions
+            docs:
+              desc: Lists the subscriptions associated with the tenant.
+            mql: |
+              microsoft.tenant.subscriptions
+
+      - title: Groups
+        filters: asset.platform == "microsoft365" || asset.runtime == "ms-graph"
+        queries:
+          - uid: mondoo-asset-inventory-m365-groups
+            title: Groups
+            docs:
+              desc: Lists the Microsoft 365 groups in the organization.
+            mql: |
+              microsoft.groups
+          - uid: mondoo-asset-inventory-m365-groups-public
+            title: Public Groups and their Members
+            docs:
+              desc: Public-visibility groups with their members.
+            mql: |
+              microsoft.groups.where (visibility == "Public") {id displayName securityEnabled members}
+          - uid: mondoo-asset-inventory-m365-groups-security-enabled
+            title: Groups no Security enabled
+            docs:
+              desc: Groups that are not security-enabled, with members.
+            mql: |
+              microsoft.groups.where (securityEnabled == false) {id displayName securityEnabled members}
+
+      - title: Applications
+        filters: asset.platform == "microsoft365" || asset.runtime == "ms-graph"
+        queries:
+          - uid: mondoo-asset-inventory-m365-applications
+            title: Applications
+            docs:
+              desc: Lists the applications registered in Microsoft Entra ID.
+            mql: |
+              microsoft.applications
+          - uid: mondoo-asset-inventory-m365-applications-expired-credentials
+            title: Applications with expired credentials
+            docs:
+              desc: Applications with expired credentials, and their owners.
+            mql: |
+              microsoft.applications.where(hasExpiredCredentials == true) {appId name owners createdAt servicePrincipal}
+          - uid: mondoo-asset-inventory-m365-enterprise-applications
+            title: Enterprise Applications
+            docs:
+              desc: Enterprise applications, the tenant's service principals.
+            mql: |
+              microsoft.enterpriseApplications
+
+      - title: Device Management
+        filters: asset.platform == "microsoft365" || asset.runtime == "ms-graph"
+        queries:
+          - uid: mondoo-asset-inventory-m365-device-management-device-compliance-policy
+            title: Device Compliance Policy
+            docs:
+              desc: Intune device compliance policies in the tenant.
+            mql: |
+              microsoft.devicemanagement.deviceCompliancePolicies
+          - uid: mondoo-asset-inventory-m365-device-management-device-configurations
+            title: Device Configurations
+            docs:
+              desc: Intune device configuration profiles in the tenant.
+            mql: |
+              microsoft.devicemanagement.deviceConfigurations
+
+      - title: Domains
+        filters: asset.platform == "microsoft365" || asset.runtime == "ms-graph"
+        queries:
+          - uid: mondoo-asset-inventory-m365-domains
+            title: Domains
+            docs:
+              desc: Lists the domains configured in the tenant.
+            mql: |
+              microsoft.domains
+
+      - title: Users
+        filters: asset.platform == "microsoft365" || asset.runtime == "ms-graph"
+        queries:
+          - uid: mondoo-asset-inventory-m365-users
+            title: Users
+            docs:
+              desc: Lists the users in the tenant.
+            mql: |
+              microsoft.users
+          - uid: mondoo-asset-inventory-m365-users-account-enabled
+            title: Users account enabled
+            docs:
+              desc: Users whose accounts are enabled, with their names.
+            mql: |
+              microsoft.users.where(accountEnabled == true) {id givenName surname userPrincipalName}
+          - uid: mondoo-asset-inventory-m365-users-mfa
+            title: Users with no MFA enabled
+            docs:
+              desc: Users without MFA enabled, with their names.
+            mql: |
+              microsoft.users.where(mfaEnabled == false) {id givenName surname userPrincipalName}
+
+      - title: Policies
+        filters: asset.platform == "microsoft365" || asset.runtime == "ms-graph"
+        queries:
+          - uid: mondoo-asset-inventory-m365-policies-admin-consent-request-policy
+            title: Admin Consent Request Policy
+            docs:
+              desc: How users request admin approval for app permissions.
+            mql: |
+              microsoft.policies.adminConsentRequestPolicy
+          - uid: mondoo-asset-inventory-m365-policies-authorization-policy
+            title: Authorization Policy
+            docs:
+              desc: Tenant policy controlling default user permissions.
+            mql: |
+              microsoft.policies.authorizationPolicy
+          - uid: mondoo-asset-inventory-m365-policies-consent-policy-settings
+            title: Consent Policy Settings
+            docs:
+              desc: Settings governing user consent to applications.
+            mql: |
+              microsoft.policies.consentPolicySettings
+          - uid: mondoo-asset-inventory-m365-policies-identity-security-defaults-enforcement-policy
+            title: Identity Security Defaults Enforcement Policy
+            docs:
+              desc: Whether Entra security defaults are enforced.
+            mql: |
+              microsoft.policies.identitySecurityDefaultsEnforcementPolicy
+          - uid: mondoo-asset-inventory-m365-policies-permission-grant-policies
+            title: Permission Grant Policies
+            docs:
+              desc: Policies controlling which permissions users can grant.
+            mql: |
+              microsoft.policies.permissionGrantPolicies
+
+      - title: Roles
+        filters: asset.platform == "microsoft365" || asset.runtime == "ms-graph"
+        queries:
+          - uid: mondoo-asset-inventory-m365-roles
+            title: Roles
+            docs:
+              desc: Lists the directory roles available in Microsoft Entra ID.
+            mql: |
+              microsoft.roles
+
+      - title: Security
+        filters: asset.platform == "microsoft365" || asset.runtime == "ms-graph"
+        queries:
+          - uid: mondoo-asset-inventory-m365-security-latest-secure-scores
+            title: Latest Security Score
+            docs:
+              desc: Latest Microsoft Secure Score, current and maximum.
+            mql: |
+              microsoft.security.latestSecureScores {maxScore currentScore azureTenantId vendorInformation averageComparativeScores activeUserCount}
+          - uid: mondoo-asset-inventory-m365-security-risky-users
+            title: Risky Users
+            docs:
+              desc: Users flagged risky by Entra ID Identity Protection.
+            mql: |
+              microsoft.security.riskyUsers
+
+      - title: Service Principals
+        filters: asset.platform == "microsoft365" || asset.runtime == "ms-graph"
+        queries:
+          - uid: mondoo-asset-inventory-m365-service-principals
+            title: Service Principals
+            docs:
+              desc: Service principals, the app identities in the tenant.
+            mql: |
+              microsoft.serviceprincipals
+          - uid: mondoo-asset-inventory-m365-service-principals-enabled
+            title: Enabled Service Principals
+            docs:
+              desc: Enabled service principals and their permissions.
+            mql: |
+              microsoft.serviceprincipals.where(enabled == true) {id name servicePrincipalNames assignments signInAudience permissions}
+
+      - title: Settings
+        filters: asset.platform == "microsoft365" || asset.runtime == "ms-graph"
+        queries:
+          - uid: mondoo-asset-inventory-m365-group-settings
+            title: Group Settings
+            docs:
+              desc: Directory-level group settings for the tenant.
+            mql: |
+              microsoft.groupSettings

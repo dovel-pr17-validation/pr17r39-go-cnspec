@@ -1,0 +1,1587 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+policies:
+  - uid: mondoo-http-security
+    name: Mondoo HTTP Security
+    version: 1.4.1
+    license: BUSL-1.1
+    tags:
+      mondoo.com/category: security
+      mondoo.com/platform: host
+      mondoo.com/icon: policy
+    require:
+      - provider: network
+    authors:
+      - name: Mondoo, Inc.
+        email: hello@mondoo.com
+    summary: Secure HTTP headers against XSS, clickjacking, and more
+    docs:
+      desc: |
+        The Mondoo HTTP Security policy identifies missing or misconfigured HTTP security headers that could expose web applications to cross-site scripting, clickjacking, MIME-type sniffing, and information disclosure. This policy helps organizations apply defense-in-depth at the HTTP layer, detecting weaknesses before attackers can exploit them to steal session tokens, hijack user actions, or enumerate sensitive server details.
+
+        This policy provides security checks across key HTTP security headers and exposures:
+
+        - Content-Security-Policy
+        - Strict-Transport-Security (HSTS)
+        - X-Content-Type-Options
+        - X-Frame-Options and frame-ancestors
+        - Referrer-Policy and Permissions-Policy
+        - Server and technology fingerprinting headers
+
+        Have suggestions for new checks in this policy? Visit our [cnspec repository](https://github.com/mondoohq/cnspec).
+    groups:
+      # This group's filter is deterministic on purpose. The other groups here
+      # select on `http.get.header != empty` and `tls.certificates != empty`,
+      # both of which reach out over the network to decide whether the group
+      # applies — and when the request cannot be made, the expression errors
+      # rather than returning empty. A filter that errors is not a filter that
+      # is false: the resolver drops the checks behind it from the resolved
+      # policy, so a host with nothing answering on the scanned port came back
+      # with zero checks and a clean score. `asset.platform == 'host'` cannot
+      # fail, so this one check always runs and reports the unreachable endpoint
+      # as the finding it is, while the header groups keep their request filter
+      # and stay quiet rather than failing every header individually.
+      #
+      # That leaves the partial case open: when the host answers but a header
+      # group's own request fails transiently, that group still disappears
+      # without a trace, and this check passes. Observed on a healthy host — one
+      # run of this policy returned the three HSTS checks and the next did not.
+      # Closing it means teaching the resolver to tell a filter that errored
+      # from one that was false, rather than dropping both.
+      - title: HTTP endpoint
+        filters: |
+          asset.platform == 'host'
+        checks:
+          - uid: mondoo-http-security-endpoint-responds
+      - title: Headers for HTTP/HTTPS communication
+        filters: |
+          asset.platform == 'host' && http.get.header != empty
+        checks:
+          - uid: mondoo-http-security-x-content-type-options-nosniff
+          - uid: mondoo-http-security-content-security-policy
+          - uid: mondoo-http-security-obfuscate-server
+          - uid: mondoo-http-security-no-x-powered-by
+          - uid: mondoo-http-security-no-x-aspnet-version
+          - uid: mondoo-http-security-no-x-aspnetmvc-version
+          - uid: mondoo-http-security-no-public-key-pins
+          - uid: mondoo-http-security-x-frame-options
+          - uid: mondoo-http-security-referrer-policy
+      - title: Headers for HTTPS communication
+        # Joined with && rather than left as two lines of a block scalar. Both
+        # forms select the same assets, but a block scalar is a single Mquery
+        # whose statements become independent datapoints that are all evaluated,
+        # so the TLS handshake was attempted against every asset this filter ran
+        # against instead of short-circuiting on the platform test.
+        filters: |
+          asset.platform == 'host' && tls.certificates != empty
+        checks:
+          - uid: mondoo-http-security-strict-transport-security
+          - uid: mondoo-http-security-hsts-max-age
+          - uid: mondoo-http-security-hsts-include-subdomains
+          - uid: mondoo-http-security-hsts-preload
+    scoring_system: highest impact
+queries:
+  - uid: mondoo-http-security-endpoint-responds
+    title: Ensure the host answers an HTTP request
+    impact: 70
+    mql: http.get.header != empty
+    docs:
+      desc: |
+        This check verifies that the scanned host answers an HTTP request with response headers, which is the precondition for every header check in this policy.
+
+        A failure means no HTTP response was obtained at all: nothing is listening on the scanned port, the port is filtered, or the connection was reset before headers were returned. Confirm with `curl -sSI https://<host>/`, which prints the status line and headers when the endpoint answers and the transport error when it does not.
+
+        **Why this matters**
+
+        This check exists because its absence scored the wrong answer. The header groups in this policy select assets with `http.get.header != empty`, an expression that performs the request; when the request cannot be made the expression errors, and a check whose filter errors is dropped from the resolved policy rather than failed. A host that answered nothing therefore reported zero checks and a passing score — indistinguishable, in the report, from a host that returned every security header this policy asks for.
+
+        Treating "no answer" as "nothing to report" also hides the ordinary causes of an unreachable endpoint, which are worth knowing: a service that is down, a listener bound to the wrong interface, or a firewall rule that is broader than intended.
+      audit: |
+        Run `curl -sSI https://<HOST>/` and confirm that a status line and response headers are returned.
+      remediation: |
+        Serve HTTP on the scanned port, or scan the port that is served.
+
+        - Confirm the service is listening on the expected interface: `ss -lntp | grep -E ':(80|443)'`.
+        - Confirm no firewall drops the port: `sudo iptables -L -n | grep -E '(80|443)'`, or the equivalent cloud security-group rule.
+        - If the site is fronted by a load balancer, reverse proxy, or CDN, scan that endpoint — it is where the response headers this policy assesses are set.
+  - uid: mondoo-http-security-x-content-type-options-nosniff
+    title: Set X-Content-Type-Options HTTP header to 'nosniff'
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-23
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-asvs-5: owasp-asvs-5-3-4-4
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: http.get.header.xContentTypeOptions.downcase == "nosniff"
+    docs:
+      desc: |
+        This check verifies that the server tells browsers not to guess the type of a response body.
+
+        The instrument is the `X-Content-Type-Options` response header. The server must send `X-Content-Type-Options: nosniff`, and the check accepts that value in any capitalization. Any other value fails, and so does a response that omits the header.
+
+        **Why this matters**
+
+        Without `nosniff`, browsers fall back to content sniffing. When the declared `Content-Type` looks wrong or generic, the browser inspects the first bytes of the body and decides the type itself. An attacker exploits that by uploading a file the application considers harmless. A user avatar, a support attachment, or an exported document served as `text/plain` or `application/octet-stream` can begin with an HTML tag, and a sniffing browser renders it as `text/html` on the application's own origin. Script in that document then runs with access to the session cookie and to the DOM of a page the user trusts.
+
+        The same failure applies to code. A JSON endpoint or a user-controlled file served without `nosniff` can be pulled in through a `<script>` tag and executed if the browser decides the bytes look like JavaScript, which turns a data endpoint into an execution path for any page that can reach it.
+
+        `nosniff` also makes browsers refuse to execute a script whose response is not declared with a JavaScript MIME type, and refuse a stylesheet that is not `text/css`. That closes the sniffing path, but it also means a server that mislabels its own assets will start breaking pages, so confirm that static assets carry correct `Content-Type` values before rolling the header out.
+
+        Serving untrusted uploads from a separate origin is stronger than the header alone, because it keeps a sniffed document away from the origin that holds the session. Use both.
+      audit: |
+        Use `curl` to inspect the response headers returned by the site:
+
+        1. Request the headers from the target host:
+
+            ```bash
+            curl -sI https://example.com | grep -i '^X-Content-Type-Options:'
+            ```
+
+        2. Review the output.
+
+        A passing result returns `X-Content-Type-Options: nosniff`. A failing result returns no `X-Content-Type-Options` header, or a value other than `nosniff`.
+      remediation:
+        - id: nginx
+          desc: |
+            **Using NGINX**
+
+            1. Open your NGINX configuration file (typically found at `/etc/nginx/nginx.conf` or in a site-specific file under `/etc/nginx/sites-available/`).
+            2. Inside the `server` block, add the following line:
+
+                ```nginx
+                add_header X-Content-Type-Options "nosniff" always;
+                ```
+
+                Put the directive in the `server` block rather than in a nested `location`. NGINX inherits `add_header` from the enclosing level only while the current level declares none of its own, so one `add_header` inside a `location` discards every header the `server` block sets for requests routed there. Where a `location` genuinely needs its own header, repeat the whole set inside it.
+
+                The `always` flag sends the header on error responses as well. Without it NGINX omits the header from a 404 or 500, and an error page whose type a browser is free to sniff is exactly the case this header exists to close.
+
+            3. Save the file and reload NGINX:
+
+                ```bash
+                nginx -s reload
+                ```
+        - id: apache
+          desc: |
+            **Using Apache HTTPD**
+
+            1. Open your Apache configuration file or `.htaccess` file.
+            2. Add the following directive:
+
+                ```apache
+                Header set X-Content-Type-Options "nosniff"
+                ```
+
+            3. Make sure the headers module is enabled:
+
+                ```bash
+                a2enmod headers
+                systemctl restart apache2
+                ```
+        - id: iis
+          desc: |
+            **Using IIS**
+
+            1. Open the IIS Manager.
+            2. Select your site and go to the `HTTP Response Headers` feature.
+            3. Click on `Add` in the right pane.
+            4. Set the name to `X-Content-Type-Options` and the value to `nosniff`.
+            5. Click OK and restart IIS:
+
+                ```bash
+                iisreset
+                ```
+    refs:
+      - url: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/X-Content-Type-Options
+        title: MDN Web Docs X-Content-Type-Options
+      - url: https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html#x-content-type-options
+        title: OWASP HTTP Security Response Headers Cheat Sheet
+  - uid: mondoo-http-security-content-security-policy
+    title: Set Content Security Policy (CSP) HTTP header
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-23
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-asvs-5: owasp-asvs-5-3-4-3
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: http.get.header.params.keys.any(downcase == "content-security-policy")
+    docs:
+      desc: |
+        This check verifies that the server sends a Content Security Policy telling the browser which sources a page may load code and content from.
+
+        The instrument is the `Content-Security-Policy` response header. The server must send it. The check confirms only that a header by that name is present and does not evaluate the directives inside it, so a policy that locks a page down to a single nonce and a policy consisting of nothing useful both pass.
+
+        **Why this matters**
+
+        A Content Security Policy does not prevent cross-site scripting, it caps what an injection can do. Without a policy, injected script runs with the full privileges of the page. It can read the DOM, read tokens held in `localStorage`, submit forms as the user, and post what it collects to any host the attacker chooses. A restrictive policy removes most of those options. A `script-src` directive built on nonces or hashes blocks the inline script the injection produced in the first place, and `connect-src` limits where a script that does run can send what it stole.
+
+        The policy also constrains code you invited. Analytics tags, ad tags, chat widgets, and tag managers execute on your origin with your users' sessions, so a compromise of any of their delivery networks becomes a compromise of your site. Pinning `script-src` to the hosts you actually rely on turns that from a silent takeover into a blocked request.
+
+        The `frame-ancestors` directive is also the modern replacement for `X-Frame-Options` and the only way to permit framing from a specific list of origins.
+
+        A policy that leans on `unsafe-inline` or a wildcard `script-src` passes this check while providing almost none of that protection. Treat a pass as a starting point. Deploy the policy first through `Content-Security-Policy-Report-Only` to find what it breaks, then tighten the directives.
+      audit: |
+        Use `curl` to inspect the response headers returned by the site:
+
+        1. Request the headers from the target host:
+
+            ```bash
+            curl -sI https://example.com | grep -i '^Content-Security-Policy:'
+            ```
+
+        2. Review the output.
+
+        A passing result returns a `Content-Security-Policy` header with a defined directive set. A failing result returns no `Content-Security-Policy` header.
+      remediation:
+        - id: nginx
+          desc: |
+            **Using NGINX**
+
+            A Content Security Policy that is too strict can break legitimate scripts, styles, and images. Deploy it in report-only mode first, fix the violations it reports, and only then switch to the enforcing header. The check passes only once the enforcing `Content-Security-Policy` header is served.
+
+            The `default-src 'self'` value shown below is only a starting skeleton, not a finished policy. On its own it blocks inline styles and scripts, CDNs, analytics, fonts, and embedded media that most real sites depend on. Treat it as the strict baseline you start from, then enumerate the exact sources your application actually loads and add the directives for them, such as the specific `script-src`, `style-src`, `img-src`, and `connect-src` origins your pages request. This is why report-only rollout matters: the violation reports tell you which sources to add before you enforce.
+
+            1. Open your NGINX configuration file, typically `/etc/nginx/nginx.conf` or a site-specific file under `/etc/nginx/sites-available/`.
+            2. Inside the `server` block, add a report-only policy to observe violations without blocking content:
+
+                ```nginx
+                add_header Content-Security-Policy-Report-Only "default-src 'self';" always;
+                ```
+
+                Put the directive in the `server` block rather than in a nested `location`. NGINX inherits `add_header` from the enclosing level only while the current level declares none of its own, so one `add_header` inside a `location` discards every header the `server` block sets for requests routed there. Where a `location` genuinely needs its own header, repeat the whole set inside it.
+
+                The `always` flag sends the header on error responses as well. Without it NGINX omits the header from a 404 or 500, leaving error pages outside the policy.
+
+            3. Save the file and reload NGINX:
+
+                ```bash
+                nginx -s reload
+                ```
+
+            4. Browse the application and review CSP violation reports in the browser console or your reporting endpoint. Extend the policy with the sources your application legitimately needs.
+            5. Once the policy no longer reports violations for legitimate traffic, replace the report-only directive with the enforcing header:
+
+                ```nginx
+                add_header Content-Security-Policy "default-src 'self';" always;
+                ```
+
+            6. Save the file and reload NGINX:
+
+                ```bash
+                nginx -s reload
+                ```
+        - id: apache
+          desc: |
+            **Using Apache HTTPD**
+
+            A Content Security Policy that is too strict can break legitimate scripts, styles, and images. Deploy it in report-only mode first, fix the violations it reports, and only then switch to the enforcing header. The check passes only once the enforcing `Content-Security-Policy` header is served.
+
+            The `default-src 'self'` value shown below is only a starting skeleton, not a finished policy. On its own it blocks inline styles and scripts, CDNs, analytics, fonts, and embedded media that most real sites depend on. Treat it as the strict baseline you start from, then enumerate the exact sources your application actually loads and add the directives for them, such as the specific `script-src`, `style-src`, `img-src`, and `connect-src` origins your pages request. This is why report-only rollout matters: the violation reports tell you which sources to add before you enforce.
+
+            1. Open your Apache configuration file or `.htaccess` file.
+            2. Add a report-only policy to observe violations without blocking content:
+
+                ```apache
+                Header set Content-Security-Policy-Report-Only "default-src 'self';"
+                ```
+
+            3. Make sure the headers module is enabled and restart Apache:
+
+                ```bash
+                a2enmod headers
+                systemctl restart apache2
+                ```
+
+            4. Browse the application and review CSP violation reports in the browser console or your reporting endpoint. Extend the policy with the sources your application legitimately needs.
+            5. Once the policy no longer reports violations for legitimate traffic, replace the report-only directive with the enforcing header:
+
+                ```apache
+                Header set Content-Security-Policy "default-src 'self';"
+                ```
+
+            6. Restart Apache:
+
+                ```bash
+                systemctl restart apache2
+                ```
+        - id: iis
+          desc: |
+            **Using IIS**
+
+            A Content Security Policy that is too strict can break legitimate scripts, styles, and images. Deploy it in report-only mode first, fix the violations it reports, and only then switch to the enforcing header. The check passes only once the enforcing `Content-Security-Policy` header is served.
+
+            The `default-src 'self'` value shown below is only a starting skeleton, not a finished policy. On its own it blocks inline styles and scripts, CDNs, analytics, fonts, and embedded media that most real sites depend on. Treat it as the strict baseline you start from, then enumerate the exact sources your application actually loads and add the directives for them, such as the specific `script-src`, `style-src`, `img-src`, and `connect-src` origins your pages request. This is why report-only rollout matters: the violation reports tell you which sources to add before you enforce.
+
+            1. Open the IIS Manager.
+            2. Select your site and go to the `HTTP Response Headers` feature.
+            3. Click `Add` in the right pane and create a header named `Content-Security-Policy-Report-Only` with the value `default-src 'self';`.
+            4. Browse the application and review CSP violation reports in the browser console or your reporting endpoint. Extend the policy with the sources your application legitimately needs.
+            5. Once the policy no longer reports violations for legitimate traffic, remove the report-only header and add a header named `Content-Security-Policy` with the finished policy value.
+            6. Click OK. The change takes effect immediately.
+    refs:
+      - url: https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CSP
+        title: MDN Web Docs Content Security Policy (CSP)
+  - uid: mondoo-http-security-strict-transport-security
+    title: Set Strict-Transport-Security (HSTS) HTTP header
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/mitre-attack: mitre-attack-t1557
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-asvs-5: owasp-asvs-5-3-4-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: http.get.header.params.keys.any(downcase == "strict-transport-security")
+    docs:
+      desc: |
+        This check verifies that the site instructs browsers to reach it only over HTTPS.
+
+        The instrument is the `Strict-Transport-Security` response header, which the server must send on its HTTPS responses. The check confirms the header is present and leaves the strength of its `max-age`, `includeSubDomains`, and `preload` directives to the checks that cover each of those.
+
+        **Why this matters**
+
+        A user who types a bare hostname, follows an old `http://` bookmark, or clicks a link in a plain-text email makes a cleartext request first. On a shared or hostile network an attacker positioned on the path answers that request instead of the server. Rather than blocking it, the attacker proxies the session, speaking HTTPS to the real site and plain HTTP to the victim while rewriting every `https://` link in the response along the way. The browser never shows a certificate warning because no certificate is involved. This is SSL stripping, and the HTTP to HTTPS redirect that most sites rely on is exactly the request the attacker intercepts.
+
+        Once the session is downgraded, session cookies without the `Secure` attribute travel in the clear on every request, submitted credentials are readable, and any response body can be modified before it reaches the browser.
+
+        Strict-Transport-Security closes that window after the first successful HTTPS response. The browser records the site for the lifetime of the header's `max-age` and refuses to make a cleartext request to it at all, rewriting `http://` to `https://` internally and turning a certificate error into a hard failure the user cannot click through.
+
+        The header takes effect only when delivered over HTTPS and only protects visits after the first one, so pair it with a `max-age` of at least one year, the `includeSubDomains` directive, and preload submission when the very first connection also needs to be covered.
+      audit: |
+        Use `curl` to inspect the response headers returned by the site over HTTPS:
+
+        1. Request the headers from the target host:
+
+            ```bash
+            curl -sI https://example.com | grep -i '^Strict-Transport-Security:'
+            ```
+
+        2. Review the output.
+
+        A passing result returns a `Strict-Transport-Security` header. A failing result returns no `Strict-Transport-Security` header.
+      remediation:
+        - id: nginx
+          desc: |
+            **Using NGINX**
+
+            1. Confirm the site and everything under its hostname is fully reachable over HTTPS. Browsers that receive this header refuse plain HTTP for the duration of `max-age`.
+            2. Open your NGINX configuration file, typically `/etc/nginx/nginx.conf` or a site-specific file under `/etc/nginx/sites-available/`.
+            3. Inside the `server` block that terminates TLS, add the following line. Start with a short `max-age` such as `300` during rollout and raise it to at least `31536000` once you have confirmed nothing breaks:
+
+                ```nginx
+                add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+                ```
+
+                Add `includeSubDomains` only after verifying that every subdomain serves HTTPS. Add the `preload` directive only if you intend to submit the domain to browser preload lists; that is a long-term commitment that is slow to reverse.
+
+            4. Save the file and reload NGINX:
+
+                ```bash
+                nginx -s reload
+                ```
+        - id: apache
+          desc: |
+            **Using Apache HTTPD**
+
+            1. Confirm the site and everything under its hostname is fully reachable over HTTPS. Browsers that receive this header refuse plain HTTP for the duration of `max-age`.
+            2. Open your Apache configuration file or `.htaccess` file.
+            3. Add the following directive. Start with a short `max-age` such as `300` during rollout and raise it to at least `31536000` once you have confirmed nothing breaks:
+
+                ```apache
+                Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+                ```
+
+                Add `includeSubDomains` only after verifying that every subdomain serves HTTPS. Add the `preload` directive only if you intend to submit the domain to browser preload lists; that is a long-term commitment that is slow to reverse.
+
+            4. Make sure the headers module is enabled and restart Apache:
+
+                ```bash
+                a2enmod headers
+                systemctl restart apache2
+                ```
+        - id: iis
+          desc: |
+            **Using IIS**
+
+            IIS 10.0 version 1709 and later carry a native HSTS setting on the site. Use it rather than the `HTTP Response Headers` feature: a custom response header is emitted on the site's plain HTTP binding as well, and RFC 6797 requires that an HSTS host never send the header over non-secure transport. The native setting adds the header only when IIS answers an HTTPS request.
+
+            1. Confirm the site and everything under its hostname is fully reachable over HTTPS. Browsers that receive this header refuse plain HTTP for the duration of `max-age`.
+            2. There is no IIS Manager page for this setting, so configure it with `appcmd.exe`. Replace `Contoso` with your site name and keep `/commit:apphost`, which writes the value to the right section of `applicationHost.config`:
+
+                ```cmd
+                appcmd.exe set config -section:system.applicationHost/sites "/[name='Contoso'].hsts.enabled:True" /commit:apphost
+                appcmd.exe set config -section:system.applicationHost/sites "/[name='Contoso'].hsts.max-age:31536000" /commit:apphost
+                ```
+
+            3. Enable `includeSubDomains` only after verifying that every subdomain serves HTTPS:
+
+                ```cmd
+                appcmd.exe set config -section:system.applicationHost/sites "/[name='Contoso'].hsts.includeSubDomains:True" /commit:apphost
+                ```
+
+                Enable the `preload` attribute only if you intend to submit the domain to browser preload lists; that is a long-term commitment that is slow to reverse.
+
+            4. The resulting `applicationHost.config` entry looks like this:
+
+                ```xml
+                <site name="Contoso" id="1">
+                  <hsts enabled="true" max-age="31536000" includeSubDomains="true" />
+                </site>
+                ```
+
+            5. The setting applies to the next request. On IIS releases older than 10.0 version 1709 the `<hsts>` element does not exist, so emit the header from the application or from a URL Rewrite outbound rule conditioned on `HTTPS` being `on`.
+    refs:
+      - url: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Strict-Transport-Security
+        title: MDN Web Docs Strict-Transport-Security
+  - uid: mondoo-http-security-obfuscate-server
+    title: Remove or obfuscate the Server header
+    impact: 40
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-2-iv-access-control-encryption-and-decryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/mitre-attack: mitre-attack-t1592-002
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ds-1
+      compliance/nist-csf-2: nist-csf-2-pr-ds-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-28
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-2
+      compliance/owasp-asvs-5: owasp-asvs-5-13-4-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-3-5-1
+      compliance/soc2-2017: soc2-control-cc6-1-10
+      compliance/vda-isa-5: vda-isa-5-5-1-1
+    mql: |
+      if (http.get.header.server != empty) {
+        http.get.header.server
+        http.get.header.server.downcase != /nginx|microsoft|apache|litespeed|lsws|openresty/
+      } else {
+        true
+      }
+    docs:
+      desc: |
+        This check verifies that responses do not advertise which web server software is answering requests.
+
+        The instrument is the `Server` response header. The check passes when the server sends no `Server` header at all, and otherwise when the value it sends does not name the product. A value containing `nginx`, `microsoft`, `apache`, `litespeed`, `lsws`, or `openresty` in any capitalization fails.
+
+        **Why this matters**
+
+        Attack tooling is organized by product. Mass scanners crawl the internet continuously, record the `Server` header alongside the hostname, and build a searchable index anyone can query for every host running a given server. When a remote code execution flaw lands in one of those products, exploitation begins with a ready-made target list, and hosts that named themselves are already on it. Sites that never advertised the product still get hit by untargeted scanning, but they get hit later and less often, which is frequently the difference between patching in time and not.
+
+        The header often gives away more than the product name. Default builds append a version string, and several distributions append the operating system, so one response can narrow a host to a specific package on a specific distribution. That is enough for an attacker to select an exploit rather than spray several, and spraying is what usually gets an attacker noticed.
+
+        Removing the header patches nothing, and a determined attacker can still fingerprint a server from error page wording, header ordering, and TLS behavior. Treat this as falling off the cheap target lists rather than as a defense. Note also that a reverse proxy or content delivery network in front of the origin sets its own `Server` value, so what this check observes may describe the edge rather than the application server behind it.
+      audit: |
+        Use `curl` to inspect the response headers returned by the site:
+
+        1. Request the headers from the target host:
+
+            ```bash
+            curl -sI https://example.com | grep -i '^Server:'
+            ```
+
+        2. Review the output.
+
+        A passing result returns no `Server` header, or a value that does not disclose the underlying server software. A failing result returns a `Server` header that names software such as `nginx`, `Apache`, `Microsoft-IIS`, `LiteSpeed`, or `openresty`.
+      remediation:
+        - id: nginx
+          desc: |
+            **Using NGINX**
+
+            The `server_tokens off;` directive only hides the version number. NGINX still sends `Server: nginx`, which discloses the server software. Removing or replacing the header requires the headers-more module.
+
+            1. Install the headers-more module. On Debian or Ubuntu:
+
+                ```bash
+                apt-get install libnginx-mod-http-headers-more-filter
+                ```
+
+            2. Open your NGINX configuration file, typically `/etc/nginx/nginx.conf`.
+            3. Make sure the module is loaded at the top of the main configuration if your distribution does not load it automatically:
+
+                ```nginx
+                load_module modules/ngx_http_headers_more_filter_module.so;
+                ```
+
+            4. Inside the `http` block, remove the Server header entirely:
+
+                ```nginx
+                more_clear_headers Server;
+                ```
+
+                To send a generic value instead, use:
+
+                ```nginx
+                more_set_headers "Server: webserver";
+                ```
+
+            5. Save the file, test, and reload NGINX:
+
+                ```bash
+                nginx -t
+                nginx -s reload
+                ```
+        - id: apache
+          desc: |
+            **Using Apache HTTPD**
+
+            `ServerTokens Prod` still sends `Server: Apache`, which discloses the server software, and `Header unset Server` has no effect because Apache adds the header after output filters run. Replacing the value requires ModSecurity.
+
+            1. Install ModSecurity. On Debian or Ubuntu:
+
+                ```bash
+                apt-get install libapache2-mod-security2
+                ```
+
+            2. Open your Apache configuration file.
+            3. Add the following directives. ModSecurity can only overwrite the full server string when `ServerTokens` is set to `Full`:
+
+                ```apache
+                ServerTokens Full
+                SecServerSignature "webserver"
+                ```
+
+            4. Restart Apache:
+
+                ```bash
+                systemctl restart apache2
+                ```
+
+            `ServerTokens Full` is the most information-revealing setting and exposes the full server version string on its own. This configuration is only safe once ModSecurity is confirmed loaded and actively rewriting the `Server` header. If the module fails to load, the signature directive does nothing and the server falls back to leaking its complete version. Always verify the result before relying on it:
+
+            5. Confirm ModSecurity is loaded:
+
+                ```bash
+                apachectl -M | grep -i security2
+                ```
+
+            6. Confirm no version information leaks in the response:
+
+                ```bash
+                curl -sI https://example.com | grep -i '^Server:'
+                ```
+
+                The `Server` value must read `webserver` (or your chosen string). If it still shows `Apache` or a version number, ModSecurity is not rewriting the header and `ServerTokens Full` is exposing the version. Resolve the module load failure before leaving the configuration in place.
+        - id: iis
+          desc: |
+            **Using IIS**
+
+            The IIS-generated `Server` header is not a custom response header, so it cannot be removed through the `HTTP Response Headers` feature. On IIS 10 and later, remove it with the request-filtering setting.
+
+            1. Open the `web.config` file for your site.
+            2. Add the `removeServerHeader` attribute:
+
+                ```xml
+                <system.webServer>
+                  <security>
+                    <requestFiltering removeServerHeader="true" />
+                  </security>
+                </system.webServer>
+                ```
+
+            3. Restart IIS:
+
+                ```bash
+                iisreset
+                ```
+
+            On IIS versions before 10, use the URL Rewrite module with an outbound rule that rewrites the `RESPONSE_Server` server variable to an empty value.
+    refs:
+      - url: https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html#server
+        title: OWASP HTTP Security Response Headers Cheat Sheet
+  - uid: mondoo-http-security-no-x-powered-by
+    title: Remove all X-Powered-By headers
+    impact: 40
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-2-iv-access-control-encryption-and-decryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/mitre-attack: mitre-attack-t1592-002
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ds-1
+      compliance/nist-csf-2: nist-csf-2-pr-ds-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-28
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-2
+      compliance/owasp-asvs-5: owasp-asvs-5-13-4-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-3-5-1
+      compliance/soc2-2017: soc2-control-cc6-1-10
+      compliance/vda-isa-5: vda-isa-5-5-1-1
+    mql: http.get.header.params.keys.none(downcase == "x-powered-by")
+    docs:
+      desc: |
+        This check verifies that responses do not disclose the application framework or runtime behind the site.
+
+        The instrument is the `X-Powered-By` response header, and the passing condition is that the response carries no header by that name. Express, PHP, and ASP.NET each add it on their own initiative, so it is removed in the runtime configuration or stripped at a reverse proxy rather than in application code.
+
+        **Why this matters**
+
+        `X-Powered-By` is added automatically by several runtimes and frameworks, and its value names the technology and often the version. That single line tells an attacker which language the application is written in, which deserialization gadgets and template injection payloads are worth trying, and, when a version is present, whether a published exploit applies without any further probing.
+
+        Version disclosure is the sharper end of it. Public vulnerability databases are indexed by product and version, so a version string in a header lets an attacker match a host to known flaws in seconds. Internet-wide scanners record these headers, which means the matching happens continuously and at scale rather than only when someone decides to look at your site specifically.
+
+        The header is on by default in several stacks, so it is usually present because nobody turned it off rather than because anyone decided to publish it. That makes it a reliable signal in its own right. A host that still sends it has probably not been through a hardening pass, and an attacker will reasonably assume other defaults are untouched as well.
+
+        Suppressing the header does not remove the vulnerability underneath it, and behavioral fingerprinting can still identify a runtime from response timing and error handling. Keep the framework patched and treat this as denying a free hint, not as protection.
+      audit: |
+        Use `curl` to inspect the response headers returned by the site:
+
+        1. Request the headers from the target host:
+
+            ```bash
+            curl -sI https://example.com | grep -i '^X-Powered-By:'
+            ```
+
+        2. Review the output.
+
+        A passing result returns no `X-Powered-By` header. A failing result returns an `X-Powered-By` header that discloses the underlying technology stack.
+      remediation:
+        - id: nginx
+          desc: |
+            **Using NGINX**
+
+            1. Open your NGINX configuration file, typically `/etc/nginx/nginx.conf` or a site-specific file under `/etc/nginx/sites-available/`.
+            2. Inside the `http` block, hide the header for both proxied and FastCGI responses:
+
+                ```nginx
+                proxy_hide_header X-Powered-By;
+                fastcgi_hide_header X-Powered-By;
+                ```
+
+            3. Save the file and reload NGINX:
+
+                ```bash
+                nginx -s reload
+                ```
+
+            4. Where possible, also stop emitting the header at the source. For PHP, set `expose_php = Off` in `php.ini`. For Express applications, call `app.disable('x-powered-by')`.
+        - id: apache
+          desc: |
+            **Using Apache HTTPD**
+
+            1. Open your Apache configuration file or `.htaccess` file.
+            2. Add the following directive:
+
+                ```apache
+                Header unset X-Powered-By
+                ```
+
+            3. Make sure the headers module is enabled:
+
+                ```bash
+                a2enmod headers
+                systemctl restart apache2
+                ```
+        - id: iis
+          desc: |
+            **Using IIS**
+
+            1. Open the IIS Manager.
+            2. Select your site and go to the `HTTP Response Headers` feature.
+            3. Remove the `X-Powered-By` header if it exists.
+            4. Restart IIS:
+
+                ```bash
+                iisreset
+                ```
+    refs:
+      - url: https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html#x-powered-by
+        title: OWASP HTTP Security Response Headers Cheat Sheet
+  - uid: mondoo-http-security-no-x-aspnet-version
+    title: Remove all X-AspNet-Version headers
+    impact: 30
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-2-iv-access-control-encryption-and-decryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/mitre-attack: mitre-attack-t1592-002
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ds-1
+      compliance/nist-csf-2: nist-csf-2-pr-ds-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-28
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-2
+      compliance/owasp-asvs-5: owasp-asvs-5-13-4-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-3-5-1
+      compliance/soc2-2017: soc2-control-cc6-1-10
+      compliance/vda-isa-5: vda-isa-5-5-1-1
+    mql: http.get.header.params.keys.none(downcase == "x-aspnet-version")
+    docs:
+      desc: |
+        This check verifies that responses do not disclose the version of the .NET runtime serving the application.
+
+        The instrument is the `X-AspNet-Version` response header, and the passing condition is that the response carries no header by that name. Its value is an exact framework build number such as `4.0.30319`.
+
+        **Why this matters**
+
+        `X-AspNet-Version` carries an exact framework build number, for example `4.0.30319`. Public vulnerability databases are indexed by product and version, so that string lets an attacker decide in a single lookup whether a published exploit or a known deserialization gadget applies to this host, with none of the probing traffic a defender might notice in the logs.
+
+        It also dates the host. A build that shipped years ago says the server has not been through a framework upgrade, which is a strong hint that the operating system, the web server, and the application dependencies are behind as well. Internet-wide scanners record this header alongside the hostname, so the host ends up in a searchable index of stale .NET deployments that attackers query the moment a new flaw is published.
+
+        ASP.NET emits the header by default, so its presence usually means nobody removed it. An attacker reads that as a statement about how much hardening the deployment has had, and prioritizes accordingly.
+
+        Removing the header changes nothing about the runtime underneath. A host on an unsupported .NET version is exactly as exploitable once someone fingerprints it another way, so treat suppression as removing a shortcut and keep the runtime patched and in support.
+      audit: |
+        Use `curl` to inspect the response headers returned by the site:
+
+        1. Request the headers from the target host:
+
+            ```bash
+            curl -sI https://example.com | grep -i '^X-AspNet-Version:'
+            ```
+
+        2. Review the output.
+
+        A passing result returns no `X-AspNet-Version` header. A failing result returns an `X-AspNet-Version` header that discloses the ASP.NET framework version.
+      remediation:
+        - id: nginx
+          desc: |
+            **Using NGINX**
+
+            1. Open your NGINX configuration file (typically found at `/etc/nginx/nginx.conf` or in a site-specific file under `/etc/nginx/sites-available/`).
+            2. Inside the `http` block, add the following line:
+
+                ```nginx
+                proxy_hide_header X-AspNet-Version;
+                ```
+
+            3. Save the file and reload NGINX:
+
+                ```bash
+                nginx -s reload
+                ```
+        - id: apache
+          desc: |
+            **Using Apache HTTPD**
+
+            1. Open your Apache configuration file or `.htaccess` file.
+            2. Add the following directive:
+
+                ```apache
+                Header unset X-AspNet-Version
+                ```
+
+            3. Make sure the headers module is enabled:
+
+                ```bash
+                a2enmod headers
+                systemctl restart apache2
+                ```
+        - id: iis
+          desc: |
+            **Using IIS with ASP.NET**
+
+            The `X-AspNet-Version` header is added by the ASP.NET runtime, so it does not appear in the IIS `HTTP Response Headers` feature. Disable it in the application configuration instead.
+
+            1. Open the `web.config` file for your application.
+            2. Disable the version header in the `httpRuntime` element:
+
+                ```xml
+                <system.web>
+                  <httpRuntime enableVersionHeader="false" />
+                </system.web>
+                ```
+
+            3. Restart IIS:
+
+                ```bash
+                iisreset
+                ```
+    refs:
+      - url: https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html#x-aspnet-version
+        title: OWASP HTTP Security Response Headers Cheat Sheet
+  - uid: mondoo-http-security-no-x-aspnetmvc-version
+    title: Remove all X-AspNetMvc-Version headers
+    impact: 30
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-2-iv-access-control-encryption-and-decryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/mitre-attack: mitre-attack-t1592-002
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ds-1
+      compliance/nist-csf-2: nist-csf-2-pr-ds-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-28
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-2
+      compliance/owasp-asvs-5: owasp-asvs-5-13-4-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-3-5-1
+      compliance/soc2-2017: soc2-control-cc6-1-10
+      compliance/vda-isa-5: vda-isa-5-5-1-1
+    mql: http.get.header.params.keys.none(downcase == "x-aspnetmvc-version")
+    docs:
+      desc: |
+        This check verifies that responses do not disclose the version of ASP.NET MVC the application is built on.
+
+        The instrument is the `X-AspNetMvc-Version` response header, and the passing condition is that the response carries no header by that name. An ASP.NET MVC application on the .NET Framework sends this one alongside `X-AspNet-Version`, so a site that has suppressed the runtime header often still leaks the framework version through this one.
+
+        **Why this matters**
+
+        `X-AspNetMvc-Version` names the MVC framework version, which is a different fact from the runtime build reported by `X-AspNet-Version`. It tells an attacker which model binding behavior, which anti-forgery token implementation, and which routing engine the application uses, and therefore which framework-specific attacks are worth attempting at all. Mass assignment through model binding and anti-forgery bypasses are both version dependent, so knowing the version narrows the work to the attempts likely to succeed.
+
+        Taken together with the runtime version, the pair pins an application to a specific point in the .NET release history. That is enough to choose one exploit rather than try several, and trying several is what usually raises an alert.
+
+        The framework adds the header unless it is explicitly suppressed, so a response carrying it indicates the deployment has not been hardened. Attackers reading internet-wide scan data use exactly that inference when deciding which hosts to look at first.
+
+        Suppressing the header does not upgrade anything. ASP.NET MVC on the .NET Framework has been superseded by ASP.NET Core, so a deployment still running it needs a migration plan regardless of what its headers say.
+      audit: |
+        Use `curl` to inspect the response headers returned by the site:
+
+        1. Request the headers from the target host:
+
+            ```bash
+            curl -sI https://example.com | grep -i '^X-AspNetMvc-Version:'
+            ```
+
+        2. Review the output.
+
+        A passing result returns no `X-AspNetMvc-Version` header. A failing result returns an `X-AspNetMvc-Version` header that discloses the ASP.NET MVC framework version.
+      remediation:
+        - id: nginx
+          desc: |
+            **Using NGINX**
+
+            1. Open your NGINX configuration file (typically found at `/etc/nginx/nginx.conf` or in a site-specific file under `/etc/nginx/sites-available/`).
+            2. Inside the `http` block, add the following line:
+
+                ```nginx
+                proxy_hide_header X-AspNetMvc-Version;
+                ```
+
+            3. Save the file and reload NGINX:
+
+                ```bash
+                nginx -s reload
+                ```
+        - id: apache
+          desc: |
+            **Using Apache HTTPD**
+
+            1. Open your Apache configuration file or `.htaccess` file.
+            2. Add the following directive:
+
+                ```apache
+                Header unset X-AspNetMvc-Version
+                ```
+
+            3. Make sure the headers module is enabled:
+
+                ```bash
+                a2enmod headers
+                systemctl restart apache2
+                ```
+        - id: iis
+          desc: |
+            **Using IIS with ASP.NET MVC**
+
+            The `X-AspNetMvc-Version` header is added by the ASP.NET MVC framework, so it does not appear in the IIS `HTTP Response Headers` feature. Disable it in application code instead.
+
+            1. Open the `Global.asax.cs` file for your application.
+            2. Disable the header in `Application_Start`:
+
+                ```csharp
+                protected void Application_Start()
+                {
+                    MvcHandler.DisableMvcResponseHeader = true;
+                }
+                ```
+
+            3. Rebuild and redeploy the application, then restart IIS:
+
+                ```bash
+                iisreset
+                ```
+    refs:
+      - url: https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html#x-aspnetmvc-version
+        title: OWASP HTTP Security Response Headers Cheat Sheet
+  - uid: mondoo-http-security-no-public-key-pins
+    title: The header Public-Key-Pins is deprecated and should not be used
+    impact: 40
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-2-iv-access-control-encryption-and-decryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ds-1
+      compliance/nist-csf-2: nist-csf-2-pr-ds-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-28
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-2
+      compliance/owasp-asvs-5: false
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-3-5-1
+      compliance/soc2-2017: soc2-control-cc6-1-10
+      compliance/vda-isa-5: vda-isa-5-5-1-1
+    mql: http.get.header.params.keys.none(downcase == "public-key-pins")
+    docs:
+      desc: |
+        This check verifies that the site does not deploy HTTP Public Key Pinning, a mechanism browsers have removed.
+
+        The instrument is the `Public-Key-Pins` response header, and the passing condition is that the response carries no header by that name. The reporting-only form of the header uses a different name and is not covered here.
+
+        **Why this matters**
+
+        Public key pinning let a site publish a set of public key hashes and instruct browsers to reject any certificate chain for that host that did not include one of them. It was aimed at mis-issued certificates from trusted certificate authorities. In practice the failure mode was catastrophic and self-inflicted. If the pinned keys were lost in a server rebuild, or a certificate was reissued on a new key without updating the pins, every browser that had cached the header refused to connect for the remaining lifetime of `max-age`. There was no way to reach the affected visitors and no way to serve them a warning page, because the connection failed before any content loaded.
+
+        The header also created a hostile takeover path. An attacker with even brief control over a site's response headers could pin keys they held and set a long `max-age`, locking the real owner out of their own domain for months with nothing the owner could serve to undo it.
+
+        Chrome removed support in version 72 and Firefox followed, so the header is inert in current browsers and carries only the residual risk that some older client still honors it. Certificate Transparency now provides the detection that pinning was reaching for, with no opt-in header and nothing for the site operator to get wrong. The `Expect-CT` header that accompanied that transition is likewise obsolete and should not be deployed.
+      audit: |
+        Use `curl` to inspect the response headers returned by the site:
+
+        1. Request the headers from the target host:
+
+            ```bash
+            curl -sI https://example.com | grep -i '^Public-Key-Pins:'
+            ```
+
+        2. Review the output.
+
+        A passing result returns no `Public-Key-Pins` header. A failing result returns a `Public-Key-Pins` header, which uses the deprecated HPKP mechanism.
+      remediation:
+        - id: nginx
+          desc: |
+            **Using NGINX**
+
+            1. Open your NGINX configuration file (typically found at `/etc/nginx/nginx.conf` or in a site-specific file under `/etc/nginx/sites-available/`).
+            2. Inside the `http` block, add the following line to remove the header from proxied responses:
+
+                ```nginx
+                proxy_hide_header Public-Key-Pins;
+                ```
+
+            3. Also remove any existing `add_header Public-Key-Pins` directives from your configuration.
+
+            4. Save the file and reload NGINX:
+
+                ```bash
+                nginx -s reload
+                ```
+        - id: apache
+          desc: |
+            **Using Apache HTTPD**
+
+            1. Open your Apache configuration file or `.htaccess` file.
+            2. Remove any existing `Header set Public-Key-Pins` directives from your configuration.
+            3. To strip the header from responses generated by applications or upstream servers, add:
+
+                ```apache
+                Header unset Public-Key-Pins
+                ```
+
+            4. Make sure the headers module is enabled:
+
+                ```bash
+                a2enmod headers
+                systemctl restart apache2
+                ```
+        - id: iis
+          desc: |
+            **Using IIS**
+
+            1. Open the IIS Manager.
+            2. Select your site and go to the `HTTP Response Headers` feature.
+            3. Remove the `Public-Key-Pins` header if it exists.
+            4. Restart IIS:
+
+                ```bash
+                iisreset
+                ```
+    refs:
+      - url: https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html#public-key-pins-hpkp
+        title: OWASP HTTP Security Response Headers Cheat Sheet
+  - uid: mondoo-http-security-x-frame-options
+    title: Set X-Frame-Options HTTP header
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-23
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-asvs-5: owasp-asvs-5-3-4-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: http.get.header.params.keys.any(downcase == "x-frame-options")
+    docs:
+      desc: |
+        This check verifies that the server tells browsers whether the page may be displayed inside another site's frame.
+
+        The instrument is the `X-Frame-Options` response header, and the check requires only that a header by that name is present. The two values that do anything are `DENY`, which forbids framing outright, and `SAMEORIGIN`, which permits it from your own origin only. `ALLOW-FROM` was never widely implemented and is ignored by current browsers, so an origin allowlist has to come from the Content-Security-Policy `frame-ancestors` directive instead. Set the header in the `server` block in Nginx, with `Header set` in Apache, or under HTTP Response Headers in IIS.
+
+        **Why this matters**
+
+        Without the header, any site can load your pages in a `<frame>`, `<iframe>`, `<embed>`, or `<object>` element. An attacker builds a page that does exactly that, makes the frame fully transparent, and positions it so a button on your page sits underneath something their own page invites the visitor to click. The visitor clicks what looks like a play button and actually clicks Transfer, or Authorize, or Delete Account, in a session where they are already signed in. Their browser sends the request with their cookies attached, and your application cannot tell it apart from a deliberate action.
+
+        The technique does not stop at a single click. An overlaid frame can be repositioned between clicks to walk a victim through a multi-step flow, and a transparent frame placed over a text field captures keystrokes the visitor believed they were typing into the attacker's page.
+
+        Deploy `frame-ancestors` alongside the legacy header rather than instead of it. Browsers that understand both prefer the policy directive, and the older header keeps protecting clients that do not.
+      audit: |
+        Use `curl` to inspect the response headers returned by the site:
+
+        1. Request the headers from the target host:
+
+            ```bash
+            curl -sI https://example.com | grep -i '^X-Frame-Options:'
+            ```
+
+        2. Review the output.
+
+        A passing result returns an `X-Frame-Options` header with a value such as `DENY` or `SAMEORIGIN`. A failing result returns no `X-Frame-Options` header.
+      remediation:
+        - id: nginx
+          desc: |
+            **Using NGINX**
+
+            X-Frame-Options is a legacy header. The modern equivalent is the Content-Security-Policy `frame-ancestors` directive, which modern browsers prefer when both are present and which supports finer-grained origin control. Deploy `frame-ancestors` alongside X-Frame-Options so legacy browsers that do not honor CSP still get clickjacking protection.
+
+            1. Open your NGINX configuration file.
+            2. Inside the `server` block, add both headers:
+
+                ```nginx
+                add_header X-Frame-Options "SAMEORIGIN" always;
+                add_header Content-Security-Policy "frame-ancestors 'self';" always;
+                ```
+
+                Use `frame-ancestors 'none'` to forbid all framing, the CSP equivalent of `DENY`.
+
+                Put the directives in the `server` block rather than in a nested `location`. NGINX inherits `add_header` from the enclosing level only while the current level declares none of its own, so one `add_header` inside a `location` discards every header the `server` block sets for requests routed there. Where a `location` genuinely needs its own header, repeat the whole set inside it.
+
+                The `always` flag sends the headers on error responses as well. Without it NGINX omits them from a 404 or 500, leaving those pages framable.
+
+                If you already serve a Content-Security-Policy header, do not add a second `add_header Content-Security-Policy` line. NGINX `add_header` is additive, so a second directive emits two CSP headers and browsers enforce the most restrictive intersection, which can break the page. Instead, add `frame-ancestors 'self'` to the single existing CSP value.
+
+            3. Save and reload NGINX:
+
+                ```bash
+                nginx -s reload
+                ```
+        - id: apache
+          desc: |
+            **Using Apache HTTPD**
+
+            X-Frame-Options is a legacy header. The modern equivalent is the Content-Security-Policy `frame-ancestors` directive, which modern browsers prefer when both are present and which supports finer-grained origin control. Deploy `frame-ancestors` alongside X-Frame-Options so legacy browsers that do not honor CSP still get clickjacking protection.
+
+            1. Open your Apache configuration file or `.htaccess` file.
+            2. Add both headers:
+
+                ```apache
+                Header set X-Frame-Options "SAMEORIGIN"
+                Header set Content-Security-Policy "frame-ancestors 'self';"
+                ```
+
+                Use `frame-ancestors 'none'` to forbid all framing, the CSP equivalent of `DENY`.
+
+                If you already serve a Content-Security-Policy header, do not add a second `Header set Content-Security-Policy` line. `Header set` replaces rather than appends, so it overwrites the existing policy and drops every other directive it contains. Instead, merge `frame-ancestors 'self'` into the existing CSP value, or use `Header append` or `Header edit` to extend the current header rather than overwrite it.
+
+            3. Enable the headers module and restart:
+
+                ```bash
+                a2enmod headers
+                systemctl restart apache2
+                ```
+        - id: iis
+          desc: |
+            **Using IIS**
+
+            X-Frame-Options is a legacy header. The modern equivalent is the Content-Security-Policy `frame-ancestors` directive, which modern browsers prefer when both are present and which supports finer-grained origin control. Deploy `frame-ancestors` alongside X-Frame-Options so legacy browsers that do not honor CSP still get clickjacking protection.
+
+            1. Open the IIS Manager.
+            2. Select your site and go to `HTTP Response Headers`.
+            3. Add `X-Frame-Options` with value `SAMEORIGIN`.
+            4. Add a second header named `Content-Security-Policy` with the value `frame-ancestors 'self';`. Use `frame-ancestors 'none'` to forbid all framing, the CSP equivalent of `DENY`.
+            5. Restart IIS:
+
+                ```bash
+                iisreset
+                ```
+    refs:
+      - url: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/X-Frame-Options
+        title: MDN Web Docs X-Frame-Options
+      - url: https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html#x-frame-options
+        title: OWASP HTTP Security Response Headers Cheat Sheet
+  - uid: mondoo-http-security-referrer-policy
+    title: Set Referrer-Policy HTTP header
+    impact: 50
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-23
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-asvs-5: owasp-asvs-5-3-4-5
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: http.get.header.params.keys.any(downcase == "referrer-policy")
+    docs:
+      desc: |
+        This check verifies that the server states how much of the current URL browsers may disclose when a user follows a link or the page loads an external resource.
+
+        The instrument is the `Referrer-Policy` response header, and the check requires only that a header by that name is present. `strict-origin-when-cross-origin` is the usual choice, sending the full URL within your own site and only the bare origin to anyone else. `no-referrer` sends nothing at all, and `same-origin` sends the URL internally and nothing externally. Set it in the `server` block in Nginx, with `Header set` in Apache, or under HTTP Response Headers in IIS.
+
+        **Why this matters**
+
+        Without the header the browser applies its own default, and that default sends the full URL of the page the user came from, path and query string included, to every third party the page touches. URLs carry secrets far more often than anyone intends. Password reset links, email confirmation tokens, invitation links, single sign-on parameters, and session identifiers in older applications all live in the query string, and any one of them is enough to take over the account it belongs to.
+
+        The recipient list is larger than it looks. Every image, font, script, advertisement, and analytics beacon on the page receives the referrer, as does every outbound link the user clicks. A password reset page that loads one third-party script has handed the reset token to that vendor and to anyone with access to their request logs.
+
+        Even where no token is present, the referrer leaks structure. Internal hostnames, customer identifiers embedded in paths, and the names of pages that were never meant to be public all accumulate in logs you do not control and cannot get deleted.
+
+        Keep tokens out of URLs where the design allows it, and set this header for the cases where it does not.
+      audit: |
+        Use `curl` to inspect the response headers returned by the site:
+
+        1. Request the headers from the target host:
+
+            ```bash
+            curl -sI https://example.com | grep -i '^Referrer-Policy:'
+            ```
+
+        2. Review the output.
+
+        A passing result returns a `Referrer-Policy` header with a defined value. A failing result returns no `Referrer-Policy` header.
+      remediation:
+        - id: nginx
+          desc: |
+            **Using NGINX**
+
+            1. Open your NGINX configuration file.
+            2. Inside the `server` block, add:
+
+                ```nginx
+                add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+                ```
+
+                Put the directive in the `server` block rather than in a nested `location`. NGINX inherits `add_header` from the enclosing level only while the current level declares none of its own, so one `add_header` inside a `location` discards every header the `server` block sets for requests routed there. Where a `location` genuinely needs its own header, repeat the whole set inside it.
+
+                The `always` flag sends the header on error responses as well. Without it NGINX omits the header from a 404 or 500, and those URLs are the ones most likely to carry a token in the query string.
+
+            3. Save and reload NGINX:
+
+                ```bash
+                nginx -s reload
+                ```
+        - id: apache
+          desc: |
+            **Using Apache HTTPD**
+
+            1. Open your Apache configuration file or `.htaccess` file.
+            2. Add:
+
+                ```apache
+                Header set Referrer-Policy "strict-origin-when-cross-origin"
+                ```
+
+            3. Enable the headers module and restart:
+
+                ```bash
+                a2enmod headers
+                systemctl restart apache2
+                ```
+        - id: iis
+          desc: |
+            **Using IIS**
+
+            1. Open the IIS Manager.
+            2. Select your site and go to `HTTP Response Headers`.
+            3. Add `Referrer-Policy` with value `strict-origin-when-cross-origin`.
+            4. Restart IIS:
+
+                ```bash
+                iisreset
+                ```
+    refs:
+      - url: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Referrer-Policy
+        title: MDN Web Docs Referrer-Policy
+      - url: https://cheatsheetseries.owasp.org/cheatsheets/HTTP_Headers_Cheat_Sheet.html#referrer-policy
+        title: OWASP HTTP Security Response Headers Cheat Sheet
+  - uid: mondoo-http-security-hsts-max-age
+    title: Ensure HSTS max-age is at least one year
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/mitre-attack: mitre-attack-t1557
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-asvs-5: owasp-asvs-5-3-4-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: http.get.header.sts != empty && http.get.header.sts.maxAge >= 365 * time.day
+    docs:
+      desc: |
+        This check verifies that the HTTPS-only instruction the site sends to browsers lasts at least a year.
+
+        The instrument is the `max-age` directive of the `Strict-Transport-Security` response header, expressed in seconds, and the check requires at least 365 days, which is `31536000`. A complete header reads `Strict-Transport-Security: max-age=31536000; includeSubDomains`. Set it in the `server` block in Nginx, with `Header always set` in Apache, or through the site's native HSTS setting on current IIS releases rather than as a custom response header.
+
+        **Why this matters**
+
+        The directive is a countdown, and it restarts on every HTTPS response the browser receives. Protection therefore lasts for the length of `max-age` after a user's last visit, and once it lapses that browser is back to sending its first request in the clear.
+
+        That first cleartext request is the whole attack. A user who types the hostname, follows an old bookmark, or clicks a link in a plain-text email makes a plain HTTP request, and an attacker on the network path answers it instead of the server. They proxy the session, speaking HTTPS to the real site and HTTP to the victim, rewriting links as they go. No certificate warning appears because no certificate is involved, and the session cookie, the submitted credentials, and every response body pass through their hands.
+
+        A short lifetime narrows the protection to frequent visitors. Someone who signs in monthly, or who returns after a holiday, arrives with an expired entry and is exposed on exactly the visit where they are most likely to type a password.
+
+        One year is also the floor for browser preload eligibility, so a shorter value forecloses the strongest form of this protection while providing the weakest form of the ordinary one.
+      audit: |
+        Use `curl` to inspect the response headers returned by the site over HTTPS:
+
+        1. Request the headers from the target host:
+
+            ```bash
+            curl -sI https://example.com | grep -i '^Strict-Transport-Security:'
+            ```
+
+        2. Review the `max-age` directive in the returned value.
+
+        A passing result returns a `Strict-Transport-Security` header whose `max-age` is at least `31536000`. A failing result returns no header, or a `max-age` below `31536000`.
+      remediation:
+        - id: nginx
+          desc: |
+            **Using NGINX**
+
+            1. Open your NGINX configuration file.
+            2. Update the HSTS header so `max-age` is at least one year, which is 31536000 seconds. Keep any directives you already deploy deliberately, such as `includeSubDomains`. Do not add the `preload` directive unless you intend to submit the domain to browser preload lists, which is a long-term commitment that is slow to reverse:
+
+                ```nginx
+                add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+                ```
+
+            3. Save and reload NGINX:
+
+                ```bash
+                nginx -s reload
+                ```
+        - id: apache
+          desc: |
+            **Using Apache HTTPD**
+
+            1. Open your Apache configuration file or `.htaccess` file.
+            2. Update the HSTS header so `max-age` is at least one year, which is 31536000 seconds. Keep any directives you already deploy deliberately, such as `includeSubDomains`. Do not add the `preload` directive unless you intend to submit the domain to browser preload lists, which is a long-term commitment that is slow to reverse:
+
+                ```apache
+                Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+                ```
+
+            3. Restart Apache:
+
+                ```bash
+                systemctl restart apache2
+                ```
+        - id: iis
+          desc: |
+            **Using IIS**
+
+            The HSTS header on IIS 10.0 version 1709 and later comes from the site's native HSTS setting, not from the `HTTP Response Headers` feature, so raise `max-age` there.
+
+            1. Set `max-age` to at least one year, which is 31536000 seconds. Replace `Contoso` with your site name:
+
+                ```cmd
+                appcmd.exe set config -section:system.applicationHost/sites "/[name='Contoso'].hsts.max-age:31536000" /commit:apphost
+                ```
+
+            2. Leave the other attributes as they are. In particular, do not enable `preload` unless you intend to submit the domain to browser preload lists, which is a long-term commitment that is slow to reverse.
+            3. Confirm the stored value:
+
+                ```cmd
+                appcmd.exe list config -section:system.applicationHost/sites
+                ```
+
+            4. The setting applies to the next request. If the site still carries a `Strict-Transport-Security` entry under `HTTP Response Headers`, remove it, because that copy is also sent over plain HTTP and can override the intended `max-age`.
+    refs:
+      - url: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Strict-Transport-Security
+        title: MDN Web Docs Strict-Transport-Security
+      - url: https://hstspreload.org/
+        title: HSTS Preload List Submission
+  - uid: mondoo-http-security-hsts-include-subdomains
+    title: Ensure HSTS includes subdomains
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/mitre-attack: mitre-attack-t1557
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-asvs-5: owasp-asvs-5-3-4-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: http.get.header.sts.includeSubDomains == true
+    docs:
+      desc: |
+        This check verifies that the site's HTTPS-only instruction covers every subdomain and not just the hostname that sent it.
+
+        The instrument is the `includeSubDomains` directive of the `Strict-Transport-Security` response header. The server must send the directive alongside the lifetime, as in `Strict-Transport-Security: max-age=31536000; includeSubDomains`.
+
+        **Why this matters**
+
+        Without the directive, the browser's HTTPS-only rule applies to exactly the host that issued the header. Every other name under the domain is unprotected, and there are usually many: legacy hosts, marketing microsites, staging environments, status pages, and vendor-operated subdomains nobody has looked at in years. An attacker on the network path has no need to attack the hardened main site. They wait for any request to a cleartext subdomain, answer it themselves, and serve a page on a name the browser treats as part of your domain.
+
+        Cookies make that pivot valuable. A cookie scoped to the parent domain is sent to every subdomain, so one cleartext request to any unprotected name hands the attacker the session cookie unless it carries the `Secure` attribute. The attacker also gains script execution on an origin that is same-site with the real application, which relaxes any protection written in terms of the registrable domain.
+
+        The directive is a precondition for the browser preload lists as well. A domain cannot be preloaded without it, so leaving it off forecloses the strongest form of this protection.
+
+        Applying it commits every current and future subdomain to HTTPS for the lifetime of `max-age`, including hosts that are not yours to fix and internal names that resolve only inside the network. Inventory those first, get certificates in place, and roll the directive out with a short `max-age` before extending it.
+      audit: |
+        Use `curl` to inspect the response headers returned by the site over HTTPS:
+
+        1. Request the headers from the target host:
+
+            ```bash
+            curl -sI https://example.com | grep -i '^Strict-Transport-Security:'
+            ```
+
+        2. Check whether the returned value contains the `includeSubDomains` directive.
+
+        A passing result returns a `Strict-Transport-Security` header that includes `includeSubDomains`. A failing result returns no header, or a value without the `includeSubDomains` directive.
+      remediation:
+        - id: nginx
+          desc: |
+            **Using NGINX**
+
+            1. Inventory every subdomain of this domain and confirm each one is fully reachable over HTTPS. After this change, browsers refuse plain HTTP to all subdomains for the full `max-age`, which makes any HTTP-only subdomain unreachable.
+            2. Open your NGINX configuration file.
+            3. Update the HSTS header to include `includeSubDomains`. Do not add the `preload` directive unless you intend to submit the domain to browser preload lists, which is a long-term commitment that is slow to reverse:
+
+                ```nginx
+                add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+                ```
+
+            4. Save and reload NGINX:
+
+                ```bash
+                nginx -s reload
+                ```
+        - id: apache
+          desc: |
+            **Using Apache HTTPD**
+
+            1. Inventory every subdomain of this domain and confirm each one is fully reachable over HTTPS. After this change, browsers refuse plain HTTP to all subdomains for the full `max-age`, which makes any HTTP-only subdomain unreachable.
+            2. Open your Apache configuration file or `.htaccess` file.
+            3. Update the HSTS header to include `includeSubDomains`. Do not add the `preload` directive unless you intend to submit the domain to browser preload lists, which is a long-term commitment that is slow to reverse:
+
+                ```apache
+                Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+                ```
+
+            4. Restart Apache:
+
+                ```bash
+                systemctl restart apache2
+                ```
+        - id: iis
+          desc: |
+            **Using IIS**
+
+            The `includeSubDomains` directive on IIS 10.0 version 1709 and later is an attribute of the site's native HSTS setting, not a value you type into the `HTTP Response Headers` feature.
+
+            1. Inventory every subdomain of this domain and confirm each one is fully reachable over HTTPS. After this change, browsers refuse plain HTTP to all subdomains for the full `max-age`, which makes any HTTP-only subdomain unreachable.
+            2. Set the attribute. Replace `Contoso` with your site name:
+
+                ```cmd
+                appcmd.exe set config -section:system.applicationHost/sites "/[name='Contoso'].hsts.includeSubDomains:True" /commit:apphost
+                ```
+
+            3. Confirm `max-age` is still at least 31536000, since preload eligibility needs both:
+
+                ```cmd
+                appcmd.exe list config -section:system.applicationHost/sites
+                ```
+
+            4. Do not enable `preload` unless you intend to submit the domain to browser preload lists, which is a long-term commitment that is slow to reverse.
+            5. The setting applies to the next request.
+    refs:
+      - url: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Strict-Transport-Security
+        title: MDN Web Docs Strict-Transport-Security
+  - uid: mondoo-http-security-hsts-preload
+    title: Ensure HSTS preload is enabled
+    impact: 40
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/mitre-attack: mitre-attack-t1557
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-asvs-5: owasp-asvs-5-3-7-4
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: http.get.header.sts.preload == true
+    docs:
+      desc: |
+        This check verifies that the site asks to be included in the browsers' built-in HTTPS-only lists.
+
+        The instrument is the `preload` directive of the `Strict-Transport-Security` response header. Sending it is a declaration of intent rather than the enrollment itself. After the header is deployed the domain has to be submitted at https://hstspreload.org/, and the lists also require `includeSubDomains` and a `max-age` of at least a year before they will accept it. On current IIS releases, `preload` is an attribute of the site's native HSTS setting rather than a value typed into a custom header.
+
+        **Why this matters**
+
+        Ordinary HSTS is trust on first use. A browser learns the rule only from a response it already received over HTTPS, so the very first request a given browser makes to your domain still goes out in the clear when the user types a bare hostname or follows an `http://` link. An attacker on the network path answers that request, proxies the session while speaking HTTPS to the real site, and reads the credentials the user submits. The same window reopens whenever the recorded entry expires.
+
+        Preloading removes the window by shipping the rule inside the browser. A browser that has never contacted your domain still refuses to make a cleartext request to it, so there is no first request left to intercept.
+
+        The commitment is real and slow to reverse. Every name under the registrable domain has to serve HTTPS, including internal hosts that resolve only inside your network and any subdomain a team creates later, and removal from the lists takes months to reach users who already hold the entry. Inventory what exists under the domain and confirm each name has a certificate before submitting, because after submission a host that cannot serve HTTPS is unreachable rather than merely insecure.
+      audit: |
+        Use `curl` to inspect the response headers returned by the site over HTTPS:
+
+        1. Request the headers from the target host:
+
+            ```bash
+            curl -sI https://example.com | grep -i '^Strict-Transport-Security:'
+            ```
+
+        2. Check whether the returned value contains the `preload` directive.
+
+        A passing result returns a `Strict-Transport-Security` header that includes `preload`. A failing result returns no header, or a value without the `preload` directive.
+      remediation:
+        - id: nginx
+          desc: |
+            **Using NGINX**
+
+            HSTS preload is a long-term commitment. Once the domain is on browser preload lists, every browser refuses plain HTTP for the entire registrable domain and all of its subdomains, and removal from the lists takes months to propagate. Only proceed if every current and future subdomain will serve HTTPS. Preload list eligibility requires `max-age` of at least 31536000 and the `includeSubDomains` directive.
+
+            1. Confirm every subdomain of the registrable domain serves HTTPS and that you accept the long-term commitment described above.
+            2. Open your NGINX configuration file.
+            3. Update the HSTS header to include `preload`:
+
+                ```nginx
+                add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
+                ```
+
+            4. Save and reload NGINX:
+
+                ```bash
+                nginx -s reload
+                ```
+
+            5. After deploying the header, submit your domain at https://hstspreload.org/.
+        - id: apache
+          desc: |
+            **Using Apache HTTPD**
+
+            HSTS preload is a long-term commitment. Once the domain is on browser preload lists, every browser refuses plain HTTP for the entire registrable domain and all of its subdomains, and removal from the lists takes months to propagate. Only proceed if every current and future subdomain will serve HTTPS. Preload list eligibility requires `max-age` of at least 31536000 and the `includeSubDomains` directive.
+
+            1. Confirm every subdomain of the registrable domain serves HTTPS and that you accept the long-term commitment described above.
+            2. Open your Apache configuration file or `.htaccess` file.
+            3. Update the HSTS header to include `preload`:
+
+                ```apache
+                Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+                ```
+
+            4. Restart Apache:
+
+                ```bash
+                systemctl restart apache2
+                ```
+
+            5. After deploying the header, submit your domain at https://hstspreload.org/.
+        - id: iis
+          desc: |
+            **Using IIS**
+
+            HSTS preload is a long-term commitment. Once the domain is on browser preload lists, every browser refuses plain HTTP for the entire registrable domain and all of its subdomains, and removal from the lists takes months to propagate. Only proceed if every current and future subdomain will serve HTTPS. Preload list eligibility requires `max-age` of at least 31536000 and the `includeSubDomains` directive.
+
+            On IIS 10.0 version 1709 and later, `preload` is an attribute of the site's native HSTS setting rather than a value typed into the `HTTP Response Headers` feature.
+
+            1. Confirm every subdomain of the registrable domain serves HTTPS and that you accept the long-term commitment described above.
+            2. Set all three attributes, since the preload list rejects a domain missing any of them. Replace `Contoso` with your site name:
+
+                ```cmd
+                appcmd.exe set config -section:system.applicationHost/sites "/[name='Contoso'].hsts.enabled:True" /commit:apphost
+                appcmd.exe set config -section:system.applicationHost/sites "/[name='Contoso'].hsts.max-age:31536000" /commit:apphost
+                appcmd.exe set config -section:system.applicationHost/sites "/[name='Contoso'].hsts.includeSubDomains:True" /commit:apphost
+                appcmd.exe set config -section:system.applicationHost/sites "/[name='Contoso'].hsts.preload:True" /commit:apphost
+                ```
+
+            3. The resulting `applicationHost.config` entry looks like this:
+
+                ```xml
+                <site name="Contoso" id="1">
+                  <hsts enabled="true" max-age="31536000" includeSubDomains="true" preload="true" />
+                </site>
+                ```
+
+            4. The setting applies to the next request.
+            5. After deploying the header, submit your domain at https://hstspreload.org/.
+    refs:
+      - url: https://hstspreload.org/
+        title: HSTS Preload List Submission
+      - url: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Strict-Transport-Security
+        title: MDN Web Docs Strict-Transport-Security

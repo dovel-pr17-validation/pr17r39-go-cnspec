@@ -1,0 +1,12 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Resources:
+  Cluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      Engine: postgres
+      DBClusterInstanceClass: db.m5d.large
+      AllocatedStorage: 100
+      Iops: 1000
+      StorageType: io1
+      DBSubnetGroupName: public-subnets
+      PubliclyAccessible: true

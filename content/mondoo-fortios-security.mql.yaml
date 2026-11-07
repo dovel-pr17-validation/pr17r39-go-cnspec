@@ -1,0 +1,2819 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+policies:
+  - uid: mondoo-fortios-security
+    name: Mondoo Fortinet FortiOS Security
+    version: 1.0.5
+    license: BUSL-1.1
+    tags:
+      mondoo.com/category: security
+      mondoo.com/platform: fortios,networkdevice
+      mondoo.com/icon: fortinet
+    require:
+      - provider: fortios
+    authors:
+      - name: Mondoo, Inc.
+        email: hello@mondoo.com
+    summary: Secure Fortinet FortiOS firewall and FortiGate appliance configurations
+    docs:
+      desc: |
+        The Mondoo Fortinet FortiOS Security policy identifies critical misconfigurations on FortiGate firewalls and FortiOS appliances that could leave your perimeter and internal segmentation vulnerable to attackers. This policy helps organizations detect and remediate hardening gaps before they can be exploited, reducing the likelihood of unauthorized device access, policy bypass, traffic interception, and disruption of protected services.
+
+        This policy provides security checks across key FortiOS areas:
+
+        - **Firmware security**: GA status, maturity, and supported major version
+        - **System hardening**: Admin session timeouts, non-default management ports, and HA configuration
+        - **DNS and NTP**: DNS-over-TLS, NTP synchronization, and trusted server configuration
+        - **Logging and monitoring**: Implicit deny logging, external log destinations, and extended log formats
+        - **Firewall policy hygiene**: Restriction of overly permissive rules, UTM and SSL inspection, and traffic logging
+        - **Network interfaces**: Management access restrictions on WAN and removal of telnet access
+        - **Routing security**: BGP and OSPF neighbor change logging and graceful restart
+        - **FortiGuard subscriptions**: Active antispam, web filter, and outbreak prevention subscriptions
+
+        Learn more about scanning Fortinet FortiOS in the [cnspec Fortinet FortiOS documentation](https://mondoo.com/docs/cnspec/network/fortios).
+
+        Have suggestions for new checks in this policy? Visit our [cnspec repository](https://github.com/mondoohq/cnspec).
+
+    groups:
+      - title: Firmware Security
+        filters: asset.platform == "fortios"
+        checks:
+          - uid: mondoo-fortios-security-firmware-ga-release
+          - uid: mondoo-fortios-security-firmware-mature-release
+          - uid: mondoo-fortios-security-firmware-supported-major-version
+      - title: System Hardening
+        filters: asset.platform == "fortios"
+        checks:
+          - uid: mondoo-fortios-security-admin-timeout
+          - uid: mondoo-fortios-security-admin-https-non-default-port
+          - uid: mondoo-fortios-security-admin-ssh-non-default-port
+          - uid: mondoo-fortios-security-admin-scp-disabled
+          - uid: mondoo-fortios-security-ha-enabled
+          - uid: mondoo-fortios-security-ha-session-pickup
+      - title: DNS & NTP
+        filters: asset.platform == "fortios"
+        checks:
+          - uid: mondoo-fortios-security-dns-over-tls
+          - uid: mondoo-fortios-security-ntp-sync-enabled
+          - uid: mondoo-fortios-security-ntp-servers-configured
+      - title: Logging & Monitoring
+        filters: asset.platform == "fortios"
+        checks:
+          - uid: mondoo-fortios-security-log-implicit-deny
+          - uid: mondoo-fortios-security-log-local-in-denied-unicast
+          - uid: mondoo-fortios-security-log-extended-format
+          - uid: mondoo-fortios-security-log-no-user-anonymization
+          - uid: mondoo-fortios-security-log-syslog-enabled
+          - uid: mondoo-fortios-security-log-external-destination
+          - uid: mondoo-fortios-security-log-fortianalyzer-encryption
+          - uid: mondoo-fortios-security-log-fortianalyzer-reliable
+      - title: Firewall Policy
+        filters: asset.platform == "fortios"
+        checks:
+          - uid: mondoo-fortios-security-no-disabled-policies
+          - uid: mondoo-fortios-security-no-allow-all-rule
+          - uid: mondoo-fortios-security-policy-logging-enabled
+          - uid: mondoo-fortios-security-policy-utm-enabled
+          - uid: mondoo-fortios-security-policy-ssl-inspection
+      - title: Network Interfaces
+        filters: asset.platform == "fortios"
+        checks:
+          - uid: mondoo-fortios-security-wan-no-management-access
+          - uid: mondoo-fortios-security-no-telnet-access
+      - title: Routing Security
+        filters: asset.platform == "fortios"
+        checks:
+          - uid: mondoo-fortios-security-bgp-log-neighbor-changes
+          - uid: mondoo-fortios-security-bgp-graceful-restart
+          - uid: mondoo-fortios-security-ospf-log-neighbor-changes
+      - title: FortiGuard Subscriptions
+        filters: asset.platform == "fortios"
+        checks:
+          - uid: mondoo-fortios-security-fortiguard-antispam-active
+          - uid: mondoo-fortios-security-fortiguard-webfilter-active
+          - uid: mondoo-fortios-security-fortiguard-outbreak-prevention-active
+    scoring_system: highest impact
+queries:
+  - uid: mondoo-fortios-security-firmware-ga-release
+    title: Ensure firmware is a General Availability release
+    impact: 90
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-12
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a03
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-5
+    mql: fortios.system.firmware.current.releaseType == "GA"
+    docs:
+      desc: |
+        This check verifies that the FortiGate runs a General Availability firmware release rather than a beta, interim, or engineering build.
+
+        Fortinet publishes firmware in stages. General Availability builds have completed the full quality assurance cycle and are the only builds Fortinet supports in production, while interim and engineering builds are handed out to resolve a specific customer issue and carry fixes that have not been regression tested. The running build appears under **System > Firmware & Registration** in the web interface and in the output of `get system status`, and this check requires a release type of GA.
+
+        **Why this matters**
+
+        A non-GA build is a firmware image whose security fixes have not been cross-checked against the rest of the code base. An attacker holding a working exploit for a known FortiOS flaw does not care which branch the device is on, only whether the fix for that flaw is present and correct. Interim builds routinely lag the GA branch on unrelated security patches, so a device sitting on a months-old engineering build can be missing several rounds of fixes for the SSL-VPN and administrative daemons that get scanned for within days of every advisory.
+
+        Non-GA firmware also fails in ways that become outages rather than alerts. An unexpected reboot or a crashing inspection process on a perimeter firewall drops every tunnel the device terminates, and if the unit is not clustered the site stays dark until someone reaches the console.
+
+        Fortinet support is limited for non-GA builds, so when the device does misbehave the first instruction from support is to move to a GA release, which then happens during an incident instead of during a planned window.
+
+        If Fortinet has supplied an interim build to resolve a specific defect, run it only until that fix reaches a GA release, and track the return to GA as an open action item.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **System > Firmware & Registration**.
+        3. Review the **Current version** and confirm the release type.
+
+        A passing result shows a General Availability (GA) release. A failing result shows a beta, interim, or engineering build.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           get system status
+           ```
+
+        3. Inspect the **Version** line and the build's release type.
+
+        A passing result identifies the running firmware as a GA release. A failing result shows a non-GA build.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            1. Navigate to **System > Firmware & Registration**
+            2. Review the current firmware version and release type
+            3. Select a GA release from the available firmware versions
+            4. Click **Upgrade** and follow the prompts to install the GA firmware
+            5. The device will reboot to complete the upgrade
+
+            **Important**: Back up the device configuration before upgrading firmware. Navigate to **System > Configuration > Backups** and download the configuration file.
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Check the current firmware version:
+
+            ```text
+            get system status
+            ```
+
+            Back up the configuration before upgrading. `execute backup full-config` captures both user-specified and default settings, which gives you a complete restore point if the upgrade has to be rolled back:
+
+            ```text
+            execute backup full-config tftp <filename> <tftp_server_ip>
+            ```
+
+            Download a GA firmware image from [Fortinet Support](https://support.fortinet.com), stage it on a TFTP server, and install it. **`execute restore image` reboots the device immediately with no confirmation prompt and interrupts all traffic until FortiOS comes back up, so run it only during a maintenance window.** If your current version is several releases behind the GA target, follow the [FortiOS upgrade path tool](https://docs.fortinet.com/upgrade-tool/fortigate) and upgrade one hop at a time rather than jumping directly. Back up the configuration and verify the device is healthy after each hop before starting the next one:
+
+            ```text
+            execute restore image tftp <filename> <tftp_server_ip>
+            ```
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/596131/upgrading-individual-devices
+        title: FortiOS firmware upgrades
+      - url: https://docs.fortinet.com/document/fortigate/latest/fortios-release-notes/760203/introduction-and-supported-models
+        title: Introduction and supported models
+
+  - uid: mondoo-fortios-security-firmware-mature-release
+    title: Ensure firmware has reached mature release status
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-12
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a03
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-5
+    mql: fortios.system.firmware.current.maturity == "M"
+    docs:
+      desc: |
+        This check verifies that the FortiGate runs firmware Fortinet classifies as Mature rather than a Feature release.
+
+        Fortinet labels each FortiOS branch with a maturity level. Feature builds carry new capability and are still accumulating field exposure, while Mature builds have stopped taking new features and receive only stability and security fixes. The running build appears under **System > Firmware & Registration** and in the output of `get system status`, the FortiOS release notes state which branches have reached Mature status, and this check requires a maturity level of M.
+
+        **Why this matters**
+
+        New code on a firewall is new attack surface. A Feature branch ships parsers, protocol handlers, and management pages that have run in production for weeks rather than years, and the FortiOS advisories that get exploited at scale are consistently memory-safety and authentication-bypass defects in exactly that kind of freshly written code. Staying on a Mature branch means an attacker's newly discovered bug in a recent feature does not apply to the device at all.
+
+        Stability matters here for the same reason. A defect that crashes an inspection daemon on a perimeter firewall does not degrade gracefully. Sessions drop, tunnels renegotiate, and if the crash loops the site loses connectivity until someone reaches the console. Mature branches have had that class of defect shaken out by the installed base.
+
+        Firmware upgrades on a firewall need an outage window, so the branch chosen is the branch the device lives on for a long time. A Mature branch keeps it on a supported path that continues to receive fixes without forcing a feature-driven upgrade later.
+
+        Environments that genuinely need a capability present only in a Feature branch should run it deliberately, with a plan to move to the corresponding Mature release once Fortinet publishes it.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **System > Firmware & Registration**.
+        3. Review the current firmware version against the FortiOS release notes to determine its maturity level.
+
+        A passing result shows a release that Fortinet classifies as "Mature" (M). A failing result shows a "Feature" (F) release.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           get system status
+           ```
+
+        3. Compare the **Version** against the FortiOS release notes to determine its maturity level.
+
+        A passing result shows a Mature (M) release. A failing result shows a Feature (F) release.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            1. Back up the device configuration under **System > Configuration > Backups**
+            2. Navigate to **System > Firmware & Registration**
+            3. Review the available firmware versions and their maturity levels
+            4. Select a firmware version with "Mature" maturity status
+            5. Click **Upgrade** and follow the prompts; the device reboots to complete the upgrade
+
+            Consult the [Fortinet firmware maturity documentation](https://docs.fortinet.com/document/fortigate/latest/administration-guide/173707/firmware-maturity-levels) to identify which releases have reached Mature status for your platform.
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Check the current firmware status:
+
+            ```text
+            get system status
+            ```
+
+            Back up the configuration before upgrading. `execute backup full-config` captures both user-specified and default settings, which gives you a complete restore point if the upgrade has to be rolled back:
+
+            ```text
+            execute backup full-config tftp <filename> <tftp_server_ip>
+            ```
+
+            Download a Mature release from [Fortinet Support](https://support.fortinet.com) and install it. **`execute restore image` reboots the device immediately with no confirmation prompt and interrupts all traffic until FortiOS comes back up, so run it only during a maintenance window.** If the target Mature release is several versions ahead, follow the [FortiOS upgrade path tool](https://docs.fortinet.com/upgrade-tool/fortigate) and upgrade one hop at a time. Back up the configuration and verify the device is healthy after each hop before starting the next one:
+
+            ```text
+            execute restore image tftp <filename> <tftp_server_ip>
+            ```
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/596131/upgrading-individual-devices
+        title: FortiOS firmware upgrades
+      - url: https://docs.fortinet.com/document/fortigate/latest/fortios-release-notes/760203/introduction-and-supported-models
+        title: Introduction and supported models
+
+  - uid: mondoo-fortios-security-firmware-supported-major-version
+    title: Ensure firmware is a supported major version
+    impact: 95
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-id-ra-1
+      compliance/nist-csf-2: nist-csf-2-id-ra-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a03
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: soc2-control-cc7-1-2
+      compliance/vda-isa-5: vda-isa-5-5-2-5
+    # Review annually — update when older major versions reach EOL
+    mql: fortios.system.firmware.current.major >= 7
+    docs:
+      desc: |
+        This check verifies that the FortiGate runs a major FortiOS version that is still within Fortinet's support lifecycle.
+
+        Fortinet publishes an end of engineering support date and an end of support date for every FortiOS major version. Past those dates the branch receives no further security fixes, and FortiGuard entitlements and vendor assistance wind down with it. The running version appears under **System > Firmware & Registration** and in the output of `get system status`, and this check requires major version 7 or later.
+
+        **Why this matters**
+
+        An out-of-support major version is a device with a permanent, published list of unfixed vulnerabilities. Fortinet's advisories name the affected versions and the fixed versions, so when a branch has no fixed version the advisory reads as an exploitation guide for anyone scanning the public address. Several FortiOS pre-authentication flaws in the SSL-VPN and administrative daemons have been exploited at scale within days of disclosure, and unsupported devices stay exploitable indefinitely because there is no patch to apply.
+
+        Because the firewall terminates VPN tunnels and holds the certificates used for inspection, that exploitation is not contained to the appliance. An attacker who lands on the device reads the traffic crossing it, adds an administrative account or a local-in policy to get back in later, and reaches the internal networks the firewall is supposed to keep apart.
+
+        Support expiry also removes the safety net for everything else. FortiGuard signature feeds and vendor escalation follow the same lifecycle, so the device loses its detection content and its support path at the same moment it stops receiving patches.
+
+        Major-version upgrades change configuration semantics, so follow Fortinet's documented upgrade path through each intermediate release and back up the configuration before every hop.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **System > Firmware & Registration**.
+        3. Note the major version of the current firmware and check it against the [Fortinet product life cycle](https://support.fortinet.com/support/#/lifecycle).
+
+        A passing result shows a supported major version (7.x or later). A failing result shows a version that has reached end of engineering support or end of life.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           get system status
+           ```
+
+        3. Read the major version from the **Version** line and check it against the Fortinet product life cycle.
+
+        A passing result shows a supported major version (7.x or later). A failing result shows an unsupported major version.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            1. Navigate to **System > Firmware & Registration**
+            2. Review the available firmware versions for a supported major version (7.x or later)
+            3. Plan the upgrade path carefully — Fortinet recommends upgrading through intermediate versions rather than skipping major releases
+            4. Consult the [FortiOS upgrade path tool](https://docs.fortinet.com/upgrade-tool/fortigate) to determine the recommended upgrade sequence
+            5. Back up the configuration before each upgrade step
+            6. Perform the upgrade during a maintenance window
+
+            **Important**: Major version upgrades may introduce configuration changes. Review the release notes and migration guides for each version in the upgrade path.
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Check the current firmware version:
+
+            ```text
+            get system status
+            ```
+
+            Back up the configuration. `execute backup full-config` captures both user-specified and default settings, which gives you a complete restore point if an upgrade hop has to be rolled back:
+
+            ```text
+            execute backup full-config tftp <filename> <tftp_server_ip>
+            ```
+
+            Follow the [FortiOS upgrade path tool](https://docs.fortinet.com/upgrade-tool/fortigate) and upgrade through each required intermediate version. **`execute restore image` reboots the device immediately with no confirmation prompt and interrupts all traffic until FortiOS comes back up, so run it only during a maintenance window.** Run the command once per hop in the supported sequence rather than jumping straight to the target version, because skipping intermediate releases can corrupt the configuration migration. Back up the configuration and verify the device is healthy after each hop before starting the next one:
+
+            ```text
+            execute restore image tftp <filename> <tftp_server_ip>
+            ```
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/596131/upgrading-individual-devices
+        title: FortiOS firmware upgrades
+      - url: https://support.fortinet.com/support/#/lifecycle
+        title: Fortinet product life cycle
+      - url: https://docs.fortinet.com/upgrade-tool/fortigate
+        title: FortiGate firmware upgrade path tool
+  - uid: mondoo-fortios-security-admin-timeout
+    title: Ensure admin session timeout is 5 minutes or less
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-02
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-12
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-10
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: fortios.system.global.admintimeout > 0 && fortios.system.global.admintimeout <= 5
+    docs:
+      desc: |
+        This check verifies that idle administrative sessions on the FortiGate are terminated after five minutes or less.
+
+        The idle timeout closes a management session, in the web interface and on the command line, once it has gone that long without activity. It appears under **System > Settings** as **Idle Timeout** in the web interface, and in the CLI as `config system global` with `set admintimeout`, which on a multi-VDOM device is reached through `config global`. This check requires a value greater than zero and no more than five.
+
+        **Why this matters**
+
+        A live administrative session is full control of the firewall without a password. An attacker who reaches an unlocked workstation, or who takes over a session on a shared jump host, inherits that control and can add an administrator account, insert a permissive firewall policy, extend the access list on a WAN interface to open a way back in, or export the whole configuration with its VPN keys and stored credentials.
+
+        Long timeouts also widen the window for session reuse after a laptop is lost or an operations console is left logged in. With a five minute limit an abandoned session is gone before an opportunist finds it, and the attacker has to produce credentials and any second factor rather than picking up where an administrator stopped.
+
+        Setting the value to zero disables the timeout completely and leaves sessions open until the device or the client tears them down, which is why this check requires a positive value as well as a short one.
+
+        Automation that holds a long-lived command line session should be reworked to authenticate per run, rather than justifying a longer timeout for every human administrator.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **System > Settings**.
+        3. Under **Administration Settings**, read the **Idle Timeout** value.
+
+        A passing result shows an idle timeout of 5 minutes or less. A failing result shows a timeout greater than 5 minutes.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           get system global | grep admintimeout
+           ```
+
+        A passing result reports `admintimeout` between 1 and 5. A failing result reports a value above 5 or 0 (no timeout).
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            1. Navigate to **System > Settings**
+            2. Under **Administration Settings**, set **Idle Timeout** to 5 minutes or less
+            3. Click **Apply**
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            On a multi-VDOM device, first run `config global`.
+
+            ```text
+            config system global
+                set admintimeout 5
+            end
+            ```
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/215451/setting-the-idle-timeout-time
+        title: Setting the idle timeout time
+
+  - uid: mondoo-fortios-security-admin-https-non-default-port
+    title: Ensure HTTPS admin port is non-default
+    impact: 30
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-pt-3
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: fortios.system.global.adminSport != 443
+    docs:
+      desc: |
+        This check verifies that the HTTPS administrative interface listens on a port other than the default 443.
+
+        The administrative HTTPS listener is what serves the FortiGate web interface. Its port is set under **System > Settings** as **HTTPS port**, or in the CLI with `config system global` and `set admin-sport`, and this check requires any value other than 443.
+
+        **Why this matters**
+
+        Mass scanning for FortiGate management interfaces is continuous and cheap. Internet-wide scanners sweep port 443 for the FortiOS login page, index what they find, and publish or sell the result, so a device on the default port appears in a searchable list of FortiGates within hours of being connected. When the next pre-authentication advisory lands, that list is the target list, and exploitation has followed disclosure by days.
+
+        Moving the listener does not stop an attacker who scans every port, but it takes the device out of the cheap sweeps that drive commodity exploitation and credential stuffing, and it makes the traffic that does arrive on the new port far more interesting to investigate.
+
+        The change supplements restricting where administration can happen at all and never replaces it. Pair it with trusted host entries on every administrator account and an interface access list that does not offer management on internet-facing interfaces. Choose a port that does not collide with the SSL-VPN listener, because if the two overlap one of the services fails to bind and either administrators or VPN users lose access.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **System > Settings**.
+        3. Under **Administration Settings**, read the **HTTPS port** value.
+
+        A passing result shows a non-default port. A failing result shows port 443.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           get system global | grep admin-sport
+           ```
+
+        A passing result reports `admin-sport` set to any value other than 443. A failing result reports `admin-sport` of 443.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            1. Navigate to **System > Settings**
+            2. Under **Administration Settings**, change the **HTTPS port** to a non-standard port such as 8443
+            3. Click **Apply**
+
+            **Important**: Choose a port that does not overlap the SSL-VPN listening `port`, which commonly uses 443 or 8443. If the admin HTTPS port and the SSL-VPN port collide, one of the services fails to bind and either administrators or VPN users lose access. After you apply the change, the web session disconnects and you must reconnect to the new port, for example `https://<device-ip>:8443`. Inform all administrators of the new port and update any bookmarks or management tools accordingly.
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            On a multi-VDOM device, first run `config global`.
+
+            Pick a port that does not overlap the SSL-VPN listening `port`, which commonly uses 443 or 8443. If `admin-sport` collides with the SSL-VPN port, one of the two services fails to bind and either administrators or VPN users lose access.
+
+            ```text
+            config system global
+                set admin-sport 8443
+            end
+            ```
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/616955/configuring-ports
+        title: Changing the FortiOS admin ports
+
+  - uid: mondoo-fortios-security-admin-ssh-non-default-port
+    title: Ensure SSH admin port is non-default
+    impact: 30
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-pt-3
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: fortios.system.global.adminSshPort != 22
+    docs:
+      desc: |
+        This check verifies that the SSH administrative service listens on a port other than the default 22.
+
+        SSH gives full command line control of the FortiGate, including configuration export and firmware installation. Its port is set under **System > Settings** as **SSH port**, or in the CLI with `config system global` and `set admin-ssh-port`, and this check requires any value other than 22.
+
+        **Why this matters**
+
+        Credential-guessing botnets hammer port 22 on every routable address around the clock. On the default port a FortiGate absorbs thousands of authentication attempts a day from that background traffic, and every one of them is a chance that a reused or weak administrator password lands. Moving the listener drops that volume to almost nothing.
+
+        The noise is also what hides the real attempt. When the log is full of automated guessing against port 22, a targeted attack on a named administrator account is invisible inside it. On an unusual port nearly every connection attempt is worth looking at, which turns the authentication log from something nobody reads into a usable signal.
+
+        Scanners that enumerate every port still find the service and fingerprint it as FortiOS SSH, so treat this as one layer. Restrict administrator logins with trusted host entries, prefer key authentication where the workflow allows it, and keep SSH out of the interface access list on internet-facing interfaces entirely.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **System > Settings**.
+        3. Under **Administration Settings**, read the **SSH port** value.
+
+        A passing result shows a non-default port. A failing result shows port 22.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           get system global | grep admin-ssh-port
+           ```
+
+        A passing result reports `admin-ssh-port` set to any value other than 22. A failing result reports `admin-ssh-port` of 22.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            1. Navigate to **System > Settings**
+            2. Under **Administration Settings**, change the **SSH port** to a non-standard port (e.g., 2222)
+            3. Click **Apply**
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            On a multi-VDOM device, first run `config global`.
+
+            ```text
+            config system global
+                set admin-ssh-port 2222
+            end
+            ```
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/616955/configuring-ports
+        title: Changing the FortiOS admin ports
+
+  - uid: mondoo-fortios-security-admin-scp-disabled
+    title: Ensure SCP admin access is disabled
+    impact: 50
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-pt-3
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: fortios.system.global.adminScp == "disable"
+    docs:
+      desc: |
+        This check verifies that SCP access to the FortiGate configuration is disabled.
+
+        With SCP enabled the SSH daemon additionally serves file transfer, letting anyone who can authenticate as an administrator copy the device configuration off the unit or push a file onto it in a single non-interactive command. The option appears under **System > Settings** as **SCP**, and in the CLI as `config system global` with `set admin-scp`. This check requires it to be disabled.
+
+        **Why this matters**
+
+        The FortiGate configuration file is the most valuable object on the device. It holds the full policy set, the address objects that map the internal network, the administrator definitions, IPsec preshared keys, and stored credentials for authentication servers and cloud connectors. SCP turns exfiltrating all of that into one command, fast enough to finish before anyone reads an alert and quiet enough to leave nothing in the web interface audit trail.
+
+        The same channel works in the other direction. An attacker with administrative credentials can push a prepared configuration that adds an account, offers management on a WAN interface, or installs a local-in policy allowing their own address, then let the device load it, which is far less conspicuous than typing those changes at a console.
+
+        Disabling SCP removes no administrative capability, because configuration backup and restore remain available through the web interface and through `execute backup` and `execute restore` on the command line.
+
+        If a migration or a support case genuinely needs SCP, enable it for the duration of that work and turn it off when the work is finished.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **System > Settings**.
+        3. Under **Administration Settings**, check the **SCP** toggle.
+
+        A passing result shows SCP disabled. A failing result shows SCP enabled.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           get system global | grep admin-scp
+           ```
+
+        A passing result reports `admin-scp` set to `disable`. A failing result reports `admin-scp` set to `enable`.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            1. Navigate to **System > Settings**
+            2. Under **Administration Settings**, ensure **SCP** is set to **Disabled**
+            3. Click **Apply**
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            On a multi-VDOM device, first run `config global`.
+
+            ```text
+            config system global
+                set admin-scp disable
+            end
+            ```
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/
+        title: FortiOS administration guide
+
+  - uid: mondoo-fortios-security-ha-enabled
+    title: Ensure high availability mode is enabled
+    impact: 50
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-bcr-08
+      compliance/dora: dora-art-12
+      compliance/hipaa: hipaa-security-ss164-308-a-7-ii-a-contingency-plan-data-backup-plan
+      compliance/iso-27001-2022: iso-27001-2022-a-8-14
+      compliance/nis-2: nis-2-21-2-c
+      compliance/nist-csf-1: nist-csf-1-pr-pt-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cp-10
+      compliance/nist-sp-800-171: nist-sp-800-171--3-6-1
+      compliance/owasp-top-10-2025: false
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc9-1-1
+      compliance/vda-isa-5: vda-isa-5-3-1-2
+    mql: fortios.system.ha.mode != "standalone"
+    docs:
+      desc: |
+        This check verifies that the FortiGate is a member of a high availability cluster rather than running standalone.
+
+        In a high availability cluster two or more units share a virtual identity and exchange heartbeats, so that if one stops responding another takes over the traffic without an administrator being involved. The mode is set under **System > HA** in the web interface, or in the CLI with `config system ha` and `set mode`, and this check requires any mode other than standalone.
+
+        **Why this matters**
+
+        A standalone perimeter firewall is a single point of failure for everything behind it. When it dies, whether from a power supply, a firmware defect, or a crash triggered by hostile traffic, it does not fail open into an unprotected state. It fails closed and the site goes offline until someone physically replaces the unit and restores a configuration, which at a remote location is measured in hours or days.
+
+        Denial of service against the device therefore becomes a business outage rather than a nuisance. An attacker who can reliably crash or exhaust one unit takes the site down and can repeat it after each manual recovery. With a cluster the peer picks the traffic up, and the same attack costs the attacker a failover instead of a day of downtime.
+
+        Standalone also removes the safe way to install firmware. Patching means an outage window, outage windows get postponed, and that is the mechanism by which firewalls stay on vulnerable builds for years. A cluster allows one member to be upgraded at a time, so the security fix and the availability requirement stop competing.
+
+        Small sites where a second unit is not justified should compensate with a documented spare, a current configuration backup held off the device, and a rehearsed recovery procedure.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **System > HA**.
+        3. Read the configured **Mode**.
+
+        A passing result shows Active-Passive or Active-Active mode. A failing result shows Standalone mode.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           get system ha | grep mode
+           ```
+
+        A passing result reports a `mode` of `a-p` or `a-a`. A failing result reports `standalone`.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            1. Navigate to **System > HA**
+            2. Set **Mode** to **Active-Passive** or **Active-Active** depending on your requirements
+            3. Configure HA group settings, priorities, and heartbeat interfaces
+            4. Click **Apply**
+
+            **Important**: HA configuration requires a second FortiGate unit with matching hardware and firmware. Plan the deployment carefully and perform the configuration during a maintenance window.
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            **Important**: HA configuration requires a second FortiGate unit with matching hardware, firmware, and licenses. Forming a cluster renegotiates interfaces and can briefly interrupt traffic, so apply this change during a maintenance window from the console or a dedicated management interface. Set a cluster password so only authorized units can join.
+
+            ```text
+            config system ha
+                set mode a-p
+                set group-name "fg-cluster"
+                set password <cluster-password>
+                set hbdev "port3" 50
+                set priority 200
+            end
+            ```
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/587596/ha
+        title: FortiOS high availability
+
+  - uid: mondoo-fortios-security-ha-session-pickup
+    title: Ensure HA session pickup is enabled
+    impact: 50
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-bcr-08
+      compliance/dora: dora-art-12
+      compliance/hipaa: hipaa-security-ss164-308-a-7-ii-a-contingency-plan-data-backup-plan
+      compliance/iso-27001-2022: iso-27001-2022-a-8-14
+      compliance/nis-2: nis-2-21-2-c
+      compliance/nist-csf-1: nist-csf-1-pr-pt-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cp-10
+      compliance/nist-sp-800-171: nist-sp-800-171--3-6-1
+      compliance/owasp-top-10-2025: false
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc9-1-1
+      compliance/vda-isa-5: vda-isa-5-3-1-2
+    mql: fortios.system.ha.mode == "standalone" || fortios.system.ha.sessionPickup == "enable"
+    docs:
+      desc: |
+        This check verifies that a clustered FortiGate synchronizes its session table to its peers so established connections survive a failover.
+
+        Session pickup copies the state of active sessions from the primary unit to the other cluster members as those sessions are created, which is what lets the new primary keep forwarding existing flows instead of dropping them for having no matching state. It is set under **System > HA** as **Session pickup**, or in the CLI with `config system ha` and `set session-pickup enable`. This check requires it on a clustered device and passes on a standalone unit, where there is no peer to synchronize with.
+
+        **Why this matters**
+
+        Without session pickup a failover is indistinguishable from a reboot for every connection crossing the firewall. IPsec and SSL-VPN tunnels renegotiate, database and application sessions reset, calls drop, and long-running transfers restart, so a hardware fault or a firmware upgrade on one member produces the visible outage the cluster was bought to prevent.
+
+        That predictable outage is also a lever. An attacker who can force a failover, by crashing the active unit or by disrupting the heartbeat path, flushes every established session on demand. The reconnection storm that follows is a denial of service in its own right and a noisy window in which individual malicious connections are hard to pick out of thousands of legitimate re-establishments.
+
+        Synchronizing sessions costs memory and heartbeat bandwidth on very large session tables. Where that cost is real, narrow it with the session pickup delay option, which synchronizes only sessions that have lasted long enough to be worth preserving, rather than switching the feature off.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **System > HA**.
+        3. Check whether **Session Pickup** is enabled.
+
+        A passing result shows Session Pickup enabled, or the device running in Standalone mode. A failing result shows an HA cluster with Session Pickup disabled.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           get system ha | grep session-pickup
+           ```
+
+        A passing result reports `session-pickup` set to `enable`, or the device in standalone mode. A failing result reports `session-pickup` set to `disable` on an HA cluster.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            1. Navigate to **System > HA**
+            2. Enable **Session Pickup**
+            3. Click **Apply**
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            ```text
+            config system ha
+                set session-pickup enable
+            end
+            ```
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/587596/ha
+        title: FortiOS high availability
+
+  - uid: mondoo-fortios-security-dns-over-tls
+    title: Ensure DNS-over-TLS is enabled
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-20
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: fortios.system.dns.dnsOverTls == "enable"
+    docs:
+      desc: |
+        This check verifies that the FortiGate encrypts its own DNS queries with DNS over TLS.
+
+        The device resolves names for FortiGuard updates, fully qualified domain name address objects, certificate revocation checks, and administrative tooling, and by default it does so in cleartext. Encrypted resolution is selected under **Network > DNS** in the web interface, or in the CLI with `config system dns` and `set protocol dot` on FortiOS 7.0 and later, or `set dns-over-tls enable` on earlier releases. This check requires DNS over TLS to be in use.
+
+        **Why this matters**
+
+        Cleartext DNS from the firewall is both readable and writable by anyone on the path. An attacker who answers a query first controls what a domain name address object resolves to, and those objects are how firewall policies name partners, update services, and SaaS endpoints. Poisoning one turns a policy written to permit traffic to a vendor into a policy that permits traffic to the attacker, with no change appearing anywhere in the rule base.
+
+        The same position redirects the device's own outbound calls. FortiGuard update and rating lookups start with a name, so a forged answer can point the device at a host the attacker controls and stall or subvert signature delivery, while the device keeps reporting a healthy configuration as its detection content goes stale.
+
+        Even purely passive observation is useful. The resolution stream from a firewall reveals which security services it subscribes to, which partners and internal services it fronts, and when maintenance happens, all of which is reconnaissance for the attack that follows.
+
+        Encrypting resolution moves trust onto the resolver you name, so point the device at resolvers you operate or contract with, and have it verify the server certificate rather than accepting whatever answers.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **Network > DNS**.
+        3. Under **DNS Protocols**, check whether **DNS over TLS** is selected.
+
+        A passing result shows DNS over TLS enabled. A failing result shows it disabled.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           get system dns
+           ```
+
+        On FortiOS 7.0 and later, a passing result reports `protocol` set to `dot`. On FortiOS 6.4 and earlier, a passing result reports `dns-over-tls` set to `enable`. A failing result reports cleartext DNS resolution.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            1. Navigate to **Network > DNS**
+            2. Set **DNS servers** to **Specify**
+            3. Under **DNS Protocols**, select **DNS over TLS**
+            4. Ensure the configured DNS servers support DNS over TLS, such as Cloudflare 1.1.1.1 or Google 8.8.8.8
+            5. Click **Apply**
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            On a multi-VDOM device, first run `config global`.
+
+            FortiOS 7.0 and later select the DNS transport with the `protocol` option:
+
+            ```text
+            config system dns
+                set protocol dot
+                set ssl-certificate "Fortinet_Factory"
+            end
+            ```
+
+            FortiOS 6.4 and earlier use the `dns-over-tls` option:
+
+            ```text
+            config system dns
+                set dns-over-tls enable
+            end
+            ```
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/780581/dns
+        title: FortiOS DNS configuration
+
+  - uid: mondoo-fortios-security-ntp-sync-enabled
+    title: Ensure NTP synchronization is enabled
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-08
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-17
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-pt-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-04
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-2-1
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    mql: fortios.system.ntp.ntpsync == "enable"
+    docs:
+      desc: |
+        This check verifies that the FortiGate synchronizes its clock with an external time source.
+
+        Time synchronization keeps the device clock aligned with a reference so that logs, certificate checks, and time-based authentication agree with the rest of the estate. It is turned on under **System > Settings** in the **System Time** section, or in the CLI with `config system ntp` and `set ntpsync enable`, and this check requires it to be enabled.
+
+        **Why this matters**
+
+        Log timestamps are the only thing tying firewall events to events on servers, endpoints, and identity providers. A drifting clock does not announce itself. It produces an incident timeline in which the firewall's record of a connection sits minutes or hours away from the endpoint's record of the same connection, and an analyst reconstructing an intrusion either draws the wrong causal order or discards the firewall evidence entirely.
+
+        Clock error also breaks security functions outright rather than gradually. Certificate validity is evaluated against the device clock, so a device far enough off rejects valid certificates or accepts expired ones on FortiGuard connections and inspected sessions. Time-based one-time passwords for administrator login stop working, and Kerberos authentication in directory-integrated deployments refuses tickets outside a tight tolerance, which turns a quiet drift into a lockout in the middle of an incident.
+
+        An attacker who reaches an unsynchronized device gains a small but real advantage, because timestamps that cannot be correlated with anything else are timestamps that are easy to dispute.
+
+        Synchronization is only as trustworthy as its source, so pair this with time servers you operate or trust rather than leaving the device pointed at whatever default it shipped with.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **System > Settings**.
+        3. Under **Time**, check whether **Synchronize with NTP Server** is selected.
+
+        A passing result shows NTP synchronization enabled. A failing result shows the system time set manually.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           get system ntp | grep ntpsync
+           ```
+
+        A passing result reports `ntpsync` set to `enable`. A failing result reports `disable`.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            1. Navigate to **System > Settings**
+            2. Under **Time**, enable **NTP synchronization**
+            3. Configure at least one reliable NTP server
+            4. Click **Apply**
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            On a multi-VDOM device, first run `config global`.
+
+            ```text
+            config system ntp
+                set ntpsync enable
+                set type custom
+                config ntpserver
+                    edit 1
+                        set server "pool.ntp.org"
+                    next
+                end
+            end
+            ```
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/512210/setting-the-system-time
+        title: Setting the system time
+
+  - uid: mondoo-fortios-security-ntp-servers-configured
+    title: Ensure NTP servers are configured
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-08
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-17
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-pt-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-04
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-2-1
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    mql: fortios.system.ntp.servers.length > 0
+    docs:
+      desc: |
+        This check verifies that the FortiGate has at least one time server configured to synchronize against.
+
+        Enabling synchronization selects the behavior, and the server list supplies the reference it uses. Servers are entered under **System > Settings** in the **System Time** section by choosing a custom time source, or in the CLI with `config system ntp`, `set type custom`, and a `config ntpserver` block naming each server. This check requires the list to hold at least one entry.
+
+        **Why this matters**
+
+        Synchronization with no configured source silently does nothing. The device reports that it is set to synchronize, nobody looks again, and the clock drifts exactly as it would with the feature switched off, so the failure surfaces during an investigation when the log timeline does not line up with anything else.
+
+        The choice of source is itself a security decision. A device pointed at whatever public server happened to be in the shipped configuration takes its notion of time from a host nobody in the organization controls, and unauthenticated time answers are forgeable by anyone on the path, which lets an attacker step the clock far enough to make expired certificates appear valid or to scatter log timestamps.
+
+        A single server is also a single point of failure. When it becomes unreachable the device falls back to free-running and drifts, whereas several sources let it discard an outlier instead of following it.
+
+        Configure two or three servers, preferably internal ones that in turn synchronize with a small number of vetted upstream sources, so both the availability and the trustworthiness of time are under your control.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **System > Settings**.
+        3. Under **Time**, review the list of configured NTP servers.
+
+        A passing result shows at least one NTP server configured. A failing result shows no NTP servers configured.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           show system ntp
+           ```
+
+        A passing result shows one or more entries under `config ntpserver`. A failing result shows an empty `ntpserver` table.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            1. Navigate to **System > Settings**
+            2. Under **Time**, ensure at least one NTP server is configured
+            3. Recommended: configure two or more NTP servers for redundancy
+            4. Click **Apply**
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            On a multi-VDOM device, first run `config global`.
+
+            ```text
+            config system ntp
+                set ntpsync enable
+                set type custom
+                config ntpserver
+                    edit 1
+                        set server "pool.ntp.org"
+                    next
+                    edit 2
+                        set server "time.cloudflare.com"
+                    next
+                end
+            end
+            ```
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/512210/setting-the-system-time
+        title: Setting the system time
+
+  - uid: mondoo-fortios-security-log-implicit-deny
+    title: Ensure implicit deny traffic is logged
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-08
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-15
+      compliance/nis-2: nis-2-21-2-b
+      compliance/nist-csf-1: nist-csf-1-de-cm-1
+      compliance/nist-csf-2: nist-csf-2-de-cm-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-2-1
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    mql: fortios.log.setting.fwpolicyImplicitLog == "enable"
+    docs:
+      desc: |
+        This check verifies that traffic dropped by the implicit deny policy is written to the log.
+
+        Every FortiGate policy table ends with an implicit deny that discards anything no explicit policy matched, and unless logging for it is turned on those drops leave no record at all. The option exists only in the CLI, as `config log setting` with `set fwpolicy-implicit-log enable`, and this check requires it to be enabled.
+
+        **Why this matters**
+
+        The implicit deny is where reconnaissance lands. Port sweeps, service probes, and the slow enumeration that precedes a targeted attack all fail against policies that do not match them, so with implicit logging off the firewall discards the best early indicator it has and the security team sees nothing until the attacker finds something that is permitted.
+
+        It is also where lateral movement fails first. A compromised internal host reaching for segments it has no business in generates a stream of denied sessions, and that stream is often the earliest evidence that a workstation is under someone else's control. Without the log there is no stream, and the containment opportunity passes.
+
+        Silent drops are also what make firewall troubleshooting expensive. Traffic that should have matched a policy but does not disappears without explanation, and the usual response under time pressure is to add a broad permissive policy rather than to find the real gap.
+
+        Implicit deny logging on a busy internet-facing interface produces significant volume, so plan the forwarding and retention for it and filter at the collector rather than turning the source off.
+      audit: |
+        Implicit deny logging is the `fwpolicy-implicit-log` option in `config log setting`, a global log setting rather than a property of a firewall policy, and it is not exposed in the FortiGate web interface. Audit it from the CLI.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           get log setting | grep fwpolicy-implicit-log
+           ```
+
+        A passing result reports `fwpolicy-implicit-log` set to `enable`. A failing result reports `disable`.
+      remediation:
+        # No console remediation: fwpolicy-implicit-log lives in "config log setting" as a global log setting and is not exposed in the FortiGate web interface. The GUI "Log Violation Traffic" toggle sets logtraffic on a user-created deny policy, which is a different config node and leaves fwpolicy-implicit-log unchanged.
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            On a multi-VDOM device, first run `config global`.
+
+            The implicit deny logging option is available only in the CLI:
+
+            ```text
+            config log setting
+                set fwpolicy-implicit-log enable
+            end
+            ```
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/202167/logging-and-reporting-concepts
+        title: Logging and reporting concepts
+
+  - uid: mondoo-fortios-security-log-local-in-denied-unicast
+    title: Ensure denied local-in unicast traffic is logged
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-08
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-15
+      compliance/nis-2: nis-2-21-2-b
+      compliance/nist-csf-1: nist-csf-1-de-cm-1
+      compliance/nist-csf-2: nist-csf-2-de-cm-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-2-1
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    mql: fortios.log.setting.localInDenyUnicast == "enable"
+    docs:
+      desc: |
+        This check verifies that unicast traffic denied by the local-in policy, meaning traffic addressed to the FortiGate itself, is logged.
+
+        Local-in traffic is everything sent to the device's own addresses rather than through it: administrative logins, VPN negotiation, routing protocol packets, and SNMP polls. Local-in denies are logged separately from forwarded traffic, and the option exists only in the CLI, as `config log setting` with `set local-in-deny-unicast enable`. This check requires it to be enabled.
+
+        **Why this matters**
+
+        Attacks on a FortiGate are aimed at the device, not through it, so they appear in this log and nowhere else. Password guessing against the web interface and SSH, probing of the SSL-VPN listener, and attempts to reach management services that the interface access list refuses are all local-in denies, and with the option off the device absorbs every one of them in silence.
+
+        That silence matters because Fortinet has repeatedly disclosed pre-authentication flaws in the administrative and VPN daemons, and exploitation has followed disclosure within days. The reconnaissance that precedes it is visible as denied local-in traffic from addresses that have no business talking to the firewall, so losing the record means the first sign of compromise is an attacker who already holds an account.
+
+        Denied local-in traffic is also the honest measure of whether the interface access lists are doing their job. A steady stream of refused management connections from the internet says the exposure is real even though the current configuration happens to block it.
+
+        Broadcast and multicast local-in denies are governed by separate options, so enable those as well where the device sits on a segment on which that traffic is worth recording.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **Log & Report > Log Settings**.
+        3. On the **Global Settings** tab, check whether **Log denied unicast traffic** is enabled. The toggle is visible when **Local traffic logging** is set to **Specify**.
+
+        A passing result shows local-in denied unicast logging enabled. A failing result shows it disabled.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           get log setting | grep local-in-deny-unicast
+           ```
+
+        A passing result reports `local-in-deny-unicast` set to `enable`. A failing result reports `disable`.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            1. Navigate to **Log & Report > Log Settings**
+            2. On the **Global Settings** tab, set **Local traffic logging** to **Specify**
+            3. Enable **Log denied unicast traffic**
+            4. Click **Apply**
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            On a multi-VDOM device, first run `config global`.
+
+            ```text
+            config log setting
+                set local-in-deny-unicast enable
+            end
+            ```
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/202167/logging-and-reporting-concepts
+        title: Logging and reporting concepts
+
+  - uid: mondoo-fortios-security-log-extended-format
+    title: Ensure extended log format is enabled
+    impact: 50
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-08
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-15
+      compliance/nis-2: nis-2-21-2-b
+      compliance/nist-csf-1: nist-csf-1-de-ae-3
+      compliance/nist-csf-2: nist-csf-2-de-ae-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-2-1
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    mql: fortios.log.setting.extendedLog == "enable"
+    docs:
+      desc: |
+        This check verifies that the FortiGate writes logs in the extended format, which carries the additional fields security tooling needs.
+
+        A standard log entry records the session skeleton: source, destination, service, and action. Extended format adds the application, URL, and threat context the inspection engines produced while handling the session. The option exists only in the CLI, as `config log setting` with `set extended-log enable`, and this check requires it to be enabled.
+
+        **Why this matters**
+
+        A log line saying that a host opened an outbound TLS session to an address is nearly useless during an investigation, because that description fits both a software update and an exfiltration channel. The extended fields are what separate them, naming the application, the destination category, and the verdict the inspection engines reached. Without them an analyst has to go to the endpoint for information the firewall already had and threw away.
+
+        Detection content depends on the same fields. Rules that alert on a user reaching a newly registered domain, on an application that should not be in use, or on a repeated threat verdict cannot be written against records that contain neither the application nor the URL, so the collector receives a large volume of data with very little detectable structure in it.
+
+        The extra detail also shortens containment. When the fields identifying what was transferred are already in the record, scoping an incident is a query instead of a forensic exercise on every affected host.
+
+        Extended entries are larger, so size retention and any per-day licensing on the collector accordingly rather than trading away the fields that make the log usable.
+      audit: |
+        The global extended log format option is not exposed in the FortiGate web interface. Audit it from the CLI.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           get log setting | grep extended-log
+           ```
+
+        A passing result reports `extended-log` set to `enable`. A failing result reports `disable`.
+      remediation:
+        # No console remediation: the global extended-log option in "config log setting" is not exposed in the FortiGate web interface; it is configurable only in the CLI.
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            On a multi-VDOM device, first run `config global`.
+
+            The global extended log format option is available only in the CLI:
+
+            ```text
+            config log setting
+                set extended-log enable
+            end
+            ```
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/202167/logging-and-reporting-concepts
+        title: Logging and reporting concepts
+
+  - uid: mondoo-fortios-security-log-no-user-anonymization
+    title: Ensure user anonymization is disabled in logs
+    impact: 50
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-08
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-15
+      compliance/nis-2: nis-2-21-2-b
+      compliance/nist-csf-1: nist-csf-1-de-ae-3
+      compliance/nist-csf-2: nist-csf-2-de-ae-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-2-1
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    mql: fortios.log.setting.userAnonymize == "disable"
+    docs:
+      desc: |
+        This check verifies that the FortiGate records real user names in its logs rather than replacing them with anonymous identifiers.
+
+        When anonymization is on, FortiOS substitutes a placeholder for the authenticated user in log entries, so the record shows that something happened but not who did it. The option exists only in the CLI, as `config log setting` with `set user-anonymize`, and this check requires it to be disabled.
+
+        **Why this matters**
+
+        Attribution is what makes a firewall log actionable. During an intrusion the question is which account is being used, because that determines which credentials to reset, which endpoint to isolate, and how far the attacker has already reached. An anonymized log answers none of it. It shows a session from an address, which in an environment with roaming users and shared egress is not a person.
+
+        Insider misuse becomes effectively uninvestigable. Data staged to a personal cloud service, access to systems outside a role, and slow collection over weeks are patterns that exist only when actions can be tied to an identity across time, and anonymization removes the key that makes the pattern visible.
+
+        Detection tooling loses the same key. Correlation between the firewall, the identity provider, and endpoint telemetry is keyed on the user, so anonymized firewall records cannot be joined to a suspicious sign-in or a malicious process, and the rules that would have caught the combination never fire.
+
+        Where privacy rules genuinely require that names not be broadly visible, apply the restriction at the collector with access controls and a documented process for re-identification during an investigation, rather than destroying the attribution at the source where it cannot be recovered.
+      audit: |
+        The user-anonymize option is not exposed in the FortiGate web interface. Audit it from the CLI.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           get log setting | grep user-anonymize
+           ```
+
+        A passing result reports `user-anonymize` set to `disable`. A failing result reports `enable`.
+      remediation:
+        # No console remediation: the user-anonymize option in "config log setting" is not exposed in the FortiGate web interface; it is configurable only in the CLI.
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            On a multi-VDOM device, first run `config global`.
+
+            The user anonymization option is available only in the CLI:
+
+            ```text
+            config log setting
+                set user-anonymize disable
+            end
+            ```
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/202167/logging-and-reporting-concepts
+        title: Logging and reporting concepts
+
+  - uid: mondoo-fortios-security-log-syslog-enabled
+    title: Ensure syslog forwarding is enabled
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-08
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-15
+      compliance/nis-2: nis-2-21-2-b
+      compliance/nist-csf-1: nist-csf-1-de-cm-1
+      compliance/nist-csf-2: nist-csf-2-de-cm-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-4
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-2-1
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    mql: fortios.log.syslog.status == "enable"
+    docs:
+      desc: |
+        This check verifies that the FortiGate forwards its logs to a syslog collector.
+
+        Syslog forwarding streams log entries off the device as they are produced, to a server you name. It is configured under **Log & Report > Log Settings** in the web interface, or in the CLI with `config log syslogd setting` using `set status enable` together with a `set server` address. This check requires the syslog destination to be enabled.
+
+        **Why this matters**
+
+        Logs that exist only on the firewall are logs the attacker owns as soon as the firewall is compromised. An intruder with administrative access clears local storage, or simply resets the unit, and the record of how they arrived and what they reached goes with it. Forwarded entries are already on another host by then, which is what makes them evidence.
+
+        Local storage is also small and volatile. Many FortiGate models log to memory or to a modest flash partition and roll over within hours under load, so even with no attacker involved the entries covering an incident are frequently gone before anyone goes looking, and a hardware failure takes the rest.
+
+        Forwarding is the only path to correlation as well. Firewall records become useful when they sit alongside identity, endpoint, and server telemetry in one place, and a firewall that keeps its logs to itself contributes nothing to detection rules that span those sources.
+
+        Send syslog over TCP or TLS to a collector the firewall administrators cannot delete from, and monitor for the absence of the stream, because a forwarding destination nobody watches fails silently.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **Log & Report > Log Settings**.
+        3. Under **Remote Logging**, check whether **Send logs to syslog** is enabled and a server is configured.
+
+        A passing result shows syslog forwarding enabled. A failing result shows it disabled.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           get log syslogd setting | grep status
+           ```
+
+        A passing result reports `status` set to `enable`. A failing result reports `disable`.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            1. Navigate to **Log & Report > Log Settings**
+            2. Under **Remote Logging**, enable **Syslog**
+            3. Configure the syslog server IP address and port
+            4. Select the appropriate facility and log level
+            5. Click **Apply**
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            On a multi-VDOM device, first run `config global`.
+
+            ```text
+            config log syslogd setting
+                set status enable
+                set server "10.0.0.100"
+                set port 514
+                set facility local7
+            end
+            ```
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/202167/logging-and-reporting-concepts
+        title: Logging and reporting concepts
+
+  - uid: mondoo-fortios-security-log-external-destination
+    title: Ensure an external log destination is configured
+    impact: 85
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-08
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-15
+      compliance/nis-2: nis-2-21-2-b
+      compliance/nist-csf-1: nist-csf-1-de-cm-1
+      compliance/nist-csf-2: nist-csf-2-de-cm-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-4
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-2-1
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    mql: |
+      fortios.log.syslog.status == "enable" || fortios.log.fortianalyzer.status == "enable"
+    docs:
+      desc: |
+        This check verifies that the FortiGate sends its logs to at least one destination outside the device, either a syslog collector or a FortiAnalyzer.
+
+        FortiOS can hold logs in memory or on local disk, and it can additionally stream them to an external system. Both external options are configured under **Log & Report > Log Settings**, or in the CLI with `config log syslogd setting` or `config log fortianalyzer setting`, in each case using `set status enable` and naming a server. This check passes when either destination is active.
+
+        **Why this matters**
+
+        Retention on the device has to survive a compromise that specifically targets the device. Fortinet's advisories describe attackers reaching FortiOS through pre-authentication flaws and then persisting on it, and an attacker in that position edits or discards local logs as routine cleanup. Whether the surviving copy lands in a SIEM or in a FortiAnalyzer matters far less than that a copy exists somewhere the attacker did not just take over.
+
+        Off-device retention also survives the ordinary end of the appliance. Hardware replacement, a return for repair, and a factory reset during recovery all destroy local storage, and those events cluster around exactly the incidents whose logs are worth reading afterward.
+
+        The two destinations answer different needs. A syslog stream feeds whatever platform already holds the rest of the estate's telemetry and is the right choice when correlation across sources drives detection. FortiAnalyzer understands FortiOS log structure natively and gives reporting and long-term storage tuned to the Fortinet stack. Sending to both is common and entirely reasonable.
+
+        Whichever destination is chosen, treat delivery as something to monitor, because a device whose only external destination has quietly stopped accepting logs looks compliant and is not.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **Log & Report > Log Settings**.
+        3. Under **Remote Logging**, check the **Syslog** and **FortiAnalyzer** settings.
+
+        A passing result shows at least one of syslog or FortiAnalyzer enabled with a server configured. A failing result shows both disabled.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following commands:
+
+           ```text
+           get log syslogd setting | grep status
+           get log fortianalyzer setting | grep status
+           ```
+
+        A passing result reports `status` set to `enable` for at least one destination. A failing result reports `disable` for both.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            Configure at least one external log destination:
+
+            **Option 1: Syslog**
+            1. Navigate to **Log & Report > Log Settings**
+            2. Enable **Syslog** and configure the server address
+
+            **Option 2: FortiAnalyzer**
+            1. Navigate to **Log & Report > Log Settings**
+            2. Enable **FortiAnalyzer** and configure the server address
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            On a multi-VDOM device, first run `config global`.
+
+            **Option 1: Syslog**
+
+            ```text
+            config log syslogd setting
+                set status enable
+                set server "10.0.0.100"
+            end
+            ```
+
+            **Option 2: FortiAnalyzer**
+
+            ```text
+            config log fortianalyzer setting
+                set status enable
+                set server "10.0.0.200"
+            end
+            ```
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/202167/logging-and-reporting-concepts
+        title: Logging and reporting concepts
+
+  - uid: mondoo-fortios-security-log-fortianalyzer-encryption
+    title: Ensure FortiAnalyzer uses strong encryption
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: |
+      fortios.log.fortianalyzer.status != "enable" || fortios.log.fortianalyzer.encAlgorithm == "high"
+    docs:
+      desc: |
+        This check verifies that a FortiGate logging to FortiAnalyzer negotiates the strong cipher set for that connection.
+
+        The FortiAnalyzer log channel is encrypted and its cipher strength is selectable. The high setting restricts the connection to the stronger algorithms, while lower settings admit legacy ciphers for compatibility with older collectors. It is set in the CLI with `config log fortianalyzer setting` and `set enc-algorithm high`. This check requires the high setting when FortiAnalyzer logging is enabled and passes when it is not in use.
+
+        **Why this matters**
+
+        The log stream is a running description of the network. It names internal addresses, users, applications, destinations, and the verdicts the inspection engines reached, so an attacker who can read it learns the internal topology, which accounts are active, and which of their own actions the security stack noticed. Weak ciphers put that stream within reach of anyone positioned on the path between the firewall and the collector.
+
+        Weak negotiation is an active opportunity, not only a passive one. An attacker able to influence the handshake pushes both ends onto the weakest mutually supported algorithm and can then tamper with entries in flight as well as read them, suppressing the records of their own activity while the firewall continues reporting a healthy connection.
+
+        The connection routinely crosses network segments, sometimes between sites or over a wide area link, so the assumption that the path is trusted rarely holds for its full length.
+
+        If an older FortiAnalyzer cannot negotiate the high cipher set, upgrade the collector rather than relaxing the setting, and until that happens carry the log traffic inside a tunnel you do control.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **Log & Report > Log Settings**.
+        3. Under **FortiAnalyzer** settings, review the **Encryption** algorithm.
+
+        A passing result shows the encryption algorithm set to **High**, or FortiAnalyzer logging not enabled. A failing result shows FortiAnalyzer enabled with an encryption algorithm other than High.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           get log fortianalyzer setting | grep -e status -e enc-algorithm
+           ```
+
+        A passing result reports `enc-algorithm` set to `high`, or `status` set to `disable`. A failing result reports `status` of `enable` with `enc-algorithm` other than `high`.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            1. Navigate to **Log & Report > Log Settings**
+            2. Under **FortiAnalyzer** settings, set **Encryption** to **High**
+            3. Click **Apply**
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            On a multi-VDOM device, first run `config global`.
+
+            ```text
+            config log fortianalyzer setting
+                set enc-algorithm high
+            end
+            ```
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/202167/logging-and-reporting-concepts
+        title: Logging and reporting concepts
+
+  - uid: mondoo-fortios-security-log-fortianalyzer-reliable
+    title: Ensure FortiAnalyzer reliable logging is enabled
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-08
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-15
+      compliance/nis-2: nis-2-21-2-b
+      compliance/nist-csf-1: nist-csf-1-de-cm-1
+      compliance/nist-csf-2: nist-csf-2-de-cm-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-4
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-2-1
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    mql: |
+      fortios.log.fortianalyzer.status != "enable" || fortios.log.fortianalyzer.reliable == "enable"
+    docs:
+      desc: |
+        This check verifies that a FortiGate logging to FortiAnalyzer uses reliable delivery rather than fire-and-forget.
+
+        Reliable mode carries log entries over TCP and buffers them locally when the collector is unreachable, retransmitting once it returns. The default unreliable mode sends over UDP, where a lost datagram is simply gone. It is set in the CLI with `config log fortianalyzer setting` and `set reliable enable`. This check requires reliable mode when FortiAnalyzer logging is enabled and passes when it is not in use.
+
+        **Why this matters**
+
+        Unreliable delivery loses entries without telling anyone. Congestion on the path, a brief collector restart, or a link flap silently removes whatever was in flight, and because both ends still report a healthy configuration the gap is found only when someone queries a time window and finds nothing there, usually during an investigation.
+
+        That property is directly usable by an attacker. Anyone who can generate load or disrupt the path between the firewall and the collector can open a hole in the record on demand, and whatever happens during that hole leaves no trace at all. A buffered TCP channel turns the same disruption into delayed logs instead of missing ones.
+
+        Losses are also worst exactly when they matter most. Incidents produce log bursts, and bursts are when a datagram-based channel drops the most, so the entries describing an active attack are the ones least likely to arrive.
+
+        Reliable mode makes the firewall hold entries while the collector is away, so size the local buffer for the longest outage you expect and alert on the log stream stopping rather than assuming the buffer will always be enough.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **Log & Report > Log Settings**.
+        3. Under **FortiAnalyzer** settings, check whether **Reliable Logging** is enabled.
+
+        A passing result shows reliable logging enabled, or FortiAnalyzer logging not enabled. A failing result shows FortiAnalyzer enabled with reliable logging disabled.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           get log fortianalyzer setting | grep -e status -e reliable
+           ```
+
+        A passing result reports `reliable` set to `enable`, or `status` set to `disable`. A failing result reports `status` of `enable` with `reliable` set to `disable`.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            1. Navigate to **Log & Report > Log Settings**
+            2. Under **FortiAnalyzer** settings, enable **Reliable Logging**
+            3. Click **Apply**
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            On a multi-VDOM device, first run `config global`.
+
+            ```text
+            config log fortianalyzer setting
+                set reliable enable
+            end
+            ```
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/202167/logging-and-reporting-concepts
+        title: Logging and reporting concepts
+
+  - uid: mondoo-fortios-security-no-disabled-policies
+    title: Ensure no firewall policies are disabled
+    impact: 50
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-22
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: fortios.firewall.policies.all(status == "enable")
+    docs:
+      desc: |
+        This check verifies that every firewall policy on the FortiGate is active rather than left in a disabled state.
+
+        A disabled policy stays in the table with its full definition and its place in the match order but is skipped during evaluation. Policy status is visible under **Policy & Objects > Firewall Policy** and in the output of `show firewall policy`, and it is changed with `config firewall policy` and `set status`. This check requires every policy to be enabled.
+
+        **Why this matters**
+
+        A disabled policy is a permission waiting to be granted by a single click. The policies that get disabled rather than deleted are usually the broad ones created during troubleshooting, so the object most likely to be sitting dormant in the table is also the one whose re-enabling opens the widest path. Anyone with administrative access, including an attacker who has obtained it, can turn one on without creating a new policy and without the change looking like anything more than a routine toggle.
+
+        Dead entries also make the effective rule set hard to read, and rule sets that are hard to read are where mistakes live. Reasoning about which policy matches first means mentally filtering out entries that do not participate, and a policy re-enabled later lands back at its original sequence number, ahead of controls added since, permitting traffic that current policy was written to stop.
+
+        The residue accumulates because nobody remembers why a given policy was switched off, so it is never quite safe to remove and never quite safe to use.
+
+        Policies that are genuinely finished should be deleted, with the definition kept in change management and in the configuration backup in case it is needed again.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **Policy & Objects > Firewall Policy**.
+        3. Review the status indicator for each policy.
+
+        A passing result shows every policy enabled. A failing result shows one or more policies in a disabled state.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           show firewall policy
+           ```
+
+        A passing result shows no policy with `set status disable`. A failing result shows at least one policy with `set status disable`.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            1. Navigate to **Policy & Objects > Firewall Policy**
+            2. Identify any disabled policies (shown with a grey status indicator)
+            3. For each disabled policy, either:
+               - Delete it if it is no longer needed
+               - Enable it if it should be active
+            4. Document the rationale for any changes in your change management system
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            List all policies and their status:
+
+            ```text
+            show firewall policy
+            ```
+
+            Delete a policy that is no longer needed:
+
+            ```text
+            config firewall policy
+                delete <policy-id>
+            end
+            ```
+
+            Re-enable a policy that should be active instead:
+
+            ```text
+            config firewall policy
+                edit <policy-id>
+                    set status enable
+                next
+            end
+            ```
+
+            Re-enabling a policy puts it back into the match order at its existing sequence number, so confirm the traffic it permits is still intended before running this.
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/656084/firewall-policy
+        title: Firewall policy
+
+  - uid: mondoo-fortios-security-no-allow-all-rule
+    title: Ensure no allow-all firewall rules exist
+    impact: 95
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-22
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-4
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-3
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      fortios.firewall.policies.none(
+        action == "accept" &&
+        srcaddr.contains("all") &&
+        dstaddr.contains("all") &&
+        service.contains("ALL")
+      )
+    docs:
+      desc: |
+        This check verifies that no firewall policy accepts every source, every destination, and every service at once.
+
+        A policy that names the built-in all address object on both sides together with the ALL service object matches every packet that reaches it and permits it. Policies are reviewed under **Policy & Objects > Firewall Policy** or with `show firewall policy`, and their scope is narrowed with `config firewall policy` by setting `srcaddr`, `dstaddr`, and `service` to specific objects. This check requires that no accept policy combines all three.
+
+        **Why this matters**
+
+        An any-to-any accept policy is not a weak rule, it is the end of the rule set. Anything above it that constrains traffic still runs, but everything the design intended to deny now matches this policy instead and passes, so a firewall reporting a carefully built policy table is in practice forwarding whatever arrives.
+
+        For an attacker that removes the two constraints that make a network hard to move through. Lateral movement from a compromised host reaches any segment on any port with no policy to trip over, and exfiltration leaves by whatever protocol and destination is convenient rather than the handful the design allowed. Neither produces a denied session, so the implicit deny log stays quiet throughout.
+
+        These policies almost always begin as a temporary measure during a cutover or an outage, stay because the traffic works, and then survive years of review because the table is long and the entry looks like the others. Nothing in the policy name reveals the scope.
+
+        If a segment genuinely needs broad connectivity, express it with address groups and service groups that name what is intended, so the permission is auditable and can be tightened later.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **Policy & Objects > Firewall Policy**.
+        3. Inspect each accept policy for source, destination, and service all set to **all**/**ALL**.
+
+        A passing result shows no policy that accepts all sources, all destinations, and all services. A failing result shows at least one any-any-any accept rule.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           show firewall policy
+           ```
+
+        A passing result shows no accept policy combining `set srcaddr "all"`, `set dstaddr "all"`, and `set service "ALL"`. A failing result shows at least one policy that does.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            1. Navigate to **Policy & Objects > Firewall Policy**
+            2. Identify any policies where source, destination, and service are all set to "all" or "ALL"
+            3. Replace the overly permissive rule with specific policies that allow only required traffic flows
+            4. Test connectivity after making changes to ensure legitimate traffic is not disrupted
+            5. Delete the allow-all rule once replacement policies are confirmed working
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Review all policies:
+
+            ```text
+            show firewall policy
+            ```
+
+            Modify the overly permissive policy to restrict scope:
+
+            ```text
+            config firewall policy
+                edit <policy-id>
+                    set srcaddr "specific-source-group"
+                    set dstaddr "specific-dest-group"
+                    set service "HTTPS" "DNS" "SSH"
+                next
+            end
+            ```
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/best-practices/555436/firewall-policies
+        title: FortiOS firewall policy best practices
+
+  - uid: mondoo-fortios-security-policy-logging-enabled
+    title: Ensure traffic logging is enabled on accept rules
+    impact: 75
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-08
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-15
+      compliance/nis-2: nis-2-21-2-b
+      compliance/nist-csf-1: nist-csf-1-de-cm-1
+      compliance/nist-csf-2: nist-csf-2-de-cm-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-2-1
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    mql: |
+      fortios.firewall.policies.where(action == "accept").all(logtraffic != "disable")
+    docs:
+      desc: |
+        This check verifies that every firewall policy that accepts traffic also logs it.
+
+        Logging is set per policy, and a policy with logging disabled forwards its traffic with no record that the sessions ever existed. It is set under **Policy & Objects > Firewall Policy** in the **Logging Options** section, or in the CLI with `config firewall policy` and `set logtraffic all` on each accept policy. This check requires that no accept policy has logging disabled.
+
+        **Why this matters**
+
+        Denied traffic is only half the picture and it is the less interesting half. A successful intrusion travels along paths the policy set permits, so the sessions that matter during an investigation are precisely the ones an unlogged accept policy declines to record. The result is a firewall that can say what it stopped and nothing about what it let through.
+
+        That gap is where lateral movement lives. An attacker who has compromised a host inside a segment uses the permitted paths out of it, and if the policy carrying those paths does not log there is no record of which internal systems were reached, in what order, or for how long. Scoping the incident then rests entirely on endpoint evidence the attacker may have removed.
+
+        The same applies to exfiltration over permitted services. Data leaving on an allowed outbound path produces no denied session and, without policy logging, no accepted session either, so the volume and destination that would have made it obvious are never written down.
+
+        Logging every accept policy produces real volume on high-throughput paths. Where that is a genuine constraint, narrow it by recording security events only on the busiest policies rather than switching their logging off, because those are the paths most worth having a record of.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **Policy & Objects > Firewall Policy**.
+        3. For each accept policy, open it and review **Logging Options**.
+
+        A passing result shows every accept policy logging traffic (All Sessions or Security Events). A failing result shows at least one accept policy with logging disabled.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           show firewall policy
+           ```
+
+        A passing result shows every accept policy with `set logtraffic` set to `all` or `utm`. A failing result shows an accept policy with `set logtraffic disable`.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            1. Navigate to **Policy & Objects > Firewall Policy**
+            2. For each accept policy, click **Edit**
+            3. Under **Logging Options**, set **Log Allowed Traffic** to **All Sessions** or **Security Events**
+            4. Click **OK**
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            ```text
+            config firewall policy
+                edit <policy-id>
+                    set logtraffic all
+                next
+            end
+            ```
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/656084/firewall-policy
+        title: Firewall policy
+
+  - uid: mondoo-fortios-security-policy-utm-enabled
+    title: Ensure UTM profiles are enabled on accept rules
+    impact: 85
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-23
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-de-cm-4
+      compliance/nist-csf-2: nist-csf-2-de-cm-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      fortios.firewall.policies.where(action == "accept").all(utmStatus == "enable")
+    docs:
+      desc: |
+        This check verifies that every firewall policy that accepts traffic applies security inspection profiles to it.
+
+        The security profile switch on a policy is what engages the antivirus, intrusion prevention, web filtering, and application control engines for the sessions that policy permits. It is turned on under **Policy & Objects > Firewall Policy** in the **Security Profiles** section, or in the CLI with `config firewall policy` and `set utm-status enable` together with the individual profile assignments. This check requires it on every accept policy.
+
+        **Why this matters**
+
+        With no profiles attached, the policy decides on addresses and ports and nothing else, which is the behavior of a packet filter from the 1990s. Malware delivered over a permitted web or mail session, an exploit aimed at a server the policy allows the internet to reach, and command and control traffic leaving over an allowed port all pass through with nothing looking at the content.
+
+        Attackers plan for exactly this. Initial access and command and control are deliberately carried over the protocols every network permits, because the choice of port stopped being a meaningful signal long ago. The engines that recognize the payload rather than the port are the only part of the device positioned to catch it, and a policy without profiles never calls them.
+
+        The gap is invisible in the obvious places. The policy table looks complete, the device reports healthy subscriptions, and the FortiGuard signature feeds arrive on schedule, while a policy carrying the bulk of the traffic consults none of it.
+
+        Turning the profiles on without also assigning an inspection profile leaves the engines blind to encrypted sessions, so treat the two settings as one change. Where a profile genuinely cannot be applied to a specific flow, narrow that policy to the flow needing the exemption rather than leaving inspection off for everything the policy carries.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **Policy & Objects > Firewall Policy**.
+        3. For each accept policy, open it and review the **Security Profiles** section.
+
+        A passing result shows every accept policy with security profiles enabled. A failing result shows at least one accept policy with no UTM profiles applied.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           show firewall policy
+           ```
+
+        A passing result shows every accept policy with `set utm-status enable`. A failing result shows an accept policy with `set utm-status disable` or no `utm-status` line.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            1. Navigate to **Policy & Objects > Firewall Policy**
+            2. For each accept policy, click **Edit**
+            3. Under **Security Profiles**, enable the relevant profiles:
+               - **AntiVirus**: Select an appropriate AV profile
+               - **IPS**: Select an appropriate IPS sensor
+               - **Web Filter**: Select an appropriate web filter profile
+               - **Application Control**: Select an appropriate application list
+            4. Click **OK**
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Setting `utm-status enable` without an `ssl-ssh-profile` leaves the policy with no SSL/SSH inspection, so the antivirus, IPS, and web filter profiles never see inside encrypted sessions and the UTM stack is effectively bypassed for HTTPS and other TLS traffic. Always pair the UTM profiles with an inspection profile:
+
+            ```text
+            config firewall policy
+                edit <policy-id>
+                    set utm-status enable
+                    set ssl-ssh-profile "certificate-inspection"
+                    set av-profile "default"
+                    set ips-sensor "default"
+                    set webfilter-profile "default"
+                    set application-list "default"
+                next
+            end
+            ```
+
+            The `certificate-inspection` profile reads only the certificate metadata and works without further setup. The `deep-inspection` profile decrypts and re-encrypts TLS sessions and catches threats hidden inside encrypted payloads, but it requires deploying the FortiGate CA certificate to every client's trust store first, otherwise users get certificate warnings.
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/680955/security-profiles
+        title: FortiOS security profiles
+
+  - uid: mondoo-fortios-security-policy-ssl-inspection
+    title: Ensure SSL/SSH inspection is set on accept rules
+    impact: 75
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-23
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-de-cm-4
+      compliance/nist-csf-2: nist-csf-2-de-cm-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      fortios.firewall.policies.where(action == "accept").all(sslSshProfile != "" && sslSshProfile != "no-inspection")
+    docs:
+      desc: |
+        This check verifies that every firewall policy that accepts traffic has an SSL and SSH inspection profile assigned.
+
+        The inspection profile determines how much of an encrypted session the security engines can see. Certificate inspection reads the handshake metadata, while deep inspection decrypts the session so the payload can be examined. It is assigned under **Policy & Objects > Firewall Policy** in the **Security Profiles** section, or in the CLI with `config firewall policy` and `set ssl-ssh-profile`. This check requires a profile that is neither empty nor the no-inspection profile.
+
+        **Why this matters**
+
+        Nearly all traffic that carries a threat is now encrypted, so a policy left on no-inspection hands the security engines a stream they cannot read. Antivirus scanning of a file downloaded over HTTPS sees ciphertext, intrusion prevention signatures cannot match an exploit inside a TLS session, and application control is reduced to guessing from a destination address. Every engine the policy turned on still runs and finds nothing.
+
+        Attackers rely on this. Payload delivery, credential theft, and command and control are routinely carried inside TLS precisely because it defeats inspection, and tunneling over SSH is the standard way to move a session past a policy set that would otherwise deny it. Without an inspection profile the firewall records that an encrypted session took place and can say nothing about what it carried.
+
+        The result is a device reporting a complete security stack while operating as a stateful packet filter for the majority of its traffic, which is the most expensive kind of false assurance because it has been bought and licensed.
+
+        Certificate inspection works immediately and gives the engines the destination and certificate context. Deep inspection gives them the payload but requires endpoints to trust the inspection certificate and must exempt flows that are legally sensitive or that pin their certificates. Choose per policy, but choose something other than no inspection.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **Policy & Objects > Firewall Policy**.
+        3. For each accept policy, open it and review the **SSL/SSH Inspection** setting.
+
+        A passing result shows every accept policy with an SSL/SSH inspection profile assigned other than the built-in **no-inspection** profile. A failing result shows at least one accept policy with no inspection profile or with **no-inspection**.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           show firewall policy
+           ```
+
+        A passing result shows every accept policy with `set ssl-ssh-profile` set to a profile other than `no-inspection`. A failing result shows an accept policy with no `ssl-ssh-profile` assigned or with the `no-inspection` profile.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            1. Navigate to **Policy & Objects > Firewall Policy**
+            2. For each accept policy, click **Edit**
+            3. Under **Security Profiles**, set **SSL/SSH Inspection** to an appropriate profile:
+               - **certificate-inspection**: Inspects certificate metadata without decrypting (lower impact)
+               - **deep-inspection**: Full decryption and inspection (requires CA certificate deployment)
+            4. Click **OK**
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            ```text
+            config firewall policy
+                edit <policy-id>
+                    set ssl-ssh-profile "certificate-inspection"
+                next
+            end
+            ```
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/929997/ssl-ssh-inspection
+        title: FortiOS SSL/SSH inspection
+
+  - uid: mondoo-fortios-security-wan-no-management-access
+    title: Ensure WAN interfaces restrict management access
+    impact: 95
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      fortios.network.interfaces.where(role == "wan").all(
+        allowaccess != /\bhttp\b/ && allowaccess != /https/ && allowaccess != /ssh/ && allowaccess != /telnet/ && allowaccess != /snmp/
+      )
+    docs:
+      desc: |
+        This check verifies that internet-facing interfaces on the FortiGate do not offer management services.
+
+        Each interface carries an access list naming which services it answers on its own address, covering the web interface, SSH, telnet, SNMP, and ping. It is edited under **Network > Interfaces** in the **Administrative Access** section, or in the CLI with `config system interface` and `set allowaccess`. This check requires that interfaces with the WAN role permit none of HTTP, HTTPS, SSH, telnet, or SNMP.
+
+        **Why this matters**
+
+        The FortiOS management plane exposed to the internet is the single most reliably exploited thing about the product. Fortinet has disclosed a series of pre-authentication flaws in the administrative and VPN daemons, and each has been exploited at scale within days of the advisory, against target lists built from internet-wide scans that ran long before the vulnerability was public. An interface answering the administrative service is on those lists whether or not anyone has ever logged in from outside.
+
+        Compromise of the device is not compromise of one appliance. The firewall terminates the VPN tunnels, holds the keys and the inspection certificate, and sits on both sides of the segmentation boundary, so an attacker who lands on it reads the traffic crossing it, adds an administrator or a local-in exception to come back, and reaches internal networks with the firewall's own privileges.
+
+        Short of an exploit, an exposed listener is a permanent credential-guessing target, and SNMP exposure hands out the device model, firmware version, interface addressing, and routing detail to anyone who asks, which is the reconnaissance that decides whether the device is worth attacking at all.
+
+        Administer the device from an internal or dedicated management interface, and where remote administration is genuinely needed reach it over a VPN and constrain every administrator account with trusted host entries. Keep only what the WAN interface must answer, such as ping for path monitoring or the FortiManager service on a centrally managed device.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **Network > Interfaces**.
+        3. For each WAN-role interface, open it and review **Administrative Access**.
+
+        A passing result shows no WAN interface permitting HTTP, HTTPS, SSH, Telnet, or SNMP. A failing result shows a WAN interface with one of those management protocols allowed.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           show system interface
+           ```
+
+        A passing result shows no WAN-role interface with `http`, `https`, `ssh`, `telnet`, or `snmp` in its `set allowaccess` list. A failing result shows a WAN interface that allows one of those protocols.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            **Warning**: Do not make this change while connected through the WAN interface you are editing. Removing management protocols from that interface ends your session immediately and can lock you out. Connect through an internal interface, a dedicated management interface, or the serial console first.
+
+            1. Navigate to **Network > Interfaces**
+            2. For each WAN interface, click **Edit**
+            3. Under **Administrative Access**, remove **HTTPS**, **HTTP**, **SSH**, **Telnet**, and **SNMP**
+            4. Only allow **Ping** if needed for monitoring, and **FMG-Access** if managed by FortiManager
+            5. Click **OK**
+
+            For remote management, configure VPN access and manage the device through an internal interface after connecting via VPN.
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            **Warning**: Run these commands from the console or from a session that enters through an internal interface. Replacing the access list on the interface that carries your current session disconnects you immediately. Keep `fgfm` in the list if the device is managed by FortiManager.
+
+            Repeat for every WAN interface:
+
+            ```text
+            config system interface
+                edit "wan1"
+                    set allowaccess ping
+                next
+            end
+            ```
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/154471/interfaces
+        title: FortiOS interface configuration
+      - url: https://www.fortiguard.com/psirt
+        title: FortiGuard PSIRT advisories
+
+  - uid: mondoo-fortios-security-no-telnet-access
+    title: Ensure no interfaces allow telnet access
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: fortios.network.interfaces.all(allowaccess != /telnet/)
+    docs:
+      desc: |
+        This check verifies that no interface on the FortiGate offers telnet.
+
+        Telnet is the unencrypted command line service, and it is offered per interface through the same access list that controls the web interface and SSH. That list is edited under **Network > Interfaces** in the **Administrative Access** section, or in the CLI with `config system interface` and `set allowaccess`. This check requires that telnet appears on no interface.
+
+        **Why this matters**
+
+        Telnet puts the administrator password on the network in the clear, along with every command typed and every line of output returned. Anyone positioned to capture the traffic, on a switch port, on a compromised host in the path, or on a wireless segment, reads the credential directly and then holds full control of the firewall with no exploit to develop and nothing to crack.
+
+        Because the session authenticates neither end, the same position allows interception rather than only observation. An attacker can sit between the administrator and the device, present a convincing prompt, collect the password, and relay commands onward, or inject commands into a live session, and neither end has any means of detecting it.
+
+        The output is often as valuable as the credential. A telnet session in which someone displays the running configuration puts the policy set, the address objects describing the internal network, and any secrets in that output onto the wire in plain text.
+
+        SSH provides the same command line with encryption and server authentication, so removing telnet costs nothing operationally. Remove only the telnet entry from the access list rather than clearing the list, which would drop the management access you are using at the time.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **Network > Interfaces**.
+        3. For each interface, open it and review **Administrative Access**.
+
+        A passing result shows no interface permitting Telnet. A failing result shows at least one interface with Telnet allowed.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           show system interface
+           ```
+
+        A passing result shows no interface with `telnet` in its `set allowaccess` list. A failing result shows at least one interface that allows `telnet`.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            1. Navigate to **Network > Interfaces**
+            2. For each interface, click **Edit**
+            3. Under **Administrative Access**, uncheck **Telnet**
+            4. Ensure **SSH** is enabled on management interfaces as a replacement
+            5. Click **OK**
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            List the interfaces that currently allow telnet:
+
+            ```text
+            show system interface
+            ```
+
+            Remove only the telnet option from each affected interface. The `unselect` keyword removes a single option from a multi-option field without touching the others:
+
+            ```text
+            config system interface
+                edit "mgmt"
+                    unselect allowaccess telnet
+                next
+            end
+            ```
+
+            Alternatively, set the complete list of allowed protocols without telnet:
+
+            ```text
+            config system interface
+                edit "mgmt"
+                    set allowaccess ping https ssh
+                next
+            end
+            ```
+
+            Do not use `unset` to remove telnet. The `unset` keyword takes no protocol argument: `unset allowaccess` resets the whole field, removing every management protocol from the interface, including the session you may be using to administer the device.
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/154471/interfaces
+        title: FortiOS interface configuration
+
+  - uid: mondoo-fortios-security-bgp-log-neighbor-changes
+    title: Ensure BGP neighbor changes are logged
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-08
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-15
+      compliance/nis-2: nis-2-21-2-b
+      compliance/nist-csf-1: nist-csf-1-de-cm-1
+      compliance/nist-csf-2: nist-csf-2-de-cm-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-12
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-2-1
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    mql: fortios.router.bgp.neighbors.length == 0 || fortios.router.bgp.logNeighbourChanges == "enable"
+    docs:
+      desc: |
+        This check verifies that a FortiGate running BGP records peer state changes in its log.
+
+        Neighbor logging writes an entry each time a BGP session comes up or goes down, naming the peer and the reason. It is enabled in the CLI with `config router bgp` and `set log-neighbour-changes enable`. This check requires it on devices with BGP peers configured and passes when no peers exist.
+
+        **Why this matters**
+
+        BGP decides where traffic goes, which means it decides which traffic passes through inspection and which segments can reach each other at all. A session that comes up unexpectedly, or one that goes down and stays down, changes the shape of the network, and without neighbor logging that change leaves no record on the device that made it.
+
+        An attacker who establishes an unauthorized session, or who takes over a legitimate peer, pulls traffic onto a path they observe or control while the firewall's policy table remains exactly as written. The peering event is the moment that becomes visible and it is the only moment, because afterward the routes simply exist and look ordinary.
+
+        Repeated transitions are their own signal. A peer that flaps is either an unstable link or something interfering with one, and in both cases traffic swings between paths, which in a segmented network means flows periodically taking a route where the intended controls are not applied.
+
+        After a routing incident the sequence of peer transitions is what reconstructs the event, so enable this alongside forwarding the log off the device, because a record held only on the unit is lost with the unit.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **Network > BGP**.
+        3. Check whether **Log Neighbor Changes** is enabled.
+
+        A passing result shows BGP neighbor change logging enabled, or no BGP neighbors configured. A failing result shows BGP neighbors configured with neighbor change logging disabled.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           get router bgp | grep log-neighbour-changes
+           ```
+
+        A passing result reports `log-neighbour-changes` set to `enable`, or no BGP neighbors configured. A failing result reports `disable` with BGP neighbors present.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            1. Navigate to **Network > BGP**
+            2. Enable **Log Neighbor Changes**
+            3. Click **Apply**
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            ```text
+            config router bgp
+                set log-neighbour-changes enable
+            end
+            ```
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/750736/bgp
+        title: FortiOS BGP configuration
+
+  - uid: mondoo-fortios-security-bgp-graceful-restart
+    title: Ensure BGP graceful restart is enabled
+    impact: 50
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-bcr-08
+      compliance/dora: dora-art-12
+      compliance/hipaa: hipaa-security-ss164-308-a-7-ii-a-contingency-plan-data-backup-plan
+      compliance/iso-27001-2022: iso-27001-2022-a-8-14
+      compliance/nis-2: nis-2-21-2-c
+      compliance/nist-csf-1: nist-csf-1-pr-pt-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cp-10
+      compliance/nist-sp-800-171: nist-sp-800-171--3-6-1
+      compliance/owasp-top-10-2025: false
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc9-1-1
+      compliance/vda-isa-5: vda-isa-5-3-1-2
+    mql: fortios.router.bgp.neighbors.length == 0 || fortios.router.bgp.gracefulRestart == "enable"
+    docs:
+      desc: |
+        This check verifies that a FortiGate running BGP negotiates graceful restart with its peers.
+
+        Graceful restart lets a router keep forwarding on its existing routes while its BGP process restarts, and asks its peers to hold the routes it advertised instead of withdrawing them. It is enabled in the CLI with `config router bgp` and `set graceful-restart enable`, alongside the restart and stale path timers. This check requires it on devices with BGP peers configured and passes when no peers exist.
+
+        **Why this matters**
+
+        Without graceful restart, a control plane restart or a cluster failover withdraws every route the device advertised and discards every route it learned. Traffic that was flowing stops, and for as long as reconvergence takes, which with default timers runs into minutes, packets are either dropped or sent down whatever alternate path exists.
+
+        The alternate path is the security problem. A network segmented by routing sends flows through the firewall because that is where the routes point, so when those routes disappear traffic that reconverges around the device reaches its destination without passing through inspection at all, and the failure is invisible because nothing was denied.
+
+        The blackout carries an availability cost that feeds back into security. Administrators who know that touching the routing process breaks the site defer firmware upgrades and cluster maintenance, which is how a perimeter device ends up staying on a vulnerable build.
+
+        Enabling graceful restart renegotiates the capability and resets established sessions, so make the change in a maintenance window and set the stale path timer to a value the peers will honor.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **Network > BGP**.
+        3. Check whether **Graceful Restart** is enabled.
+
+        A passing result shows BGP graceful restart enabled, or no BGP neighbors configured. A failing result shows BGP neighbors configured with graceful restart disabled.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           get router bgp | grep graceful-restart
+           ```
+
+        A passing result reports `graceful-restart` set to `enable`, or no BGP neighbors configured. A failing result reports `disable` with BGP neighbors present.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            **Important**: Graceful restart is negotiated when a BGP session is established, so enabling it resets existing BGP sessions. Apply this change during a maintenance window.
+
+            1. Navigate to **Network > BGP**
+            2. Enable **Graceful Restart**
+            3. Configure appropriate restart and stalepath timers for your environment
+            4. Click **Apply**
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            **Important**: Enabling graceful restart resets established BGP sessions while the new capability is negotiated. Apply this change during a maintenance window.
+
+            ```text
+            config router bgp
+                set graceful-restart enable
+                set graceful-restart-time 120
+                set graceful-stalepath-time 360
+            end
+            ```
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/750736/bgp
+        title: FortiOS BGP configuration
+
+  - uid: mondoo-fortios-security-ospf-log-neighbor-changes
+    title: Ensure OSPF neighbor changes are logged
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-08
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-15
+      compliance/nis-2: nis-2-21-2-b
+      compliance/nist-csf-1: nist-csf-1-de-cm-1
+      compliance/nist-csf-2: nist-csf-2-de-cm-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-12
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-2-1
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-2-4
+    mql: fortios.router.ospf.areas.length == 0 || fortios.router.ospf.logNeighbourChanges == "enable"
+    docs:
+      desc: |
+        This check verifies that a FortiGate running OSPF records adjacency state changes in its log.
+
+        OSPF forms adjacencies with routers on the same segments and exchanges link state information with them, and neighbor logging writes an entry each time an adjacency forms or is lost. It is enabled in the CLI with `config router ospf` and `set log-neighbour-changes enable`. This check requires it on devices with OSPF areas configured and passes when none exist.
+
+        **Why this matters**
+
+        OSPF forms adjacencies with whatever speaks the protocol on a connected segment, which makes an unexpected neighbor a direct statement that something new is on an internal network. A host that starts advertising link state can pull internal traffic toward itself, and the adjacency log is where that first appears. The routing table afterward shows only that a prefix is reachable through a next hop, with nothing to indicate that the next hop appeared yesterday.
+
+        Manipulating the link state database is the natural follow-on. An adjacent speaker can advertise a more attractive path to an internal prefix and draw traffic onto it for interception, or advertise unreachability and blackhole a segment. Both begin with an adjacency, and both are hard to explain afterward if no record exists of when the neighbor arrived.
+
+        Adjacency churn among legitimate peers matters too, because each transition reconverges the area, and during reconvergence flows can take paths that skip the segmentation the design depends on.
+
+        The log is useful only if it leaves the device and someone acts on it, so pair this with external log forwarding and an alert on adjacency events involving addresses outside the expected peer set.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **Network > OSPF**.
+        3. Check whether **Log Neighbor Changes** is enabled.
+
+        A passing result shows OSPF neighbor change logging enabled, or no OSPF areas configured. A failing result shows OSPF areas configured with neighbor change logging disabled.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           get router ospf | grep log-neighbour-changes
+           ```
+
+        A passing result reports `log-neighbour-changes` set to `enable`, or no OSPF areas configured. A failing result reports `disable` with OSPF areas present.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            1. Navigate to **Network > OSPF**
+            2. Enable **Log Neighbor Changes**
+            3. Click **Apply**
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            ```text
+            config router ospf
+                set log-neighbour-changes enable
+            end
+            ```
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/561713/ospf
+        title: FortiOS OSPF configuration
+
+  - uid: mondoo-fortios-security-fortiguard-antispam-active
+    title: Ensure FortiGuard antispam subscription is active
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-de-cm-4
+      compliance/nist-csf-2: nist-csf-2-de-cm-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: fortios.system.fortiGuard.antispamLicense != 0 && fortios.system.fortiGuard.antispamExpiration > time.now.unix
+    docs:
+      desc: |
+        This check verifies that the FortiGate holds a current FortiGuard antispam entitlement.
+
+        The antispam service supplies the sender reputation and message signature data the device consults when it inspects mail. Entitlement status appears under **System > FortiGuard** in the web interface and in the output of `get system fortiguard`, and this check requires the antispam license to be present with an expiration date in the future.
+
+        **Why this matters**
+
+        Mail is still where targeted intrusions start. A lapsed entitlement stops the reputation and signature feeds, so the engine keeps running against data that has aged since the day the contract expired, and the phishing infrastructure stood up this week is not in it. The device continues to inspect mail and continues to pass it.
+
+        That failure is quiet in a specific way. Nothing is denied, no policy changes, and mail flow looks normal, so the loss shows up as a gradual decline in what gets caught rather than as an outage anyone reports. By the time someone notices, the gap covers however many months the renewal has been outstanding.
+
+        An attacker does not need to know the subscription lapsed to benefit from it. Commodity phishing that would have been scored on sender reputation reaches inboxes, and each message is another chance at a credential that leads to the VPN.
+
+        If mail does not traverse this device the entitlement is doing no work and an exception is reasonable. Otherwise treat renewal as a security control with an owner and a date rather than as a procurement detail.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **System > FortiGuard**.
+        3. Review the **AntiSpam** license status and expiration date.
+
+        A passing result shows the antispam license active with a future expiration date. A failing result shows an expired or missing antispam subscription.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           diagnose autoupdate versions
+           ```
+
+        A passing result shows the antispam contract with a future expiration date. A failing result shows an expired contract.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            1. Navigate to **System > FortiGuard**
+            2. Review the antispam license status and expiration date
+            3. If expired, renew the FortiGuard subscription through your Fortinet reseller or the [Fortinet Support Portal](https://support.fortinet.com)
+            4. After renewal, verify the license is active under **System > FortiGuard**
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Check the current FortiGuard license status:
+
+            ```text
+            get system fortiguard
+            diagnose autoupdate status
+            ```
+
+            Once a valid contract is registered, refresh the FortiGuard packages:
+
+            ```text
+            execute update-now
+            ```
+
+            `execute update-now` only pulls fresh packages when the device already has a registered, unexpired contract. It does not renew or register a license, so an expired subscription must be renewed and re-registered with Fortinet first, after which the device picks up the new entitlement and the updates succeed.
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/42459/fortiguard
+        title: FortiOS FortiGuard configuration
+      - url: https://support.fortinet.com
+        title: Fortinet support portal
+
+  - uid: mondoo-fortios-security-fortiguard-webfilter-active
+    title: Ensure FortiGuard web filter subscription is active
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-de-cm-4
+      compliance/nist-csf-2: nist-csf-2-de-cm-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: fortios.system.fortiGuard.webfilterLicense != 0 && fortios.system.fortiGuard.webfilterExpiration > time.now.unix
+    docs:
+      desc: |
+        This check verifies that the FortiGate holds a current FortiGuard web filtering entitlement.
+
+        The web filtering service supplies the category ratings the device consults when a policy decides whether to permit a destination. Entitlement status appears under **System > FortiGuard** and in the output of `get system fortiguard`, and this check requires the web filter license to be present with an expiration date in the future.
+
+        **Why this matters**
+
+        Web filtering policy is written against categories, so an expired entitlement does not disable the policy, it starves it. Ratings stop being refreshed and newly registered domains carry no category at all, which means the rules blocking malware and phishing categories match nothing for exactly the destinations created for this week's campaign. Attack infrastructure is deliberately short-lived for this reason.
+
+        The same starvation opens the outbound path. Command and control that would have been blocked as a rated malicious destination is unrated and therefore permitted, so a host compromised through some other route keeps its channel out through a control the organization believes is watching.
+
+        Category restrictions kept for acceptable-use reasons degrade on the same curve and just as quietly, because a destination with no rating falls through the category rules rather than triggering them.
+
+        Renew before expiry rather than after, and confirm the device has picked the new entitlement up, because a renewal that has not been registered against the serial number leaves the feeds stopped while the contract shows as purchased.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **System > FortiGuard**.
+        3. Review the **Web Filtering** license status and expiration date.
+
+        A passing result shows the web filter license active with a future expiration date. A failing result shows an expired or missing web filter subscription.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           diagnose autoupdate versions
+           ```
+
+        A passing result shows the web filter contract with a future expiration date. A failing result shows an expired contract.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            1. Navigate to **System > FortiGuard**
+            2. Review the web filter license status and expiration date
+            3. If expired, renew the FortiGuard subscription through your Fortinet reseller or the [Fortinet Support Portal](https://support.fortinet.com)
+            4. After renewal, verify the license is active under **System > FortiGuard**
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Check the current FortiGuard license status:
+
+            ```text
+            get system fortiguard
+            diagnose autoupdate status
+            ```
+
+            Once a valid contract is registered, refresh the FortiGuard packages:
+
+            ```text
+            execute update-now
+            ```
+
+            `execute update-now` only pulls fresh packages when the device already has a registered, unexpired contract. It does not renew or register a license, so an expired subscription must be renewed and re-registered with Fortinet first, after which the device picks up the new entitlement and the updates succeed.
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/42459/fortiguard
+        title: FortiOS FortiGuard configuration
+      - url: https://support.fortinet.com
+        title: Fortinet support portal
+
+  - uid: mondoo-fortios-security-fortiguard-outbreak-prevention-active
+    title: Ensure FortiGuard outbreak prevention is active
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-de-cm-4
+      compliance/nist-csf-2: nist-csf-2-de-cm-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: fortios.system.fortiGuard.outbreakPreventionLicense != 0 && fortios.system.fortiGuard.outbreakPreventionExpiration > time.now.unix
+    docs:
+      desc: |
+        This check verifies that the FortiGate holds a current FortiGuard outbreak prevention entitlement.
+
+        Outbreak prevention supplies a rapid-response hash and signature feed that the antivirus engine queries for samples too new to be covered by the regular signature package. Entitlement status appears under **System > FortiGuard** and in the output of `get system fortiguard`, and this check requires the outbreak prevention license to be present with an expiration date in the future.
+
+        **Why this matters**
+
+        The dangerous window for malware is the first hours of a campaign, before a sample has been analyzed and folded into the regular signature release. Outbreak prevention exists to cover that window, and with the entitlement lapsed the device falls back on whatever the last full package knew, which is exactly the state an attacker distributing a fresh build is counting on.
+
+        Ransomware operators repack constantly for this reason. A new build of a known family is unrecognizable to signature matching but appears in the rapid feed within hours of first being seen elsewhere, so the difference between a current entitlement and an expired one is often the difference between a blocked download and an encrypted file server.
+
+        The loss is silent. The antivirus profile stays attached to the policies, scanning continues, and the device reports that files were inspected, so nothing in normal operation reveals that the layer covering the newest threats has stopped answering.
+
+        This service supplements the regular antivirus feed rather than replacing it, so keep both entitlements current and confirm after any renewal that the device has taken the new contract up.
+      audit: |
+        ### Audit via the FortiGate web interface
+
+        1. Log in to the FortiGate web interface.
+        2. Navigate to **System > FortiGuard**.
+        3. Review the **Outbreak Prevention** license status and expiration date.
+
+        A passing result shows the outbreak prevention license active with a future expiration date. A failing result shows an expired or missing outbreak prevention subscription.
+
+        ### Audit via FortiOS CLI
+
+        1. Open an SSH or console session to the FortiGate.
+        2. Run the following command:
+
+           ```text
+           diagnose autoupdate versions
+           ```
+
+        A passing result shows the outbreak prevention contract with a future expiration date. A failing result shows an expired contract.
+      remediation:
+        - id: console
+          desc: |
+            **Using the FortiGate web interface**
+
+            1. Navigate to **System > FortiGuard**
+            2. Review the outbreak prevention license status and expiration date
+            3. If expired, renew the FortiGuard subscription through your Fortinet reseller or the [Fortinet Support Portal](https://support.fortinet.com)
+            4. After renewal, verify the license is active under **System > FortiGuard**
+        - id: cli
+          desc: |
+            **Using the CLI**
+
+            Check the current FortiGuard license status:
+
+            ```text
+            get system fortiguard
+            diagnose autoupdate status
+            ```
+
+            Once a valid contract is registered, refresh the FortiGuard packages:
+
+            ```text
+            execute update-now
+            ```
+
+            `execute update-now` only pulls fresh packages when the device already has a registered, unexpired contract. It does not renew or register a license, so an expired subscription must be renewed and re-registered with Fortinet first, after which the device picks up the new entitlement and the updates succeed.
+    refs:
+      - url: https://docs.fortinet.com/document/fortigate/latest/administration-guide/42459/fortiguard
+        title: FortiOS FortiGuard configuration
+      - url: https://support.fortinet.com
+        title: Fortinet support portal

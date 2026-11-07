@@ -1,0 +1,277 @@
+name: Integration Tests
+
+## Runs a real cnspec binary against real targets -- container images, the
+## runner's own system, and a k3d cluster -- and asserts on the structured JSON
+## report rather than on the exit code.
+##
+## The exit code is deliberately not the gate. cnspec's default --risk-threshold
+## is 101 and the comparison is `100 - worstScore >= threshold`, which 100 can
+## never satisfy, so a scan exits 0 whenever it merely connected. What the
+## assertions look for instead is whether checks actually reached a verdict.
+##
+## The `version` input selects the artifact under test: packaging, ldflags and
+## the production build tag are part of what ships, and a build of the working
+## tree exercises none of them. Left empty, it builds the checked-out ref.
+##
+## Scoped to targets that need no credentials and no standing infrastructure:
+## no Mondoo Platform service account, no cloud tenants, no SaaS orgs. Every
+## scan runs incognito and the suite scrubs MONDOO_* from the child environment
+## so it cannot accidentally do otherwise. The network is still used on purpose
+## -- provider downloads and default-policy resolution both reach the production
+## registry, and a release has to get those right.
+##
+## Trigger is manual. Promoting it to a nightly is adding a `schedule:` block;
+## see test/integration/README.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "cnspec release to test (e.g. v14.0.0-rc.1). Empty builds from the checked-out ref."
+        required: false
+        type: string
+      tiers:
+        description: "Which tiers to run"
+        required: false
+        default: all
+        type: choice
+        options:
+          - all
+          - docker-local
+          - k8s
+          - upstream
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  docker-local:
+    name: docker + local
+    # Written as `!=` rather than `==` so a scheduled run, where inputs are
+    # empty, executes every tier. That is what keeps promoting this workflow to
+    # a nightly a two-line change instead of a four-line one.
+    if: ${{ inputs.tiers != 'k8s' && inputs.tiers != 'upstream' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # A tier that cannot run is a failure here, not a skip. Skipping is right
+      # on a laptop without Docker; in CI it is how a suite stops testing
+      # something without anyone noticing.
+      CNSPEC_IT_REQUIRE_ALL: "1"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Import environment variables from file
+        run: cat ".github/env" >> $GITHUB_ENV
+
+      - name: Install Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "${{ env.golang-version }}"
+          check-latest: true
+          cache: false
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      # Per-job provider directory, the convention in pr-test-lint.yml and
+      # content-iac-tests.yaml.
+      #
+      # Deliberately not cached. EnsureProvider returns early when a provider is
+      # already present, so a restored cache pins provider versions and the run
+      # stops exercising the thing it is here for: resolving and downloading
+      # providers from the production registry with the binary under test.
+      # content-iac-tests.yaml caches with a daily-rotating key because it runs
+      # on every PR; this runs a handful of times per release, so ~60s is not
+      # worth the loss of signal.
+      - name: Make provider dir
+        run: mkdir -p ${PWD}/${GITHUB_JOB}/.providers
+
+      - name: Set provider env
+        run: echo "PROVIDERS_PATH=${PWD}/${GITHUB_JOB}/.providers" >> $GITHUB_ENV
+
+      - name: Resolve binary under test
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/resolve-cnspec-artifact.sh
+
+      - name: Run docker and local tiers
+        run: make test/integration/docker test/integration/local
+
+      - name: Run output format matrix
+        run: make test/integration/formats
+
+      # A failed assertion on a check floor or an error ratio is not diagnosable
+      # from the message alone; the report is.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: integration-reports-docker-local
+          path: test/integration/artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  k8s:
+    name: k3d
+    if: ${{ inputs.tiers != 'docker-local' && inputs.tiers != 'upstream' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CNSPEC_IT_REQUIRE_ALL: "1"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Import environment variables from file
+        run: cat ".github/env" >> $GITHUB_ENV
+
+      - name: Install Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "${{ env.golang-version }}"
+          check-latest: true
+          cache: false
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Make provider dir
+        run: mkdir -p ${PWD}/${GITHUB_JOB}/.providers
+
+      - name: Set provider env
+        run: echo "PROVIDERS_PATH=${PWD}/${GITHUB_JOB}/.providers" >> $GITHUB_ENV
+
+      # The k8s tier creates its own k3d cluster and deletes it when the test
+      # ends, with the kubeconfig in a temp file, so the job only provides the
+      # binary. Pinned by version and checksum (checksums.txt of the release).
+      - name: Install k3d
+        env:
+          K3D_VERSION: v5.8.3
+          K3D_SHA256: dbaa79a76ace7f4ca230a1ff41dc7d8a5036a8ad0309e9c54f9bf3836dbe853e
+        run: |
+          curl --fail --silent --show-error --location --retry 3 \
+            --output "${RUNNER_TEMP}/k3d" \
+            "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64"
+          echo "${K3D_SHA256}  ${RUNNER_TEMP}/k3d" | sha256sum --check --strict
+          sudo install -m 0755 "${RUNNER_TEMP}/k3d" /usr/local/bin/k3d
+          k3d version
+
+      - name: Resolve binary under test
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/resolve-cnspec-artifact.sh
+
+      - name: Run k8s tier
+        run: make test/integration/k8s
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: integration-reports-k8s
+          path: test/integration/artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  upstream:
+    name: upstream
+    # The only job that authenticates, and the only one that needs a secret.
+    # Skipped on a run where the secret is absent -- a fork, or a repo that has
+    # not configured it -- rather than failing, because a missing secret is a
+    # property of where the workflow is running and not a result about cnspec.
+    if: ${{ inputs.tiers == 'upstream' || inputs.tiers == 'all' || inputs.tiers == '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Same rule as the other jobs: once the tier is running, a skip is a
+      # failure. It can still skip before this matters -- the secret gate below
+      # decides whether the tier runs at all.
+      CNSPEC_IT_REQUIRE_ALL: "1"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Import environment variables from file
+        run: cat ".github/env" >> $GITHUB_ENV
+
+      - name: Install Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "${{ env.golang-version }}"
+          check-latest: true
+          cache: false
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Make provider dir
+        run: mkdir -p ${PWD}/${GITHUB_JOB}/.providers
+
+      - name: Set provider env
+        run: echo "PROVIDERS_PATH=${PWD}/${GITHUB_JOB}/.providers" >> $GITHUB_ENV
+
+      # Written to RUNNER_TEMP rather than the workspace so it cannot be picked
+      # up by a later step that globs the checkout, and 0600 so it is not
+      # readable by anything else sharing the runner.
+      - name: Write the service account
+        id: creds
+        env:
+          SERVICE_ACCOUNT: ${{ secrets.MONDOO_INTEGRATION_SERVICE_ACCOUNT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SERVICE_ACCOUNT}" ]; then
+            echo "no service account configured; the upstream tier will not run"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          install -m 600 /dev/null "${RUNNER_TEMP}/mondoo-sa.json"
+          printf '%s' "${SERVICE_ACCOUNT}" > "${RUNNER_TEMP}/mondoo-sa.json"
+          echo "CNSPEC_IT_UPSTREAM_CONFIG=${RUNNER_TEMP}/mondoo-sa.json" >> $GITHUB_ENV
+          echo "present=true" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve binary under test
+        if: steps.creds.outputs.present == 'true'
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/resolve-cnspec-artifact.sh
+
+      - name: Run upstream tier
+        if: steps.creds.outputs.present == 'true'
+        run: make test/integration/upstream
+
+      - name: Remove the service account
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/mondoo-sa.json"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: integration-reports-upstream
+          path: test/integration/artifacts/
+          if-no-files-found: ignore
+          retention-days: 7

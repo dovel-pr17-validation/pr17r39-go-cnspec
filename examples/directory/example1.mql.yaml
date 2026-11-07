@@ -1,0 +1,17 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+policies:
+  - uid: example1
+    name: Example policy 1
+    version: 1.0.0
+    authors:
+      - name: Mondoo
+        email: hello@mondoo.com
+    groups:
+      - filters: asset.family.contains('unix')
+        checks:
+          - uid: sshd-01
+          - uid: sshd-02
+          - uid: sshd-03
+        queries:
+          - uid: sshd-d-1

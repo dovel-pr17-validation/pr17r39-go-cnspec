@@ -1,0 +1,8 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+
+queries:
+  - uid: sshd-02
+    title: Configure the address family
+    severity: 40
+    query: sshd.config.params.AddressFamily == /inet|inet6|any/

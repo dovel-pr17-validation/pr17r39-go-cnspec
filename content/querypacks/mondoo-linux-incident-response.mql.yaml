@@ -1,0 +1,106 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+
+packs:
+  - uid: mondoo-linux-incident-response
+    name: Linux Incident Response Pack
+    version: 1.3.0
+    license: BUSL-1.1
+    require:
+      - provider: os
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    tags:
+      mondoo.com/platform: linux
+      mondoo.com/category: security
+      mondoo.com/icon: linux
+    summary: Gather Linux host evidence for incident response
+    docs:
+      desc: |
+        Gathers forensic evidence from a Linux host during a security incident: kernel details, running processes, mounted devices, listening ports, installed packages, and running services.
+
+        Enable this query pack in [Mondoo Platform](https://mondoo.com/platform) to automatically gather this evidence from your Linux hosts, or scan a host manually with cnspec:
+
+        ```bash
+        cnspec scan local -f mondoo-linux-incident-response.mql.yaml
+        ```
+    groups:
+      - uid: mondoo-linux-incident-response-system-group
+        title: System & Processes
+        filters: asset.family.contains("linux")
+        queries:
+          - uid: mondoo-linux-incident-response-uptime
+            title: Operating system uptime
+            docs:
+              desc: System uptime, to pin down the last reboot.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: os.uptime
+          - uid: mondoo-linux-incident-response-timezone
+            title: System timezone
+            docs:
+              desc: System timezone, needed to correlate log timestamps.
+            mql: os.date.timezone
+          - uid: mondoo-linux-incident-response-processes
+            title: Running processes
+            docs:
+              desc: Running processes with their PID and command line.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: processes { pid  command }
+          - uid: mondoo-linux-incident-response-running-services
+            title: Running services
+            docs:
+              desc: Services currently running, and their status.
+            mql: services.where(running == true) { name running enabled masked type }
+          - uid: mondoo-linux-incident-response-mounts
+            title: Mounted devices
+            docs:
+              desc: Mounted filesystems with type, device, and options.
+            mql: mount.list { path fstype device options size used available }
+          - uid: mondoo-linux-incident-response-listening-ports
+            title: Listening ports
+            docs:
+              desc: Listening ports, showing network-facing services.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: ports.listening
+      - uid: mondoo-linux-incident-response-kernel-group
+        title: Kernel
+        filters: asset.family.contains("linux")
+        queries:
+          - uid: mondoo-linux-incident-response-installed-kernel
+            title: Installed kernels
+            docs:
+              desc: Installed kernel versions available to boot.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: kernel.installed
+          - uid: mondoo-linux-incident-response-kernel-info
+            title: Running kernel version
+            docs:
+              desc: The kernel version currently running.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: kernel.info
+          - uid: mondoo-linux-incident-response-kernel-modules
+            title: Kernel modules
+            docs:
+              desc: Kernel modules and whether each one is loaded.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: kernel.modules { name loaded }
+      - uid: mondoo-linux-incident-response-software-group
+        title: Software
+        filters: asset.family.contains("linux")
+        queries:
+          - uid: mondoo-linux-incident-response-installed-packages
+            title: Installed packages
+            docs:
+              desc: Installed packages with version, arch, and origin.
+            mql: packages { name version arch installed epoch origin purl }
+      - uid: mondoo-linux-incident-response-security-group
+        title: Security
+        filters: asset.family.contains("linux")
+        queries:
+          - uid: mondoo-linux-incident-response-selinux-status
+            title: SELinux status
+            docs:
+              desc: SELinux enforcement mode and configured policy.
+            filters: asset.family.contains("redhat") || asset.platform == "amazonlinux"
+            mql: selinux { installed mode configMode policyType }

@@ -1,0 +1,412 @@
+// Copyright Mondoo, Inc. 2024, 2026
+// SPDX-License-Identifier: BUSL-1.1
+
+package bundle
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.mondoo.com/mql/providers-sdk/v1/resources"
+	"go.mondoo.com/mql/providers-sdk/v1/testutils"
+)
+
+var schema resources.ResourcesSchema
+
+func init() {
+	runtime := testutils.Local()
+	schema = runtime.Schema()
+}
+
+var testLintOptions = LintOptions{SkipProviderDownload: true}
+
+func TestResults_SarifReport(t *testing.T) {
+	file := "./testdata/pass-rules.mql.yaml"
+	rootDir := "./testdata"
+	results, err := Lint(schema, testLintOptions, file)
+	require.NoError(t, err)
+	report, err := results.SarifReport(rootDir)
+	require.NoError(t, err)
+	assert.Equal(t, 1, len(report.Runs))
+	assert.Equal(t, len(sarifLinterRules()), len(report.Runs[0].Tool.Driver.Rules))
+	assert.Equal(t, 0, len(report.Runs[0].Results))
+}
+
+func TestLinter_Pass(t *testing.T) {
+	file := "./testdata/pass-rules.mql.yaml"
+	results, err := Lint(schema, testLintOptions, file)
+	require.NoError(t, err)
+	assert.Equal(t, 1, len(results.BundleLocations))
+	assert.Equal(t, 0, len(results.Entries))
+	assert.False(t, results.HasError())
+}
+
+func TestLinter_Fail(t *testing.T) {
+	findEntry := func(entries []*Entry, id string) *Entry {
+		for _, entry := range entries {
+			if entry.RuleID == id {
+				return entry
+			}
+		}
+		return nil
+	}
+
+	t.Run("fail-global-props", func(t *testing.T) {
+		file := "./testdata/fail-bundle-global-props.mql.yaml"
+		results, err := Lint(schema, testLintOptions, file)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(results.Entries))
+		assert.Equal(t, "bundle-global-props-deprecated", results.Entries[0].RuleID)
+		assert.Equal(t, "error", results.Entries[0].Level)
+		assert.Equal(t, "Defining global properties in a policy bundle is deprecated. Define properties within individual policies and queries instead.", results.Entries[0].Message)
+	})
+
+	t.Run("fail-policy-uid", func(t *testing.T) {
+		file := "./testdata/fail-policy-uid.mql.yaml"
+		results, err := Lint(schema, testLintOptions, file)
+		require.NoError(t, err)
+		assert.Equal(t, 2, len(results.Entries))
+
+		result := findEntry(results.Entries, "policy-uid")
+		assert.Equal(t, "policy 'Ubuntu Benchmark 1' (at line 2) does not define a UID", result.Message)
+		assert.Equal(t, "policy-uid", result.RuleID)
+		assert.Equal(t, "error", result.Level)
+
+		result = findEntry(results.Entries, "bundle-compile-error")
+		assert.Contains(t, result.Message, "cannot refresh MRN with an empty UID")
+		assert.Equal(t, "bundle-compile-error", result.RuleID)
+	})
+
+	t.Run("fail-policy-name", func(t *testing.T) {
+		file := "./testdata/fail-policy-name.mql.yaml"
+		results, err := Lint(schema, testLintOptions, file)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(results.Entries))
+		assert.Equal(t, "policy 'ubuntu-bench-1' does not define a name", results.Entries[0].Message)
+		assert.Equal(t, "policy-name", results.Entries[0].RuleID)
+		assert.Equal(t, "error", results.Entries[0].Level)
+	})
+
+	t.Run("fail-policy-missing-asset-filter-variants", func(t *testing.T) {
+		file := "./testdata/fail-policy-missing-asset-filter-variants.mql.yaml"
+		results, err := Lint(schema, testLintOptions, file)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(results.Entries))
+		assert.Equal(t, "policy 'mondoo-aws-security', group 'AWS IAM' (line 18): Check 'mondoo-aws-security-access-keys-rotated' lacks an asset filter or variants, and the group also has no filter.", results.Entries[0].Message)
+		assert.Equal(t, "policy-missing-asset-filter", results.Entries[0].RuleID)
+		assert.Equal(t, "warning", results.Entries[0].Level)
+	})
+
+	t.Run("fail-policy-missing-asset-filter-groups", func(t *testing.T) {
+		file := "./testdata/fail-policy-missing-asset-filter-groups.mql.yaml"
+		results, err := Lint(schema, testLintOptions, file)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(results.Entries))
+		assert.Equal(t, "policy 'mondoo-aws-security', group 'AWS IAM' (line 18): Check 'mondoo-aws-security-access-keys-rotated' lacks an asset filter or variants, and the group also has no filter.", results.Entries[0].Message)
+		assert.Equal(t, "policy-missing-asset-filter", results.Entries[0].RuleID)
+		assert.Equal(t, "warning", results.Entries[0].Level)
+	})
+
+	t.Run("fail-policy-missing-checks", func(t *testing.T) {
+		file := "./testdata/fail-policy-missing-checks.mql.yaml"
+		results, err := Lint(schema, testLintOptions, file)
+		require.NoError(t, err)
+		assert.Equal(t, 2, len(results.Entries))
+		assert.Equal(t, "policy 'ubuntu-bench-1', group 'Configure Ubuntu 1' (line 16) has no checks, data queries, or sub-policies defined", results.Entries[0].Message)
+		assert.Equal(t, "policy-missing-checks", results.Entries[0].RuleID)
+		assert.Equal(t, "error", results.Entries[0].Level)
+		assert.Equal(t, "Global query UID 'ubuntu-1-1' is defined but not assigned to any policy", results.Entries[1].Message)
+		assert.Equal(t, "query-unassigned", results.Entries[1].RuleID)
+		assert.Equal(t, "warning", results.Entries[1].Level)
+	})
+
+	// A policy made only of risk factors has no groups by design; the rule must
+	// not report it. Any other finding in this fixture would also be a regression.
+	t.Run("pass-policy-risk-factors-only", func(t *testing.T) {
+		file := "./testdata/pass-policy-risk-factors-only.mql.yaml"
+		results, err := Lint(schema, testLintOptions, file)
+		require.NoError(t, err)
+		for _, e := range results.Entries {
+			assert.NotEqual(t, "policy-missing-checks", e.RuleID, e.Message)
+		}
+		assert.Empty(t, results.Entries)
+	})
+
+	t.Run("fail-policy-no-groups-or-risk-factors", func(t *testing.T) {
+		file := "./testdata/fail-policy-no-groups-or-risk-factors.mql.yaml"
+		results, err := Lint(schema, testLintOptions, file)
+		require.NoError(t, err)
+		require.Equal(t, 1, len(results.Entries))
+		assert.Equal(t, "policy 'example-empty' has no groups or risk factors defined", results.Entries[0].Message)
+		assert.Equal(t, "policy-missing-checks", results.Entries[0].RuleID)
+		assert.Equal(t, "error", results.Entries[0].Level)
+	})
+
+	t.Run("fail-policy-missing-version", func(t *testing.T) {
+		file := "./testdata/fail-policy-missing-version.mql.yaml"
+		results, err := Lint(schema, testLintOptions, file)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(results.Entries))
+		assert.Equal(t, "policy 'ubuntu-bench-1' is missing version", results.Entries[0].Message)
+		assert.Equal(t, "policy-missing-version", results.Entries[0].RuleID)
+		assert.Equal(t, "error", results.Entries[0].Level)
+	})
+
+	t.Run("fail-policy-wrong-version", func(t *testing.T) {
+		file := "./testdata/fail-policy-wrong-version.mql.yaml"
+		results, err := Lint(schema, testLintOptions, file)
+		require.NoError(t, err)
+		assert.Equal(t, 2, len(results.Entries))
+
+		result := findEntry(results.Entries, "policy-wrong-version")
+		assert.Equal(t, "policy 'ubuntu-bench-1' has invalid version 'test.1.2.3.4': Invalid Semantic Version", result.Message)
+		assert.Equal(t, "policy-wrong-version", result.RuleID)
+		assert.Equal(t, "error", result.Level)
+
+		result = findEntry(results.Entries, "bundle-compile-error")
+		assert.Equal(t, "Could not compile policy bundle: failed to validate policy: policy '//local.cnspec.io/run/local-execution/policies/ubuntu-bench-1' version 'test.1.2.3.4' is not a valid semver version", result.Message)
+		assert.Equal(t, "bundle-compile-error", result.RuleID)
+		assert.Equal(t, "error", result.Level)
+	})
+
+	t.Run("fail-policy-required-tags-missing", func(t *testing.T) {
+		file := "./testdata/fail-policy-required-tags-missing.mql.yaml"
+		results, err := Lint(schema, testLintOptions, file)
+		require.NoError(t, err)
+		assert.Equal(t, 2, len(results.Entries))
+		assert.Equal(t, "policy 'ubuntu-bench-1' does not contain the required tag `mondoo.com/category`", results.Entries[0].Message)
+		assert.Equal(t, "policy-required-tags-missing", results.Entries[0].RuleID)
+		assert.Equal(t, "warning", results.Entries[0].Level)
+		assert.Equal(t, "policy 'ubuntu-bench-1' does not contain the required tag `mondoo.com/platform`", results.Entries[1].Message)
+		assert.Equal(t, "policy-required-tags-missing", results.Entries[1].RuleID)
+		assert.Equal(t, "warning", results.Entries[1].Level)
+	})
+
+	t.Run("fail-query-uid-unique", func(t *testing.T) {
+		file := "./testdata/fail-query-uid-unique.mql.yaml"
+		results, err := Lint(schema, testLintOptions, file)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(results.Entries))
+		assert.Equal(t, "Global query UID 'ubuntu-1-1' is used multiple times in the same file", results.Entries[0].Message)
+		assert.Equal(t, "query-uid-unique", results.Entries[0].RuleID)
+		assert.Equal(t, "error", results.Entries[0].Level)
+	})
+
+	t.Run("fail-query-name", func(t *testing.T) {
+		file := "./testdata/fail-query-name.mql.yaml"
+		results, err := Lint(schema, testLintOptions, file)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(results.Entries))
+		assert.Equal(t, "Global query 'ubuntu-hard-2-2' does not define a title", results.Entries[0].Message)
+		assert.Equal(t, "query-name", results.Entries[0].RuleID)
+		assert.Equal(t, "error", results.Entries[0].Level)
+	})
+
+	t.Run("fail-query-title-too-long", func(t *testing.T) {
+		file := "./testdata/fail-query-title-too-long.mql.yaml"
+		results, err := Lint(schema, testLintOptions, file)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(results.Entries))
+		assert.Equal(t, "Global query 'ubuntu-hard-2-2' title is 83 characters long, exceeding the maximum of 75", results.Entries[0].Message)
+		assert.Equal(t, "query-title-too-long", results.Entries[0].RuleID)
+		assert.Equal(t, "warning", results.Entries[0].Level)
+	})
+
+	t.Run("fail-query-variant-uses-non-default-fields", func(t *testing.T) {
+		file := "./testdata/fail-query-variant-uses-non-default-fields.mql.yaml"
+		results, err := Lint(schema, testLintOptions, file)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(results.Entries))
+		assert.Equal(t, "Query variant 'ubuntu-hard-2-1-var1' should not define 'impact'", results.Entries[0].Message)
+		assert.Equal(t, "query-variant-uses-non-default-fields", results.Entries[0].RuleID)
+		assert.Equal(t, "warning", results.Entries[0].Level)
+	})
+
+	t.Run("fail-query-missing-mql", func(t *testing.T) {
+		file := "./testdata/fail-query-missing-mql.mql.yaml"
+		results, err := Lint(schema, testLintOptions, file)
+		require.NoError(t, err)
+		assert.Equal(t, 2, len(results.Entries))
+
+		result := findEntry(results.Entries, "query-missing-mql")
+		assert.Equal(t, "Global query 'ubuntu-hard-2-2' has no variants and must define MQL", result.Message)
+		assert.Equal(t, "query-missing-mql", result.RuleID)
+		assert.Equal(t, "error", result.Level)
+
+		result = findEntry(results.Entries, "bundle-compile-error")
+		assert.Equal(t, "Could not compile policy bundle: failed to validate query '//local.cnspec.io/run/local-execution/queries/ubuntu-hard-2-2': failed to compile query '': query is not implemented '//local.cnspec.io/run/local-execution/queries/ubuntu-hard-2-2'\n", result.Message)
+		assert.Equal(t, "bundle-compile-error", result.RuleID)
+		assert.Equal(t, "error", result.Level)
+	})
+
+	t.Run("fail-query-unassigned", func(t *testing.T) {
+		file := "./testdata/fail-query-unassigned.mql.yaml"
+		results, err := Lint(schema, testLintOptions, file)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(results.Entries))
+		assert.Equal(t, "Global query UID 'ubuntu-hard-1-1' is defined but not assigned to any policy", results.Entries[0].Message)
+		assert.Equal(t, "query-unassigned", results.Entries[0].RuleID)
+		assert.Equal(t, "warning", results.Entries[0].Level)
+	})
+
+	t.Run("fail-query-used-as-different-types", func(t *testing.T) {
+		file := "./testdata/fail-query-used-as-different-types.mql.yaml"
+		results, err := Lint(schema, testLintOptions, file)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(results.Entries))
+		assert.Equal(t, "Query UID 'sshd-sshd-01' is used as both a check and a data query in policies", results.Entries[0].Message)
+		assert.Equal(t, "query-used-as-different-types", results.Entries[0].RuleID)
+		assert.Equal(t, "error", results.Entries[0].Level)
+	})
+
+	t.Run("fail-querypack-compile-error", func(t *testing.T) {
+		// Regression: invalid MQL inside a querypack must surface as
+		// bundle-compile-error at lint time (matches server-side compile).
+		file := "./testdata/fail-querypack-compile-error.mql.yaml"
+		results, err := Lint(schema, testLintOptions, file)
+		require.NoError(t, err)
+
+		result := findEntry(results.Entries, "bundle-compile-error")
+		require.NotNil(t, result, "expected bundle-compile-error entry")
+		assert.Equal(t, "error", result.Level)
+		assert.Contains(t, result.Message, "expected closing '}', got ':'")
+	})
+
+	t.Run("fail-bundle-unknown-field", func(t *testing.T) {
+		file := "./testdata/fail-bundle-unknown-field.mql.yaml"
+		results, err := Lint(schema, testLintOptions, file)
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(results.Entries))
+		assert.Equal(t, "Bundle file fail-bundle-unknown-field.mql.yaml contains unknown fields: error unmarshaling JSON: while decoding JSON: json: unknown field \"unknown_field\"", results.Entries[0].Message)
+		assert.Equal(t, "bundle-unknown-field", results.Entries[0].RuleID)
+		assert.Equal(t, "warning", results.Entries[0].Level)
+	})
+
+	t.Run("fail-migration-missing-conditions", func(t *testing.T) {
+		file := "./testdata/fail-migration-missing-conditions.yaml"
+		results, err := Lint(schema, testLintOptions, file)
+		require.NoError(t, err)
+		if !assert.Equal(t, 8, len(results.Entries)) {
+			for _, entry := range results.Entries {
+				t.Logf("Entry: %s\t :%d:%d", entry.RuleID, entry.Location[0].Line, entry.Location[0].Column)
+			}
+		}
+
+		// Count errors by rule
+		ruleCount := make(map[string]int)
+		for _, entry := range results.Entries {
+			ruleCount[entry.RuleID]++
+		}
+
+		assert.Equal(t, 4, ruleCount["bundle-migrations-configuration-validation"], "Expected 4 configuration validation errors")
+		assert.Equal(t, 2, ruleCount["bundle-migrations-validate-stages"], "Expected 2 stage validation errors")
+		assert.Equal(t, 2, ruleCount["bundle-migrations-validate-group-conditions"], "Expected 2 group condition errors")
+	})
+
+	t.Run("fail-migration-validate-stages", func(t *testing.T) {
+		file := "./testdata/fail-migration-validate-stages.yaml"
+		results, err := Lint(schema, testLintOptions, file)
+		require.NoError(t, err)
+		if !assert.Equal(t, 6, len(results.Entries)) {
+			for _, entry := range results.Entries {
+				t.Logf("Entry: %s\t :%d:%d", entry.RuleID, entry.Location[0].Line, entry.Location[0].Column)
+			}
+		}
+
+		// Count errors by rule
+		ruleCount := make(map[string]int)
+		for _, entry := range results.Entries {
+			ruleCount[entry.RuleID]++
+		}
+
+		assert.Equal(t, 4, ruleCount["bundle-migrations-validate-stages"], "Expected 4 stage validation errors")
+		assert.Equal(t, 2, ruleCount["bundle-migrations-validate-cross-stage-produce"], "Expected 7 cross-stage produce errors")
+	})
+
+	t.Run("fail-migrations-validate-cross-stage-produce", func(t *testing.T) {
+		file := "./testdata/fail-migration-validate-cross-stage-produce.yaml"
+		results, err := Lint(schema, testLintOptions, file)
+		require.NoError(t, err)
+		if !assert.Equal(t, 1, len(results.Entries)) {
+			for _, entry := range results.Entries {
+				t.Logf("Entry: %s\t :%d:%d", entry.RuleID, entry.Location[0].Line, entry.Location[0].Column)
+			}
+		}
+	})
+}
+
+// TestLinter_StrictDeclaration covers the v14 requirement that a policy states
+// its MQL strict mode rather than inheriting the operator's config. The rule is
+// opt-in for now, so this also pins that it stays quiet by default while
+// first-party content is migrated.
+func TestLinter_StrictDeclaration(t *testing.T) {
+	hasStrictEntry := func(entries []*Entry) bool {
+		for _, entry := range entries {
+			if entry.RuleID == PolicyMissingStrictRuleID {
+				return true
+			}
+		}
+		return false
+	}
+
+	file := "./testdata/pass-rules.mql.yaml"
+
+	t.Run("off by default", func(t *testing.T) {
+		results, err := Lint(schema, testLintOptions, file)
+		require.NoError(t, err)
+		assert.False(t, hasStrictEntry(results.Entries),
+			"the rule must not fire unless it is asked for")
+	})
+
+	t.Run("opt-in flags an undeclared policy", func(t *testing.T) {
+		opts := testLintOptions
+		opts.RequireStrictDeclaration = true
+		results, err := Lint(schema, opts, file)
+		require.NoError(t, err)
+		assert.True(t, hasStrictEntry(results.Entries),
+			"a policy that declares no strict mode must be reported")
+		// a warning, not an error: it becomes an error in v14
+		assert.False(t, results.HasError())
+	})
+
+	t.Run("an explicit declaration satisfies it", func(t *testing.T) {
+		for _, decl := range []string{"true", "false"} {
+			data := []byte(`
+policies:
+- uid: strict-declared
+  name: Strict declared
+  version: "1.0.0"
+  strict: ` + decl + `
+  groups:
+  - filters: "true"
+    checks:
+    - uid: a-check
+      mql: 'asset.name != ""'
+`)
+			opts := testLintOptions
+			opts.RequireStrictDeclaration = true
+			entries := LintPolicyBundle(schema, "inline.mql.yaml", data, opts)
+			assert.False(t, hasStrictEntry(entries),
+				"strict: %s is a declaration and must satisfy the rule", decl)
+		}
+	})
+}
+
+// An overlay bundle imports a policy it does not carry and adjusts that
+// policy's checks. Neither the imported policy nor the checks are visible to
+// the linter, which has no Library and no cross-file context, so none of them
+// may be reported as missing or incomplete. Before mondoohq/server#20175 this
+// shape produced a bundle-compile-error for the import, a query-name error for
+// the override that supplies MQL, and a policy-missing-assigned-query error for
+// the one that does not - burying the one thing the author needed to know.
+func TestLinter_PassOverlayImport(t *testing.T) {
+	file := "./testdata/pass-overlay-import.mql.yaml"
+	results, err := Lint(schema, testLintOptions, file)
+	require.NoError(t, err)
+	for _, entry := range results.Entries {
+		t.Logf("[%s] %s: %s", entry.Level, entry.RuleID, entry.Message)
+	}
+	assert.Equal(t, 0, len(results.Entries))
+	assert.False(t, results.HasError())
+}

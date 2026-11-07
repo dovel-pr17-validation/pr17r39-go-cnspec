@@ -1,0 +1,279 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+
+packs:
+  - uid: mondoo-macos-inventory
+    name: macOS Inventory Pack
+    version: 1.9.0
+    license: BUSL-1.1
+    require:
+      - provider: os
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    tags:
+      mondoo.com/platform: macos
+      mondoo.com/category: best-practices
+      mondoo.com/icon: apple
+    summary: Inventory macOS host OS, packages, and configuration
+    docs:
+      desc: |
+        Inventories a macOS host: hardware and OS details, installed packages, running services and processes, network configuration, and security posture including FileVault, Gatekeeper, and MDM enrollment.
+
+        Enable this query pack in [Mondoo Platform](https://mondoo.com/platform) to automatically inventory your macOS hosts, or scan a host manually with cnspec:
+
+        ```bash
+        cnspec scan local -f mondoo-macos-inventory.mql.yaml
+        ```
+    groups:
+      - uid: mondoo-macos-inventory-system-group
+        title: System
+        filters: asset.platform == "macos"
+        queries:
+          - uid: mondoo-asset-info
+            title: Asset information
+            docs:
+              desc: Asset kind, platform, name, architecture, and version.
+            mql: asset { kind title platform name arch runtime version }
+          - uid: mondoo-hostname
+            title: Hostname
+            docs:
+              desc: Returns the system hostname.
+            mql: os.hostname
+          - uid: mondoo-macos-uptime
+            title: Operating system uptime
+            docs:
+              desc: Reports how long the system has run since its last boot.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: os.uptime
+          - uid: mondoo-macos-timezone
+            title: System timezone
+            docs:
+              desc: Returns the configured system timezone.
+            mql: os.date.timezone
+          - uid: mondoo-macos-cloud-instance
+            title: Cloud instance metadata
+            docs:
+              desc: |
+                Cloud instance identity from the metadata service.
+
+                Covers public and private hostnames and IPs plus the raw instance metadata carrying account or subscription, region, and instance type. Runs only on hosts that detect as a cloud instance; other hosts skip it.
+            filters: cloud.provider != "Unknown"
+            mql: cloud { provider instance { publicHostname privateHostname publicIpv4 { ip } privateIpv4 { ip } metadata } }
+          - uid: mondoo-macos-logged-in-users
+            title: Logged-in users
+            docs:
+              desc: Lists currently logged-in users 
+            mql: users.where(loggedIn).map(name)
+      - uid: mondoo-macos-inventory-hardware-group
+        title: Hardware & Firmware
+        filters: asset.platform == "macos"
+        queries:
+          - uid: mondoo-macos-machine-model-identifier
+            title: Machine model identifier
+            docs:
+              desc: Mac hardware model identifier, such as MacBookPro18,1.
+            mql: |
+              macos.hardware.machineModel
+          - uid: mondoo-macos-machine-model-name
+            title: Machine model name
+            docs:
+              desc: Human-readable Mac model name, such as MacBook Pro.
+            mql: |
+              macos.hardware.machineName
+          - uid: mondoo-macos-model-part-number
+            title: Model part number
+            docs:
+              desc: Returns the Apple model and part number for the hardware.
+            mql: |
+              macos.hardware.modelNumber
+          - uid: mondoo-macos-serial-number
+            title: System serial number
+            docs:
+              desc: Hardware serial number, for asset tracking.
+            mql: |
+              macos.hardware.serialNumber
+          - uid: mondoo-macos-cpu-type
+            title: CPU type
+            docs:
+              desc: Processor chip type, such as Apple M1 or Intel Core i7.
+            mql: |
+              macos.hardware.chipType
+          - uid: mondoo-macos-physical-memory
+            title: Physical memory size
+            docs:
+              desc: Returns the total installed RAM.
+            mql: |
+              macos.hardware.physicalMemory
+          - uid: mondoo-macos-hardware-information
+            title: Hardware information
+            docs:
+              desc: Model, chip, serial, UUID, memory, and processor count.
+            mql: macos.hardware{ machineModel machineName modelNumber chipType serialNumber platformUUID physicalMemory numberProcessors }
+          - uid: mondoo-macos-storage
+            title: Storage Data
+            docs:
+              desc: Returns storage volume details from macOS system_profiler.
+            mql: |
+              parse.json(content: command('system_profiler SPStorageDataType -json').stdout).params
+          - uid: mondoo-macos-power
+            title: Power Data
+            docs:
+              desc: Power and battery details from system_profiler.
+            mql: |
+              parse.json(content: command('system_profiler SPPowerDataType -json').stdout).params
+          - uid: mondoo-macos-network
+            title: Network Data
+            docs:
+              desc: Returns network configuration from macOS system_profiler.
+            mql: |
+              parse.json(content: command('system_profiler SPNetworkDataType -json').stdout).params
+      - uid: mondoo-macos-inventory-identity-group
+        title: Identity & Access
+        filters: asset.platform == "macos"
+        queries:
+          - uid: mondoo-macos-users
+            title: Regular users
+            docs:
+              desc: Regular user accounts, excluding root and system accounts.
+            mql: users.where( name != /^_/ && shell != "/usr/bin/false" && name != "root")
+      - uid: mondoo-macos-inventory-kernel-group
+        title: Kernel & Extensions
+        filters: asset.platform == "macos"
+        queries:
+          - uid: mondoo-macos-kernel-modules
+            title: Kernel modules
+            docs:
+              desc: Lists kernel extensions (kexts) and whether each is loaded.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: kernel.modules { name loaded }
+          - uid: mondoo-macos-system-extensions
+            title: macOS System Extensions
+            docs:
+              desc: System extensions with identifier, version, and state.
+            mql: macos.systemExtensions { active enabled identifier state version }
+      - uid: mondoo-macos-inventory-processes-services-group
+        title: Processes & Services
+        filters: asset.platform == "macos"
+        queries:
+          - uid: mondoo-macos-processes
+            title: Running processes
+            docs:
+              desc: Lists running processes with PID, command, and flags.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: processes { pid command flags }
+          - uid: mondoo-macos-running-services
+            title: Running services
+            docs:
+              desc: Running launchd services with enabled and type state.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: services.where(running == true) { name running enabled masked type }
+          - uid: mondoo-macos-mounts
+            title: Mounted devices
+            docs:
+              desc: Mounted filesystems with type, options, and space used.
+            mql: mount.list { path fstype device options size used available }
+      - uid: mondoo-macos-inventory-packages-group
+        title: Packages & Updates
+        filters: asset.platform == "macos"
+        queries:
+          - uid: mondoo-macos-packages
+            title: Installed packages
+            docs:
+              desc: Installed packages with version, install date, and purl.
+            mql: packages { name version arch installed epoch origin purl }
+          - uid: mondoo-macos-recommended-software-updates
+            title: Recommended software updates
+            docs:
+              desc: Pending macOS and application updates from Apple.
+            mql: macos.softwareupdate.updates { label title version size recommended action }
+      - uid: mondoo-macos-inventory-network-group
+        title: Network
+        filters: asset.platform == "macos"
+        queries:
+          - uid: mondoo-macos-ports-listening
+            title: Listening ports
+            docs:
+              desc: Ports that are not closed, with owning user and process.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: ports.where(state != "close") { user state port address protocol process remoteAddress remotePort }
+          - uid: mondoo-macos-active-connections
+            title: Active network connections
+            docs:
+              desc: Non-closed connections with local and remote endpoints.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: ports.where(state != "close") { user state port address protocol process remoteAddress remotePort }
+          - uid: mondoo-macos-interface-configuration
+            title: Network interface configuration
+            docs:
+              desc: Interface MAC, vendor, MTU, flags, and assigned IPs.
+            mql: network.interfaces { name mac vendor mtu flags active virtual ips { ip cidr subnet broadcast gateway } }
+          - uid: mondoo-macos-etc-hosts
+            title: Static host entries
+            docs:
+              desc: Static hostname to IP mappings from /etc/hosts.
+            mql: |
+              if (file("/etc/hosts").exists) { file("/etc/hosts").content }
+          - uid: mondoo-macos-network-neighbors
+            title: ARP/NDP neighbor cache
+            docs:
+              desc: ARP and NDP neighbor cache entries with IP and MAC.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: network.neighbors { ip mac interface state }
+          - uid: mondoo-macos-sshd-interface-configuration
+            title: sshd configuration
+            docs:
+              desc: SSH server parameters read from sshd_config.
+            mql: sshd.config.params
+      - uid: mondoo-macos-inventory-device-management-group
+        title: Device Management
+        filters: asset.platform == "macos"
+        queries:
+          - uid: mondoo-macos-mdm-enrollment
+            title: MDM enrollment status
+            docs:
+              desc: MDM enrollment, DEP, user approval, and server URL.
+            mql: macos.mdm { enrolled dep userApproved serverUrl }
+          - uid: mondoo-macos-mdm-vendor
+            title: MDM vendor and enrollment method
+            docs:
+              desc: |
+                MDM vendor and how the Mac was enrolled.
+
+                The vendor is recognized from the server host, so it is null for a self-hosted or unlisted MDM server. The method is `automated` for Automated Device Enrollment and `user` otherwise.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: mdm { vendor method }
+          - uid: mondoo-macos-profile
+            title: Configuration Profile Data
+            docs:
+              desc: Installed configuration profiles, with scope and payloads.
+            filters: command("id -u").stdout.trim == 0
+            mql: macos.profiles.list { identifier uuid displayName description organization type removalDisallowed scope payloads }
+      - uid: mondoo-macos-inventory-security-group
+        title: Security & Encryption
+        filters: asset.platform == "macos"
+        queries:
+          - uid: mondoo-macos-edr-agents
+            title: Endpoint security agents
+            docs:
+              desc: |
+                Recognized EDR and antivirus agents with health state.
+
+                launchd reports no boot-start setting, so `enabled` is null for every agent except CrowdStrike Falcon, whose system extension reports one.
+            mql: edr.products { id name vendor category version running enabled healthy detectedBy }
+          - uid: mondoo-macos-filevault
+            title: FileVault disk encryption status
+            docs:
+              desc: Whether FileVault is on, and its reported status.
+            mql: macos.filevault { enabled status }
+          - uid: mondoo-macos-filevault-recovery-keys
+            title: FileVault recovery keys and users
+            docs:
+              desc: Whether a personal or institutional FileVault recovery key is set, and the authorized users. Reading them requires root, so a non-root scan skips this query.
+            filters: command("id -u").stdout.trim == 0
+            mql: macos.filevault { hasPersonalRecoveryKey hasInstitutionalRecoveryKey users }
+          - uid: mondoo-macos-gatekeeper
+            title: Gatekeeper assessment status
+            docs:
+              desc: Gatekeeper assessment state and status from spctl.
+            mql: macos.gatekeeper { enabled status }

@@ -1,0 +1,109 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+
+packs:
+  - uid: mondoo-shodan-inventory
+    name: Shodan Inventory Pack
+    version: 1.1.0
+    license: BUSL-1.1
+    require:
+      - provider: shodan
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    tags:
+      mondoo.com/platform: shodan
+      mondoo.com/category: best-practices
+      mondoo.com/icon: shodan
+    summary: Inventory Shodan host and service data
+    docs:
+      desc: |
+        Collects Shodan intelligence for hosts and domains: hostnames, ASN, ISP, organization, open ports, detected OS, known CVEs, subdomains, and DNS records.
+
+        Enable this query pack in [Mondoo Platform](https://mondoo.com/platform) to automatically enrich your assets with Shodan data, or scan a network manually with cnspec. Manual scans need a [Shodan API token](https://account.shodan.io/):
+
+        ```bash
+        export SHODAN_TOKEN=<your api token>
+        cnspec scan shodan --networks "1.1.1.1/28" --discover hosts -f mondoo-shodan-inventory.mql.yaml
+        ```
+    groups:
+      - uid: mondoo-shodan-inventory-host-group
+        title: Host
+        filters: asset.platform == "shodan-host"
+        queries:
+          - uid: mondoo-shodan-inventory-hostnames
+            title: Shodan info about Hostnames / DNS
+            docs:
+              desc: Hostnames Shodan associates with the host's IP.
+            mql: |
+              shodan.host.hostnames
+          - uid: mondoo-shodan-inventory-asn
+            title: Shodan info about ASN
+            docs:
+              desc: Autonomous System Number routing the host's IP.
+            mql: |
+              shodan.host.asn
+          - uid: mondoo-shodan-inventory-tags
+            title: Shodan info about Tags
+            docs:
+              desc: Shodan tags describing the host and its services.
+            mql: |
+              shodan.host.tags
+          - uid: mondoo-shodan-inventory-isp
+            title: Shodan info about ISP
+            docs:
+              desc: Internet service provider hosting the IP address.
+            mql: |
+              shodan.host.isp
+          - uid: mondoo-shodan-inventory-org
+            title: Shodan info about Org
+            docs:
+              desc: Returns the organization that owns the IP address.
+            mql: |
+              shodan.host.org
+          - uid: mondoo-shodan-inventory-ip
+            title: Shodan info about IP
+            docs:
+              desc: Returns the IP address of the queried host.
+            mql: |
+              shodan.host.ip
+          - uid: mondoo-shodan-inventory-os
+            title: Shodan info about OS
+            docs:
+              desc: Returns the operating system Shodan detected for the host.
+            mql: |
+              shodan.host.os
+          - uid: mondoo-shodan-inventory-ports
+            title: Shodan info about Ports
+            docs:
+              desc: Lists the open ports Shodan observed on the host.
+            mql: |
+              shodan.host.ports
+          - uid: mondoo-shodan-inventory-vulns
+            title: Shodan info about vulnerabilities
+            docs:
+              desc: Known CVEs Shodan associates with services on the host.
+            mql: |
+              shodan.host.vulns { * }
+      - uid: mondoo-shodan-inventory-domain-group
+        title: Domain
+        filters: asset.platform == "shodan-domain"
+        queries:
+          - uid: mondoo-shodan-inventory-nsrecords
+            title: Shodan info about DNS NS records
+            docs:
+              desc: Lists the nameserver (NS) records Shodan has for the domain.
+            mql: |
+              shodan.domain.nsrecords
+          - uid: mondoo-shodan-inventory-subdomains
+            title: Shodan info about Subdomains
+            docs:
+              desc: Lists the subdomains Shodan discovered for the domain.
+            mql: |
+              shodan.domain.subdomains
+          - uid: mondoo-shodan-inventory-domain-tags
+            title: Shodan info about Tags
+            docs:
+              desc: Returns the Shodan tags assigned to the domain.
+            mql: |
+              shodan.domain.tags

@@ -1,0 +1,124 @@
+// Copyright Mondoo, Inc. 2024, 2026
+// SPDX-License-Identifier: BUSL-1.1
+
+package upstream
+
+import (
+	"context"
+
+	policy "go.mondoo.com/cnspec/policy"
+	mondoogql "go.mondoo.com/mondoo-go"
+	"go.mondoo.com/mql/providers-sdk/v1/upstream/gql"
+)
+
+type PageInfo struct {
+	StartCursor     string `json:"startCursor"`
+	EndCursor       string `json:"endCursor"`
+	HasNextPage     bool   `json:"hasNextPage"`
+	HasPreviousPage bool   `json:"hasPreviousPage"`
+}
+
+type UpstreamPolicy struct {
+	policy.Policy
+	TrustLevel mondoogql.TrustLevel
+	Action     mondoogql.PolicyAction
+	Assigned   bool
+}
+
+func SearchPolicy(
+	ctx context.Context,
+	c *gql.MondooClient,
+	scopeMrn string,
+	assignedOnly,
+	includePublic,
+	includePrivate *bool,
+) ([]*UpstreamPolicy, error) {
+	var policies []*UpstreamPolicy
+	var after *mondoogql.String = nil
+
+	var q struct {
+		Content struct {
+			TotalCount int `json:"totalCount"`
+			Edges      []struct {
+				Cursor string `json:"cursor"`
+				Node   struct {
+					Policy struct {
+						Mrn        string
+						Name       string
+						TrustLevel mondoogql.TrustLevel
+						Action     mondoogql.PolicyAction
+						Assigned   bool
+					} `graphql:"... on Policy"`
+				} `json:"node"`
+			} `json:"edges"`
+			PageInfo PageInfo `json:"pageInfo"`
+		} `graphql:"content(input: $input)"`
+	}
+
+	input := mondoogql.ContentSearchInput{
+		ScopeMrn:    mondoogql.String(scopeMrn),
+		CatalogType: mondoogql.CatalogType("POLICY"),
+	}
+
+	if assignedOnly != nil {
+		input.AssignedOnly = new(mondoogql.Boolean(*assignedOnly))
+	}
+	if includePublic != nil {
+		input.IncludePublic = new(mondoogql.Boolean(*includePublic))
+	}
+	if includePrivate != nil {
+		input.IncludePrivate = new(mondoogql.Boolean(*includePrivate))
+	}
+
+	for {
+		if after != nil {
+			input.After = after
+		} else {
+			input.After = nil
+		}
+
+		err := c.Query(ctx, &q, map[string]any{
+			"input": input,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		for _, edge := range q.Content.Edges {
+			policies = append(policies, &UpstreamPolicy{
+				Mrn:        edge.Node.Policy.Mrn,
+				Name:       edge.Node.Policy.Name,
+				TrustLevel: edge.Node.Policy.TrustLevel,
+				Action:     edge.Node.Policy.Action,
+				Assigned:   edge.Node.Policy.Assigned,
+			})
+		}
+
+		// Check if there are more pages
+		if !q.Content.PageInfo.HasNextPage {
+			break
+		}
+
+		// Set cursor for next page
+		afterCursor := mondoogql.String(q.Content.PageInfo.EndCursor)
+		after = &afterCursor
+	}
+
+	return policies, nil
+}
+
+type Space struct {
+	Mrn  string
+	Name string
+}
+
+func GetSpace(ctx context.Context, c *gql.MondooClient, mrn string) (*Space, error) {
+	var q struct {
+		Space Space `graphql:"space(mrn: $mrn)"`
+	}
+	err := c.Query(ctx, &q, map[string]any{"mrn": mondoogql.String(mrn)})
+	if err != nil {
+		return nil, err
+	}
+	return &q.Space, nil
+}

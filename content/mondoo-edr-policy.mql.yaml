@@ -1,0 +1,298 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+policies:
+  - uid: mondoo-edr-policy
+    name: Mondoo Endpoint Detection and Response (EDR)
+    version: 1.7.0
+    license: BUSL-1.1
+    tags:
+      mondoo.com/category: security
+      mondoo.com/platform: windows,linux,macos
+      mondoo.com/icon: policy
+    require:
+      - provider: os
+    authors:
+      - name: Mondoo, Inc.
+        email: hello@mondoo.com
+    summary: Validate endpoint detection and response deployment
+    docs:
+      desc: |
+        The Mondoo Endpoint Detection and Response (EDR) policy verifies that your EDR agents are present, running, and up to date across the endpoint fleet. EDR is only effective when its agents are actually deployed and operational. Gaps in coverage or stale signatures leave endpoints blind to active threats and create silent paths for attackers to gain a foothold and persist.
+
+        This policy helps organizations confirm continuous EDR coverage so that endpoint telemetry, threat detection, and incident response work as designed, closing the visibility gaps that adversaries rely on for initial access, privilege escalation, and lateral movement.
+
+        This policy provides checks across key EDR coverage areas:
+
+        - Presence of supported EDR agents on Windows, Linux, and macOS endpoints
+        - Operational status of the EDR agent and its services
+        - Antivirus and EDR signature freshness
+        - Coverage parity across operating systems and endpoint roles
+
+        Have suggestions for new checks in this policy? Visit our [cnspec repository](https://github.com/mondoohq/cnspec).
+    groups:
+      - title: Endpoint Detection and Response (EDR)
+        filters: |
+          asset.platform == 'macos' || asset.family.contains("linux") || asset.family.contains('windows')
+        checks:
+          - uid: mondoo-edr-policy-ensure-edr-agent-is-installed
+          - uid: mondoo-edr-policy-ensure-edr-agent-is-running
+    scoring_system: highest impact
+queries:
+  - uid: mondoo-edr-policy-ensure-edr-agent-is-installed
+    title: Ensure EDR Agent is installed
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-uem-09
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-308-a-5-ii-b-security-awareness-training-and-tools-protection-from-malicious-software
+      compliance/iso-27001-2022: iso-27001-2022-a-8-7
+      compliance/nis-2: nis-2-21-2-b
+      compliance/nist-csf-1: nist-csf-1-de-cm-4
+      compliance/nist-csf-2: nist-csf-2-de-cm-09
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-2
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-3
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-5-2-1
+      compliance/soc2-2017: soc2-control-cc6-8-4
+      compliance/vda-isa-5: vda-isa-5-5-2-3
+    mql: edr.installed
+    docs:
+      desc: |
+        This check verifies that a supported endpoint detection and response agent is installed.
+
+        The check looks for the presence of a recognized EDR product across Windows, Linux, and macOS. It assesses installation only; a companion check in this policy confirms the agent is actually running.
+
+        **Why this matters**
+
+        EDR is the control that assumes prevention failed. Antivirus asks whether a file matches something known bad; EDR records what processes did and gives an analyst the ability to ask questions afterward, which is how an intrusion using legitimate tools is found at all.
+
+        An endpoint without it is not merely less protected, it is invisible. There is no process lineage showing that a document spawned a shell, no record of the credential access that followed, and no telemetry reaching the team whose job is to notice. When that endpoint turns out to be the entry point, the investigation begins with nothing and has to be reconstructed from other machines' logs.
+
+        Coverage gaps are also where attackers end up by selection rather than by chance. An estate at ninety-five percent coverage has a five percent population that is disproportionately likely to host a compromise, because those are the machines built outside the standard process: lab systems, contractor laptops, servers stood up quickly, and the long-lived exception nobody revisited.
+
+        A failure here is a deployment question rather than a configuration one. Establish why the endpoint was missed, since the answer usually applies to more than one machine.
+      audit: |-
+        Confirm that a supported EDR agent is installed using the vendor's own management tooling.
+
+        ### Audit via console
+
+        1. Sign in to the management console for your EDR product (CrowdStrike Falcon, SentinelOne, ESET PROTECT, Microsoft Defender, Sophos Central, Cortex XDR, WatchGuard, Malwarebytes Nebula, or Wazuh).
+        2. Open the endpoint or device inventory.
+        3. Locate the asset by hostname and confirm it appears as an enrolled device.
+
+        If the asset is listed as an enrolled endpoint, the check passes. If the asset is missing from the inventory, the check fails.
+
+        ### Audit via CLI
+
+        1. On the endpoint, list installed software and services.
+        2. On Windows run `Get-Package` or `Get-Service`; on Linux run `rpm -qa` or `dpkg -l`; on macOS run `pkgutil --pkgs` or `systemextensionsctl list`.
+        3. Search the output for the EDR product (for example `falcon-sensor`, `SentinelAgent`, `Cortex XDR`, or `WinDefend`).
+
+        If a supported EDR package or service is present, the check passes. If no supported EDR product is found, the check fails.
+      remediation:
+        - id: gui
+          desc: |-
+            To install an EDR agent on a Windows or macOS endpoint:
+
+            1. Download the agent installer package for the endpoint from your EDR vendor's management console.
+            2. Run the installer on the endpoint and complete the guided installation.
+            3. On macOS, approve the vendor's system extension and full disk access prompts in System Settings > Privacy & Security.
+            4. Confirm the endpoint appears as enrolled in the vendor console.
+        - id: console
+          desc: |-
+            To deploy an EDR agent from the vendor management console:
+
+            1. Sign in to your EDR product's management console.
+            2. Create or download a deployment package scoped to the target endpoint group.
+            3. Push the package to the endpoint, or distribute the installer through your software-deployment tooling, and verify enrollment in the device inventory.
+        - id: cli
+          desc: |-
+            To install an EDR agent from the command line, run the vendor's installer for the endpoint's platform. The CrowdStrike Falcon examples below use `FALCON_CID`, your Customer ID from the Falcon console under Host setup and management > Sensor downloads. The CID is tenant-specific and sensitive, so treat it as a secret and source it from a secure variable rather than hardcoding it.
+
+            Other supported vendors use their own enrollment mechanism instead of a CID. For example, SentinelOne sensors enroll with a site or group token, and Microsoft Defender for Endpoint enrolls with the tenant onboarding package. Use the enrollment value your vendor documents.
+
+            CrowdStrike Falcon examples:
+
+            On Linux:
+
+            ```bash
+            sudo dnf install -y ./falcon-sensor.rpm
+            sudo /opt/CrowdStrike/falconctl -s --cid="${FALCON_CID}"
+            sudo systemctl enable --now falcon-sensor
+            ```
+
+            On macOS:
+
+            ```bash
+            sudo installer -pkg /tmp/FalconSensorMacOS.pkg -target /
+            sudo /Applications/Falcon.app/Contents/Resources/falconctl license "${FALCON_CID}"
+            ```
+
+            On Windows:
+
+            ```powershell
+            Start-Process -FilePath .\WindowsSensor.exe -ArgumentList '/install', '/quiet', '/norestart', 'CID=ABCDEF1234567890ABCDEF1234567890-12' -Wait
+            ```
+        - id: ansible
+          desc: |-
+            To install an EDR agent with Ansible, distribute and install the vendor package across the fleet:
+
+            ```yaml
+            - name: Install CrowdStrike Falcon sensor
+              ansible.builtin.package:
+                name: falcon-sensor
+                state: present
+
+            - name: Enable and start the Falcon sensor service
+              ansible.builtin.service:
+                name: falcon-sensor
+                state: started
+                enabled: true
+            ```
+        - id: script
+          desc: |-
+            To install an EDR agent with a script, wrap the vendor installer in your configuration-management tooling:
+
+            ```bash
+            #!/usr/bin/env bash
+            set -euo pipefail
+            sudo dnf install -y /tmp/falcon-sensor.rpm
+            sudo /opt/CrowdStrike/falconctl -s --cid="${FALCON_CID}"
+            sudo systemctl enable --now falcon-sensor
+            sudo systemctl is-active falcon-sensor
+            ```
+    refs:
+      - url: https://csrc.nist.gov/pubs/sp/800/83/r1/final
+        title: 'NIST SP 800-83 Rev. 1: Guide to Malware Incident Prevention and Handling'
+  - uid: mondoo-edr-policy-ensure-edr-agent-is-running
+    title: Ensure EDR Agent is running
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-uem-09
+      compliance/dora: dora-art-10
+      compliance/hipaa: hipaa-security-ss164-308-a-5-ii-b-security-awareness-training-and-tools-protection-from-malicious-software
+      compliance/iso-27001-2022: iso-27001-2022-a-8-7
+      compliance/nis-2: nis-2-21-2-b
+      compliance/nist-csf-1: nist-csf-1-de-cm-4
+      compliance/nist-csf-2: nist-csf-2-de-cm-09
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-2
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-3
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-5-3-5
+      compliance/soc2-2017: soc2-control-cc6-8-4
+      compliance/vda-isa-5: vda-isa-5-5-2-3
+    filters: edr.installed
+    # Defender often runs passive or disabled beside a third-party agent, so it is
+    # assessed only when no other recognized agent is installed.
+    mql: |
+      edr.products.where(id != "microsoft-defender").all(healthy)
+      edr.products.where(id != "microsoft-defender").length > 0 || edr.products.where(id == "microsoft-defender").all(healthy && signatureAge <= 1)
+    docs:
+      desc: |
+        This check verifies that the installed endpoint detection and response agent is running and enabled to start at boot.
+
+        The check assesses the agent's service state rather than its presence, so it fails on an endpoint where the software is installed but the service is stopped or disabled. A companion check in this policy confirms the agent is installed at all.
+
+        Every recognized agent on the endpoint must be running, and each service it depends on must be enabled wherever the operating system reports a boot-start setting. macOS launchd does not report one, so on macOS the check confirms that the agent is running. Microsoft Defender Antivirus is assessed only when it is the only recognized agent on a Windows endpoint, because it commonly runs in a reduced mode alongside a third-party product. In that case its signatures must also be no more than one day old.
+
+        **Why this matters**
+
+        An installed agent that is not running provides nothing while appearing to satisfy every inventory that counts installations. That gap is the reason this is a separate check: software asset management reports the endpoint as covered, and the endpoint is not.
+
+        Disabling the agent is also a deliberate step attackers take. It is well documented across ransomware operations, which is why the state of the service is worth monitoring rather than assuming, and why a stopped agent should be treated as a possible indicator rather than only as a fault.
+
+        The everyday causes are more common and matter just as much. Agents are stopped to troubleshoot a performance problem and not restarted, disabled during a software installation that asked for it, or broken by an update that failed partway. None of those produce an alert on the endpoint itself.
+
+        The distinction between running and enabled matters too. An agent running but not enabled stops protecting at the next reboot, which is precisely when a machine is most likely to be in a changed state.
+
+        Where this fails, establish whether the service was stopped deliberately, and by whom, before restarting it.
+      audit: |-
+        Confirm that the EDR agent services are running and enabled using the vendor's own tooling.
+
+        ### Audit via console
+
+        1. Sign in to the management console for your EDR product.
+        2. Open the endpoint or device inventory and locate the asset by hostname.
+        3. Review the agent health or status field for the device.
+
+        If the console reports the agent as healthy and actively reporting, the check passes. If the agent shows as offline, stale, or unprotected, the check fails.
+
+        ### Audit via CLI
+
+        1. On the endpoint, query the EDR service state.
+        2. On Windows run `Get-Service <edr-service>`; on Linux run `systemctl status <edr-service>`; on macOS run `launchctl list` or `systemextensionsctl list`.
+        3. Inspect whether the service is both active and configured to start at boot.
+        4. On a Windows endpoint where Microsoft Defender Antivirus is the only agent, run `Get-MpComputerStatus | Select-Object AntivirusSignatureAge` to read the signature age in days.
+
+        If every EDR agent's services are running and enabled, and Defender's signature age is 1 or less where it is the only agent, the check passes. If any agent's service is stopped or disabled, or those Defender signatures are older, the check fails.
+      remediation:
+        - id: gui
+          desc: |-
+            To start the EDR agent on a Windows or macOS endpoint:
+
+            1. Open the Services console on Windows, or System Settings on macOS.
+            2. Locate the EDR product's service or system extension.
+            3. Start the service and set it to launch automatically, then approve any required system extension prompt under Privacy & Security.
+        - id: console
+          desc: |-
+            To restore agent health from the vendor management console:
+
+            1. Sign in to your EDR product's management console.
+            2. Locate the affected endpoint in the device inventory.
+            3. Use the console's repair, reactivate, or redeploy action to bring the agent back online.
+        - id: cli
+          desc: |-
+            To start and enable the EDR agent service from the command line:
+
+            On Linux (CrowdStrike Falcon example):
+
+            ```bash
+            sudo systemctl enable --now falcon-sensor
+            systemctl is-active falcon-sensor
+            ```
+
+            On macOS (Wazuh example; system-extension products such as CrowdStrike Falcon and SentinelOne must instead be approved in System Settings > Privacy & Security):
+
+            ```bash
+            sudo launchctl bootstrap system /Library/LaunchDaemons/com.wazuh.agent.plist
+            sudo launchctl print system/com.wazuh.agent
+            ```
+
+            On Windows (CrowdStrike Falcon example):
+
+            ```powershell
+            Set-Service -Name CSFalconService -StartupType Automatic
+            Start-Service -Name CSFalconService
+            ```
+        - id: ansible
+          desc: |-
+            To ensure the EDR agent service is running with Ansible:
+
+            ```yaml
+            - name: Ensure the EDR agent service is running and enabled (Linux)
+              ansible.builtin.service:
+                name: falcon-sensor
+                state: started
+                enabled: true
+
+            - name: Ensure the EDR agent service is running and enabled (Windows)
+              ansible.windows.win_service:
+                name: CSFalconService
+                start_mode: auto
+                state: started
+            ```
+        - id: script
+          desc: |-
+            To start and enable the EDR agent service with a script:
+
+            ```bash
+            #!/usr/bin/env bash
+            set -euo pipefail
+            sudo systemctl enable --now falcon-sensor
+            sudo systemctl is-active falcon-sensor
+            ```
+    refs:
+      - url: https://csrc.nist.gov/pubs/sp/800/83/r1/final
+        title: 'NIST SP 800-83 Rev. 1: Guide to Malware Incident Prevention and Handling'

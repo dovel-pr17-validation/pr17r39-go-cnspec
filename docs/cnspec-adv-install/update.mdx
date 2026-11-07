@@ -1,0 +1,146 @@
+---
+title: Update cnspec
+sidebar_label: Update cnspec
+sidebar_position: 10
+displayed_sidebar: cnspec
+description: Upgrade cnspec to a new version and understand how versioning works
+image: /img/cnspec/mondoo-feature.jpg
+---
+
+cnspec is a versioned binary. To identify the currently installed version of cnspec, run:
+
+```
+cnspec version
+```
+
+To learn about cnspec provider versioning, read [Manage cnspec Providers](/cnspec/cnspec-adv-install/providers/).
+
+## How cnspec versioning works
+
+Mondoo's versioning policy is _based on_ the semantic versioning standard. For example, in version 12.1.2, 12 is the major version, 1 is the minor version, and 2 is the patch. When we release a new version, we increment one of these three version components depending on the type of changes we introduce.
+
+### Breaking changes policy
+
+Major version releases of cnspec contain _soft-breaking_ changes. These may require you to update your policies, query packs, or automation scripts in order to avoid disruption, but you have a long time to make those updates. We provide advanced warning before we make these changes, and they don't become _hard-breaking_ changes until the next major release.
+
+### Supported releases
+
+cnspec follows an N-1 support cycle, meaning the current version (N) and the immediate previous version (N-1) are officially supported. During this time, both major versions can communicate with Mondoo Platform and execute all published policies and query packs. For example, if the current release of cnspec is 12.1.2, Mondoo Platform supports all versions from 11.0 through 12.1.2. When cnspec 13.0 is released, the minimum supported version will become 12.0, and all earlier 11.x releases will reach end of life (EOL).
+
+## Update cnspec
+
+To update cnspec to the latest version, you can use your preferred package manager, such as Homebrew or Chocolatey, or simply re-run the installation script.
+
+<Callout type="info">
+  Integrations that run on Mondoo Platform as well as the Kubernetes operator
+  and the AWS Lambda-based integration, automatically update to the latest
+  version; there's no need to manually update.
+</Callout>
+### Update cnspec on Linux or macOS
+
+```bash
+bash -c "$(curl -sSL https://install.mondoo.com/sh)"
+```
+
+### Update cnspec on Windows
+
+```powershell
+Set-ExecutionPolicy Unrestricted -Scope Process -Force;
+[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072;
+iex ((New-Object System.Net.WebClient).DownloadString('https://install.mondoo.com/ps1/cnspec'));
+Install-Mondoo -Product cnspec;
+```
+
+## Turn off automatic updates
+
+By default cnspec checks for a newer release of itself at most once an hour,
+installs it into `~/.config/mondoo/bin` (`%USERPROFILE%\.config\mondoo\bin` on
+Windows), and runs the new version from then on. It also installs and updates the
+providers each command needs. One setting turns off both:
+
+| Where | Setting |
+| --- | --- |
+| Command line | `--auto-update=false` |
+| Environment | `MONDOO_AUTO_UPDATE=false` |
+| `mondoo.yml` | `auto_update: false` |
+
+cnspec resolves the setting in this order, highest first:
+
+1. The `--auto-update` flag, when you pass it.
+2. The `MONDOO_AUTO_UPDATE` environment variable.
+3. `auto_update` in `mondoo.yml`. cnspec also accepts the older `auto-update`
+   spelling, but `auto_update` wins when a file has both.
+4. On, when nothing is set.
+
+To stop only the update of the cnspec binary and keep provider updates, set
+`MONDOO_AUTO_UPDATE_ENGINE=false`. This variable can only turn the binary update
+off. It can't turn it back on when `auto_update` is off.
+
+`MONDOO_AUTO_UPDATE=false` is a hard off switch for the binary update: cnspec
+doesn't update itself even if you also pass `--auto-update=true`. Running
+`cnspec update` is an explicit request, so the flag and the config setting don't
+apply to it, but the two environment variables still do.
+
+Every process reads these settings for itself. A program that starts cnspec, such
+as an editor extension or a scheduled task, only sees the environment variable if
+it's set in that program's environment. To cover every process on a machine, set
+`auto_update: false` in `mondoo.yml`.
+
+## Release channels
+
+By default cnspec updates itself, and its providers, to the newest stable
+release. Set `update_channel` in `mondoo.yml` to track pre-releases instead:
+
+```yaml
+update_channel: preview
+```
+
+or set it in the environment:
+
+```bash
+export MONDOO_UPDATE_CHANNEL=preview
+```
+
+| Channel | What you get |
+| --- | --- |
+| `stable` (default) | The newest release with no pre-release suffix. |
+| `preview` | The newest release of all, release candidates included. |
+
+`preview` is never behind `stable`. When a release candidate becomes a final
+release, preview follows it forward rather than leaving you on the candidate, so
+you are not stranded on a pre-release once it ships.
+
+If you don't set `update_channel` at all, cnspec follows the build it is running:
+a pre-release binary resolves pre-release providers, and a stable binary resolves
+stable ones. So installing a release candidate is enough — you don't have to
+configure the channel as well, and a stable install is never moved onto
+pre-releases by anything but an explicit setting.
+
+Run `cnspec status` to see which channel a machine is on; the Channel row
+appears whenever it is not the default.
+
+To move to a release candidate once, without putting the machine on the
+pre-release track permanently:
+
+```bash
+cnspec update --channel preview
+```
+
+The same flag works on `cnspec providers update`, for trying a single
+pre-release provider.
+
+<Callout type="warning">
+  Pre-releases are for testing an upcoming release before it ships. There is no
+  automatic way back to `stable`: cnspec never downgrades itself, so returning to
+  the stable line means clearing `update_channel` and reinstalling.
+</Callout>
+
+## Learn more
+
+- For installation and deployment options, read [Extended Installation Options for cnspec](/cnspec/cnspec-adv-install/overview/).
+
+- To learn about cnspec provider versioning, read [Manage cnspec Providers](/cnspec/cnspec-adv-install/providers/).
+
+Can't find what you need? Join our <a href="https://mondoo.link/slack">community Slack channel</a> to chat with us and other Mondoo users.
+
+---

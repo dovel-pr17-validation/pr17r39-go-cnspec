@@ -1,0 +1,122 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+
+packs:
+  - uid: mondoo-vmware-asset-inventory
+    name: VMware Asset Inventory Pack
+    version: 1.1.0
+    license: BUSL-1.1
+    require:
+      - provider: vsphere
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    tags:
+      mondoo.com/platform: vmware,cloud
+      mondoo.com/category: security
+      mondoo.com/icon: vmware
+    summary: Inventory VMware vCenter and ESXi hosts
+    docs:
+      desc: |
+        Inventories VMware vCenter and ESXi: vCenter datacenters, clusters, and virtual machines, plus ESXi host packages, services, networking, firewall, and time configuration.
+
+        Enable this query pack in [Mondoo Platform](https://mondoo.com/platform) to automatically inventory your vCenter, or scan it manually with cnspec:
+
+        ```bash
+        cnspec scan vsphere <user>@<vcenter_host> --ask-pass -f mondoo-vmware-inventory.mql.yaml
+        ```
+    groups:
+      - uid: mondoo-vmware-asset-inventory-vcenter-group
+        title: vCenter and vSphere
+        filters: asset.platform == "vmware-vsphere"
+        queries:
+          - uid: mondoo-vmware-asset-inventory-vcenter-datacenters
+            title: VMware vSphere Datacenters
+            docs:
+              desc: vSphere datacenters organizing hosts, clusters, and VMs.
+            mql: |
+              vsphere.datacenters { name }
+          - uid: mondoo-vmware-asset-inventory-vcenter-clusters
+            title: VMware vSphere Clusters per Datacenter
+            docs:
+              desc: Lists the vSphere clusters within each datacenter.
+            mql: |
+              vsphere.datacenters { clusters }
+          - uid: mondoo-vmware-asset-inventory-vcenter-vms
+            title: VMware vSphere VMs per Datacenter
+            docs:
+              desc: Virtual machines per datacenter with guest OS state.
+            mql: |
+              vsphere.datacenters { vms { name advancedSettings["guestInfo.detailed.data"] properties["guest"]["guestState"] } }
+      - uid: mondoo-vmware-asset-inventory-esxi-system-group
+        title: ESXi Host System
+        filters: asset.platform == "vmware-esxi"
+        queries:
+          - uid: mondoo-vmware-asset-inventory-esxi-kernel-modules
+            title: VMware ESXi Kernel modules
+            docs:
+              desc: Lists the kernel modules loaded on the ESXi host.
+            mql: |
+              vsphere.host.kernelModules
+          - uid: mondoo-vmware-asset-inventory-esxi-installed-packages
+            title: VMware ESXi Installed packages
+            docs:
+              desc: VIBs installed on the ESXi host.
+            mql: |
+              vsphere.host.packages
+          - uid: mondoo-vmware-asset-inventory-esxi-acceptance-level
+            title: VMware ESXi Acceptance Level
+            docs:
+              desc: Host acceptance level, the VIB signature trust required.
+            mql: |
+              vsphere.host.acceptanceLevel
+          - uid: mondoo-vmware-asset-inventory-esxi-fileSystemVolume
+            title: VMware ESXi File System Volume
+            docs:
+              desc: Returns the ESXi host file system volume configuration.
+            mql: |
+              vsphere.host.properties.config.fileSystemVolume
+      - uid: mondoo-vmware-asset-inventory-esxi-services-group
+        title: ESXi Services and Time
+        filters: asset.platform == "vmware-esxi"
+        queries:
+          - uid: mondoo-vmware-asset-inventory-esxi-services
+            title: VMware ESXi Services
+            docs:
+              desc: Lists the ESXi host services with their running status.
+            mql: |
+              vsphere.host.services
+          - uid: mondoo-vmware-asset-inventory-esxi-ntp-server
+            title: VMware ESXi NTP servers
+            docs:
+              desc: NTP servers the ESXi host uses for time sync.
+            mql: |
+              vsphere.host.ntp.server
+          - uid: mondoo-vmware-asset-inventory-esxi-ntp-config
+            title: VMware ESXi NTP configuration
+            docs:
+              desc: Returns the ESXi NTP client configuration.
+            mql: |
+              vsphere.host.ntp.config
+      - uid: mondoo-vmware-asset-inventory-esxi-network-group
+        title: ESXi Network
+        filters: asset.platform == "vmware-esxi"
+        queries:
+          - uid: mondoo-vmware-asset-inventory-esxi-firewall
+            title: VMware ESXi Firewall
+            docs:
+              desc: Returns the ESXi host firewall configuration and rules.
+            mql: |
+              vsphere.host.properties.config.firewall
+          - uid: mondoo-vmware-asset-inventory-esxi-adapters
+            title: VMware ESXi Physical Adapters
+            docs:
+              desc: Physical network adapters in the ESXi host.
+            mql: |
+              vsphere.host.adapters
+          - uid: mondoo-vmware-asset-inventory-esxi-standardSwitch
+            title: VMware ESXi Standard vSwitch
+            docs:
+              desc: Standard virtual switches on the ESXi host.
+            mql: |
+              vsphere.host.standardSwitch

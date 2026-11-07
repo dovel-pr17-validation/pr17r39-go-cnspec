@@ -1,0 +1,40 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+
+packs:
+  - uid: mondoo-dns-inventory
+    name: DNS Inventory Pack
+    version: 1.0.0
+    license: BUSL-1.1
+    require:
+      - provider: network
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    tags:
+      mondoo.com/platform: host
+      mondoo.com/category: security
+      mondoo.com/icon: dns
+    summary: Inventory DNS records and configurations
+    docs:
+      desc: |
+        Inventories a domain's DNS records: the full record set and the mail exchanger (MX) records.
+
+        Enable this query pack in [Mondoo Platform](https://mondoo.com/platform) to automatically inventory your domains, or scan a domain manually with cnspec:
+
+        ```bash
+        cnspec scan host <domain> -f mondoo-dns-inventory.mql.yaml
+        ```
+    filters: asset.family.contains('network')
+    queries:
+      - uid: mondoo-dns-inventory-dns-records
+        title: Retrieve information about DNS records
+        docs:
+          desc: All DNS records for the domain, including A, MX, and TXT.
+        mql: dns.params
+      - uid: mondoo-dns-inventory-dns-mx-records
+        title: Retrieve information about the MX records
+        docs:
+          desc: Mail exchanger records with domain name and preference.
+        filters: dns.params.MX.name != empty
+        mql: dns.mx { domainName preference }

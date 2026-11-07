@@ -1,0 +1,175 @@
+// Copyright Mondoo, Inc. 2024, 2026
+// SPDX-License-Identifier: BUSL-1.1
+
+package bundle
+
+import (
+	"bytes"
+	"os"
+	"strings"
+	"unicode"
+
+	"github.com/cockroachdb/errors"
+	"github.com/rs/zerolog/log"
+	"go.mondoo.com/cnspec/policy"
+	"gopkg.in/yaml.v3"
+)
+
+// ParseYaml loads a yaml file and parse it into the go struct
+func ParseYaml(data []byte) (*Bundle, error) {
+	baseline := Bundle{}
+
+	err := yaml.Unmarshal([]byte(data), &baseline)
+	return &baseline, err
+}
+
+type FormatOptions struct {
+	SortContents        bool
+	AutoUpdateProviders bool
+}
+
+// FormatRecursive iterates recursively through all .mql.yaml files and formats them
+func FormatRecursive(mqlBundlePath string, opts FormatOptions) error {
+	log.Info().Str("file", mqlBundlePath).Msg("format policy bundle(s)")
+	_, err := os.Stat(mqlBundlePath)
+	if err != nil {
+		return errors.New("file " + mqlBundlePath + " does not exist")
+	}
+
+	files, err := policy.WalkPolicyBundleFiles(mqlBundlePath)
+	if err != nil {
+		return err
+	}
+
+	for i := range files {
+		f := files[i]
+		err := FormatFile(f, opts)
+		if err != nil {
+			return errors.Wrap(err, "could not format file: "+f)
+		}
+	}
+	return nil
+}
+
+// sanitizeStringForYaml is here to help generating literal style yaml strings
+// if a string has a trailing space in a line, it is automatically converted into quoted style
+func sanitizeStringForYaml(s string) string {
+	lines := strings.Split(s, "\n")
+	for j := range lines {
+		content := lines[j]
+		content = strings.TrimRightFunc(content, unicode.IsSpace)
+		content = strings.ReplaceAll(content, "\t", "  ")
+		content = strings.ReplaceAll(content, "\r", "\n")
+		// remove all non-printable characters
+		content = strings.Map(func(r rune) rune {
+			if r == 0x00 {
+				return -1
+			} else if unicode.IsSpace(r) {
+				return r
+			} else if unicode.IsGraphic(r) {
+				return r
+			}
+			return -1
+		}, content)
+
+		lines[j] = content
+	}
+	return strings.Join(lines, "\n")
+}
+
+func FormatFile(filename string, opts FormatOptions) error {
+	log.Info().Str("file", filename).Msg("format file")
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return err
+	}
+
+	b, err := policy.BundleFromYAML(data)
+	if err != nil {
+		return err
+	}
+	if err := b.EnsureRequirements(opts.AutoUpdateProviders); err != nil {
+		return err
+	}
+
+	raw, err := ParseYaml(data)
+	if err != nil {
+		return err
+	}
+	fmtData, err := FormatBundle(raw, opts.SortContents)
+	if err != nil {
+		return err
+	}
+
+	err = os.WriteFile(filename, fmtData, 0o644)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// FormatBundle formats the policy bundle
+func FormatBundle(b *Bundle, sort bool) ([]byte, error) {
+	// to improve the formatting we need to remove the whitespace at the end of the lines
+
+	for i := range b.Policies {
+		p := b.Policies[i]
+		p.Name = sanitizeStringForYaml(p.Name)
+		if p.Docs != nil {
+			p.Docs.Desc = sanitizeStringForYaml(p.Docs.Desc)
+		}
+	}
+
+	for i := range b.Queries {
+		query := b.Queries[i]
+		query.Title = sanitizeStringForYaml(query.Title)
+		query.Mql = sanitizeStringForYaml(query.Mql)
+		for j := range query.Props {
+			query.Props[j].Title = sanitizeStringForYaml(query.Props[j].Title)
+			query.Props[j].Mql = sanitizeStringForYaml(query.Props[j].Mql)
+			query.Props[j].Desc = sanitizeStringForYaml(query.Props[j].Desc)
+		}
+		if query.Docs != nil {
+			query.Docs.Desc = sanitizeStringForYaml(query.Docs.Desc)
+			query.Docs.Audit = sanitizeStringForYaml(query.Docs.Audit)
+			if query.Docs.Remediation != nil {
+				for j := range query.Docs.Remediation.Items {
+					docs := query.Docs.Remediation.Items[j]
+					docs.Desc = sanitizeStringForYaml(docs.Desc)
+				}
+			}
+		}
+	}
+
+	for i := range b.Frameworks {
+		for j := range b.Frameworks[i].Groups {
+			grp := b.Frameworks[i].Groups[j]
+			grp.Title = sanitizeStringForYaml(grp.Title)
+			for k := range grp.Controls {
+				grp.Controls[k].Title = sanitizeStringForYaml(grp.Controls[k].Title)
+				if grp.Controls[k].Docs != nil {
+					grp.Controls[k].Docs.Desc = sanitizeStringForYaml(grp.Controls[k].Docs.Desc)
+				}
+			}
+		}
+	}
+
+	if sort {
+		b.SortContents()
+	}
+
+	return FormatYAML(b)
+}
+
+// FormatYAML indents and formats the bundle as human-readable yaml
+func FormatYAML(bundle *Bundle) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	err := enc.Encode(bundle)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}

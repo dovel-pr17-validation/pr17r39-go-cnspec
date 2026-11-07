@@ -1,0 +1,92 @@
+-- Copyright Mondoo, Inc. 2024, 2026
+-- SPDX-License-Identifier: BUSL-1.1
+
+-- SQLite schema for cnspec policy upload files
+-- Optimized for fast writes on client side
+-- Version: 1.0 - the checksum columns and the asset/asset_filters tables
+-- are additive (invisible to readers that don't query them), so the
+-- stamped schema_version stays 1.0; see SchemaVersion in
+-- scan_data_store.go. Checksum presence is announced by the
+-- checksum_algo_version metadata key instead.
+
+-- Metadata table for versioning and asset information
+CREATE TABLE metadata (
+    key TEXT PRIMARY KEY NOT NULL,
+    value TEXT NOT NULL
+);
+
+-- Insert schema version and asset information
+-- These will be populated by the client:
+-- INSERT INTO metadata (key, value) VALUES ('schema_version', '1');
+-- INSERT INTO metadata (key, value) VALUES ('asset_mrn', ?);
+-- INSERT INTO metadata (key, value) VALUES ('upload_session_id', ?);
+-- INSERT INTO metadata (key, value) VALUES ('created_at', ?); -- RFC3339 timestamp
+
+-- Scores table - optimized for bulk inserts with upsert capability
+-- qr_id is the primary key for uniqueness and upsert operations
+CREATE TABLE scores (
+    qr_id TEXT PRIMARY KEY,          -- Score.qr_id (unique identifier)
+    risk_score INTEGER NOT NULL,      -- Score.risk_score
+    type INTEGER NOT NULL,            -- Score.type
+    value INTEGER NOT NULL,           -- Score.value
+    weight INTEGER NOT NULL,          -- Score.weight  
+    message TEXT,                     -- Score.message
+    risk_factors BLOB,               -- protobuf encoded ScoredRiskFactors
+    sources BLOB,                    -- protobuf encoded Sources
+    checksum INTEGER NOT NULL DEFAULT 0 -- 8-byte row content checksum (uint64 bit pattern)
+);
+
+-- Data table - stores LLX results with upsert capability
+-- code_id is the primary key for uniqueness and upsert operations
+CREATE TABLE data (
+    code_id TEXT PRIMARY KEY,        -- llx.Result.CodeID (query checksum, unique identifier)
+    data BLOB NOT NULL,              -- protobuf encoded llx.Result
+    checksum INTEGER NOT NULL DEFAULT 0 -- 8-byte row content checksum
+);
+
+-- ScoredRiskFactor table - stores individual risk factors for scores
+-- mrn is the primary key for uniqueness and upsert operations
+CREATE TABLE scored_risk_factors (
+    mrn TEXT PRIMARY KEY,            -- ScoredRiskFactor.mrn (unique identifier)
+    risk REAL NOT NULL,              -- ScoredRiskFactor.risk (float32)
+    is_toxic BOOLEAN NOT NULL,       -- ScoredRiskFactor.is_toxic
+    is_detected BOOLEAN NOT NULL,    -- ScoredRiskFactor.is_detected
+    checksum INTEGER NOT NULL DEFAULT 0 -- 8-byte row content checksum
+);
+
+CREATE TABLE resources (
+    name TEXT NOT NULL,              -- The resource name
+    id TEXT NOT NULL,                -- The resource ID
+    data BLOB NOT NULL,              -- protobuf encoded llx.ResourceRecording
+    checksum INTEGER NOT NULL DEFAULT 0, -- 8-byte row content checksum
+    PRIMARY KEY (name, id)           -- Composite primary key for uniqueness
+);
+
+-- Asset table - stores the inventory.Asset proto for the scanned asset.
+-- Optional single-row table (id=0), announced by its own presence (the
+-- stamped schema_version stays 1.0; see SchemaVersion), to make scan
+-- databases self-contained for replay use cases (e.g. cnspec loadtest).
+CREATE TABLE asset (
+    id INTEGER PRIMARY KEY CHECK (id = 0),
+    data BLOB NOT NULL               -- protobuf encoded inventory.Asset
+);
+
+-- Asset filter code_ids - one row per filter the scanner passed to
+-- ResolveAndUpdateJobs. We store only code_ids, not the full Mquery
+-- proto, because the server can re-resolve a filter from its code_id
+-- alone (ChecksumAssetFilters skips RefreshAsFilter when no MQL is
+-- supplied). Captured on every scan that uses the SQLite datalake.
+CREATE TABLE asset_filters (
+    code_id TEXT NOT NULL PRIMARY KEY
+);
+
+-- Primary key indexes are automatically created for scores(qr_id) and data(code_id)
+-- No additional indexes needed since we're using the primary keys for lookups
+
+-- Pragma settings for maximum write performance
+-- These should be set by the client before writing:
+PRAGMA synchronous = OFF;          -- Disable fsync for speed (risk of corruption on crash)
+PRAGMA journal_mode = MEMORY;      -- Keep journal in memory
+PRAGMA temp_store = MEMORY;        -- Keep temp tables in memory
+PRAGMA cache_size = 10000;         -- Large cache for better performance
+PRAGMA locking_mode = EXCLUSIVE;   -- Exclusive locking for single writer

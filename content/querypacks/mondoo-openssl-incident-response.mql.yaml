@@ -1,0 +1,56 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+
+packs:
+  - uid: mondoo-openssl-incident-response
+    name: OpenSSL Incident Response Pack
+    version: 1.1.0
+    license: BUSL-1.1
+    require:
+      - provider: os
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    tags:
+      mondoo.com/platform: linux
+      mondoo.com/category: security
+      mondoo.com/icon: openssl
+    summary: Gather OpenSSL library evidence for incident response
+    docs:
+      desc: |
+        Gathers SSL/TLS library evidence from a Linux host during a security incident: platform details, installed SSL packages, and listening ports that may be serving SSL/TLS.
+
+        Enable this query pack in [Mondoo Platform](https://mondoo.com/platform) to automatically gather this evidence from your Linux hosts, or scan a host manually with cnspec:
+
+        ```bash
+        cnspec scan local -f mondoo-openssl-incident-response.mql.yaml
+        ```
+    filters: asset.family.contains("linux")
+    queries:
+      - uid: mondoo-openssl-incident-response-platform
+        title: Platform details
+        docs:
+          desc: Host platform, version, and architecture.
+        mql: |
+          asset {
+            platform
+            version
+            arch
+          }
+      - uid: mondoo-openssl-incident-response-installed-version
+        title: Installed ssl libraries
+        docs:
+          desc: Installed packages named ssl, to pin OpenSSL versions.
+        mql: packages.where(name == /ssl/)
+      - uid: mondoo-openssl-incident-response-listening-ports
+        title: Listening ports for running systems
+        docs:
+          desc: Listening ports and protocols that may expose SSL or TLS.
+        mql: |
+          if ( mondoo.capabilities.contains('run-command') ) {
+            ports.listening {
+              protocol
+              address
+              port
+            }
+          }

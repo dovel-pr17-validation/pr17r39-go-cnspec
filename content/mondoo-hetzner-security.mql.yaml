@@ -1,0 +1,2425 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+policies:
+  - uid: mondoo-hetzner-security
+    name: Mondoo Hetzner Cloud Security
+    version: 2.3.3
+    license: BUSL-1.1
+    tags:
+      mondoo.com/category: security
+      mondoo.com/platform: hetzner,cloud
+      mondoo.com/icon: hetzner
+    require:
+      - provider: hetzner
+    authors:
+      - name: Mondoo, Inc.
+        email: hello@mondoo.com
+    summary: Secure Hetzner Cloud servers, SSH keys, firewalls, load balancers, certificates, Storage Boxes, and IP addresses
+    docs:
+      desc: |
+        The Mondoo Hetzner Cloud Security policy identifies critical misconfigurations that could leave your Hetzner Cloud project vulnerable to attackers. This policy focuses on security-relevant controls and helps organizations harden against unauthorized network access, data exposure in transit, weak cryptography, and exposure to known CVEs through end-of-life software.
+
+        This policy provides security checks across key Hetzner Cloud resources:
+
+        - Cloud Servers
+        - SSH keys
+        - Firewalls
+        - Load Balancers
+        - TLS Certificates
+        - Storage Boxes
+        - Floating IPs and Primary IPs
+
+        Learn more about scanning Hetzner Cloud in the [cnspec Hetzner Cloud documentation](https://mondoo.com/docs/cnspec/cloud/hetzner).
+
+        Have suggestions for new checks in this policy? Visit our [cnspec repository](https://github.com/mondoohq/cnspec).
+    groups:
+      - title: Servers
+        checks:
+          - uid: mondoo-hetzner-security-server-in-private-network
+          - uid: mondoo-hetzner-security-server-has-firewall
+          - uid: mondoo-hetzner-security-server-image-not-deprecated
+          - uid: mondoo-hetzner-security-server-not-internet-reachable
+      - title: SSH Keys
+        checks:
+          - uid: mondoo-hetzner-security-ssh-key-strong-algorithm
+      - title: Firewalls
+        checks:
+          - uid: mondoo-hetzner-security-firewall-no-unrestricted-ssh
+          - uid: mondoo-hetzner-security-firewall-no-unrestricted-rdp
+          - uid: mondoo-hetzner-security-firewall-no-unrestricted-db-ports
+          - uid: mondoo-hetzner-security-firewall-no-all-ports-open
+          - uid: mondoo-hetzner-security-firewall-no-unrestricted-egress
+          - uid: mondoo-hetzner-security-firewall-has-rules
+      - title: Load Balancers
+        checks:
+          - uid: mondoo-hetzner-security-lb-http-redirected-to-https
+          - uid: mondoo-hetzner-security-lb-https-service-has-certificate
+          - uid: mondoo-hetzner-security-lb-in-private-network
+      - title: TLS Certificates
+        checks:
+          - uid: mondoo-hetzner-security-cert-not-expired
+          - uid: mondoo-hetzner-security-cert-not-self-signed
+      - title: Storage Boxes
+        checks:
+          - uid: mondoo-hetzner-security-storage-box-not-externally-reachable
+      - title: IP Addresses
+        checks:
+          - uid: mondoo-hetzner-security-floating-ip-not-blocked
+          - uid: mondoo-hetzner-security-primary-ip-not-blocked
+    scoring_system: highest impact
+queries:
+  - uid: mondoo-hetzner-security-server-in-private-network
+    title: Ensure servers are attached to a private network
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-22
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-5
+      compliance/vda-isa-5: vda-isa-5-5-2-7
+    variants:
+      - uid: mondoo-hetzner-security-server-in-private-network-hetzner
+        tags:
+          mondoo.com/filter-title: Hetzner Cloud
+          mondoo.com/filter-icon: hetzner
+      - uid: mondoo-hetzner-security-server-in-private-network-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-hetzner-security-server-in-private-network-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-hetzner-security-server-in-private-network-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+          mondoo.com/filter-icon: terraform
+    docs:
+      desc: |
+        This check verifies that every Hetzner Cloud server is attached to at least one private network.
+
+        A private network gives the resources in a project an isolated RFC-1918 address space they can use to reach each other without touching public interfaces. Hetzner does not create or assign a private network automatically, so by default servers communicate over the public internet even when the traffic never leaves the project. You create one under **Networks** in the Hetzner Cloud Console and attach it from the server's **Networking** tab with **Attach to Network**, or run `hcloud server attach-to-network`. This check requires at least one network attachment on every server.
+
+        **Why this matters**
+
+        A server with no private network has no network boundary between it and the other resources in the project. An attacker who compromises one server reaches the others over the same public paths the server already uses, so a single foothold becomes lateral movement with no additional barrier to cross.
+
+        Traffic that stays on a private network never traverses the public internet, which removes the opportunity to intercept or manipulate intra-project communication. Without that path, servers exchange the same data across public-facing interfaces where anything on the route can see it.
+
+        Private network membership also enables subnet-level access controls that cloud firewall rules alone cannot express, and it is the prerequisite for further segmentation such as dedicated subnets per tier and private-only service endpoints. It adds depth as well: when a cloud firewall rule is misconfigured, private-network isolation confines the blast radius of that mistake to the hosts on the same network.
+
+        A single-purpose appliance with no peers in the project has nothing to talk to privately and may legitimately have no network attachment. Every server that exchanges traffic with another project resource should be on one, paired with firewall rules that restrict the forwarded ports to the private range.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to the [Hetzner Cloud Console](https://console.hetzner.com/) and select the project.
+        2. Navigate to **Servers** and open each server.
+        3. Click the **Networking** tab.
+        4. Review the **Private Networks** section.
+
+        A passing server shows at least one private network listed under **Private Networks**. A failing server shows an empty **Private Networks** section.
+
+        ### Audit via CLI
+
+        1. List all servers and inspect their private network attachments:
+
+        ```bash
+        hcloud server list -o columns=id,name
+        hcloud server describe <server> -o json | grep -A5 'private_net'
+        ```
+
+        A passing server returns a non-empty `private_net` array in the JSON output. A failing server returns an empty `private_net` array (`[]`).
+      remediation:
+        - id: console
+          desc: |
+            1. Navigate to **Networks** and create a network if one does not already exist.
+            2. Open the affected server and go to **Networking**.
+            3. Click **Attach to Network** and select the target network.
+        - id: cli
+          desc: |
+            ```bash
+            hcloud server attach-to-network <server> --network <network>
+            ```
+        - id: terraform
+          desc: |
+            Define a `hcloud_network` with at least one `hcloud_network_subnet` and reference it from a `network` block on every `hcloud_server`. Use the inline `network` block rather than a separate `hcloud_server_network` resource, because only the inline form is recognized when this check evaluates Terraform code:
+
+            ```hcl
+            resource "hcloud_network" "main" {
+              name     = "main"
+              ip_range = "10.0.0.0/16"
+            }
+
+            resource "hcloud_network_subnet" "main" {
+              network_id   = hcloud_network.main.id
+              type         = "cloud"
+              network_zone = "eu-central"
+              ip_range     = "10.0.1.0/24"
+            }
+
+            resource "hcloud_server" "example" {
+              name        = "example"
+              image       = "ubuntu-24.04"
+              server_type = "cx22"
+              location    = "nbg1"
+
+              network {
+                network_id = hcloud_network.main.id
+              }
+
+              depends_on = [hcloud_network_subnet.main]
+            }
+            ```
+    refs:
+      - url: https://docs.hetzner.com/networking/networks/overview/
+        title: Hetzner Cloud Networks overview
+
+  - uid: mondoo-hetzner-security-server-in-private-network-hetzner
+    filters: asset.platform == "hetzner-project"
+    mql: |
+      hetzner.servers.all(privateNet != empty)
+  - uid: mondoo-hetzner-security-server-in-private-network-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "hcloud_server")
+    mql: |
+      terraform.resources("hcloud_server").all(
+        blocks.where(type == "network") != empty
+      )
+  - uid: mondoo-hetzner-security-server-in-private-network-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "hcloud_server")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "hcloud_server").all(
+        change.after.network != null && change.after.network != empty
+      )
+  - uid: mondoo-hetzner-security-server-in-private-network-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "hcloud_server")
+    mql: |
+      terraform.state.resources.where(type == "hcloud_server").all(
+        values.network != null && values.network != empty
+      )
+
+  - uid: mondoo-hetzner-security-server-has-firewall
+    title: Ensure servers have at least one firewall applied
+    impact: 90
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-7
+    variants:
+      - uid: mondoo-hetzner-security-server-has-firewall-hetzner
+        tags:
+          mondoo.com/filter-title: Hetzner Cloud
+          mondoo.com/filter-icon: hetzner
+      - uid: mondoo-hetzner-security-server-has-firewall-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-hetzner-security-server-has-firewall-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-hetzner-security-server-has-firewall-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+          mondoo.com/filter-icon: terraform
+    docs:
+      desc: |
+        This check verifies that every Hetzner Cloud server has at least one Hetzner Cloud Firewall applied.
+
+        A Cloud Firewall is a separate resource that you attach to servers, and Hetzner does not attach one to new servers by default. Until a firewall is applied, every port bound on the server's public network interface is reachable from the entire internet. You create the firewall under **Firewalls** in the Hetzner Cloud Console and attach it on the firewall's **Apply to** tab, either by naming the server or by using a label selector that matches it, or you run `hcloud firewall apply-to-resource`. This check requires each server to carry at least one such attachment.
+
+        **Why this matters**
+
+        Without a Cloud Firewall a Hetzner server sits in a default-allow posture: it accepts connections on every listening port from every address on the internet. That includes the ports nobody meant to publish, such as debug endpoints, internal admin tools, and services that were misconfigured to bind on the public interface rather than on loopback.
+
+        A Cloud Firewall enforces its restrictions at the network edge, before traffic reaches the server. That is what makes it different from the in-guest OS firewall: if the guest firewall is disabled, flushed by a package upgrade, or simply misconfigured, the unauthorized ports stay unreachable anyway, and no guest-level mistake can bypass the rules.
+
+        Narrowing the exposed service footprint to the ports the workload actually needs also shrinks the window in which any vulnerability in a running service can be exploited. An explicit allowlist means unintended services are never reachable regardless of what software gets installed or started later.
+
+        A firewall additionally gives incident response a fast, centralized control plane. Traffic to a compromised server can be cut off from the console or the CLI without needing in-guest access to a machine you no longer trust.
+
+        Pair the attachment with rules narrow enough to be meaningful. A firewall that is applied but permits everything satisfies the attachment requirement while providing no perimeter.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to the [Hetzner Cloud Console](https://console.hetzner.com/) and select the project.
+        2. Navigate to **Servers** and open each server.
+        3. Click the **Firewalls** tab.
+        4. Review the list of applied firewalls.
+
+        A passing server shows at least one firewall listed. A failing server shows no firewalls applied.
+
+        ### Audit via CLI
+
+        1. List all servers and inspect each server's firewall assignments:
+
+        ```bash
+        hcloud server list -o columns=id,name
+        hcloud server describe <server> -o json | grep -A5 'firewall'
+        ```
+
+        A passing server returns a non-empty `public_net.firewalls` or `firewall_ids` array. A failing server returns an empty or absent firewall list.
+      remediation:
+        - id: console
+          desc: |
+            1. Navigate to **Firewalls** and create a firewall with rules appropriate for the server's role.
+            2. Open the firewall and go to **Apply to**.
+            3. Add the affected server (or a label selector that matches it).
+        - id: cli
+          desc: |
+            ```bash
+            hcloud firewall apply-to-resource <firewall> --type server --server <server>
+            ```
+        - id: terraform
+          desc: |
+            Reference at least one `hcloud_firewall` from `firewall_ids` on every `hcloud_server`. Use the `firewall_ids` attribute rather than a separate `hcloud_firewall_attachment` resource or an `apply_to` block on the firewall, because only the `firewall_ids` form is recognized when this check evaluates Terraform code:
+
+            ```hcl
+            resource "hcloud_firewall" "default" {
+              name = "default"
+
+              rule {
+                direction  = "in"
+                protocol   = "tcp"
+                port       = "22"
+                source_ips = ["10.0.0.0/16"]
+              }
+            }
+
+            resource "hcloud_server" "example" {
+              name         = "example"
+              image        = "ubuntu-24.04"
+              server_type  = "cx22"
+              location     = "nbg1"
+              firewall_ids = [hcloud_firewall.default.id]
+            }
+            ```
+    refs:
+      - url: https://docs.hetzner.com/cloud/firewalls/overview/
+        title: Hetzner Cloud Firewalls overview
+
+  - uid: mondoo-hetzner-security-server-has-firewall-hetzner
+    filters: asset.platform == "hetzner-project"
+    mql: |
+      hetzner.servers.all(firewalls != empty)
+  - uid: mondoo-hetzner-security-server-has-firewall-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "hcloud_server")
+    mql: |
+      terraform.resources("hcloud_server").all(
+        arguments['firewall_ids'] != null && arguments['firewall_ids'] != []
+      )
+  - uid: mondoo-hetzner-security-server-has-firewall-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "hcloud_server")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "hcloud_server").all(
+        change.after.firewall_ids != null && change.after.firewall_ids != []
+      )
+  - uid: mondoo-hetzner-security-server-has-firewall-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "hcloud_server")
+    mql: |
+      terraform.state.resources.where(type == "hcloud_server").all(
+        values.firewall_ids != null && values.firewall_ids != []
+      )
+
+  # No Terraform variants: image deprecation is runtime metadata set by Hetzner on the image (`image.deprecated` timestamp), not a configurable field on `hcloud_server`. Terraform configs only carry the image name string, with no signal whether Hetzner has marked it deprecated.
+  - uid: mondoo-hetzner-security-server-image-not-deprecated
+    title: Ensure servers do not run a deprecated OS image
+    impact: 70
+    filters: asset.platform == "hetzner-project"
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-308-a-1-ii-b-security-management-process-risk-management
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-12
+      compliance/nist-csf-2: nist-csf-2-pr-ps-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a03
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: soc2-control-cc7-1-5
+      compliance/vda-isa-5: vda-isa-5-5-2-5
+    mql: |
+      hetzner.servers.where(image != null).all(image.deprecated == null || image.deprecated > time.now)
+    docs:
+      desc: |
+        This check verifies that no Hetzner Cloud server was created from a system image whose deprecation date has passed.
+
+        Hetzner marks an image deprecated when the upstream operating system reaches end of life or when Hetzner plans to retire the image, and it publishes a deprecation timestamp alongside the image. Once that timestamp is in the past, the image is no longer supported. The fix is to move the server onto a current image, either through **Rebuild** on the server in the Hetzner Cloud Console or with `hcloud server rebuild`, and this check requires that no server run an image whose deprecation date has already elapsed.
+
+        **Why this matters**
+
+        A deprecated image is tied to an end-of-life operating system that no longer receives upstream security fixes. Known-exploited CVEs accumulate against it with no remediation path available, so the server drifts further from a patchable state with every disclosure.
+
+        The exposure is not limited to the kernel. User-space packages and system libraries shipped in a deprecated image are past end of life too, so the vulnerability surface widens across the whole software stack rather than in one component you could isolate.
+
+        Running unsupported software is also a direct compliance problem. Many frameworks require that software run on vendor-supported versions, and a deprecated image creates a gap that auditors and regulators will flag independently of whether it has been exploited.
+
+        Rebuilding from a current, supported image starts the server with all upstream security patches applied and puts it back on a baseline where future patching and image-refresh workflows are predictable and vendor-supported. Rebuilding erases the disk, so back up or migrate data first, and for stateful workloads prefer provisioning a replacement server and moving the workload onto it.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to the [Hetzner Cloud Console](https://console.hetzner.com/) and select the project.
+        2. Navigate to **Servers** and open each server.
+        3. On the **Overview** tab, check the **Image** field.
+        4. A deprecated image is noted with a deprecation warning or end-of-life indicator in the image name or description.
+
+        A passing server shows a current, non-deprecated image. A failing server shows an image flagged as deprecated or end-of-life.
+
+        ### Audit via CLI
+
+        1. Retrieve the image details for each server and check the `deprecated` field:
+
+        ```bash
+        hcloud server describe <server> -o json | grep -A5 '"image"'
+        hcloud image describe <image-id> -o json | grep 'deprecated'
+        ```
+
+        A passing server returns `"deprecated": null` or a `deprecated` date in the future. A failing server returns a `deprecated` date that is in the past.
+      remediation:
+        - id: console
+          desc: |
+            Rebuilding a server from a new image erases all data on its disk. Back up or migrate any data you need before you start. For stateful workloads, prefer provisioning a replacement server and migrating the workload.
+
+            To rebuild in place:
+
+            1. Navigate to **Servers** and open the affected server.
+            2. Go to **Rebuild**, select a current, supported OS image, and confirm.
+            3. Restore data and configuration from your backup.
+
+            To migrate to a replacement server instead:
+
+            1. Note the affected server's configuration, including server type, location, networks, firewalls, and SSH keys.
+            2. Provision a replacement server using a current OS image.
+            3. Migrate data and configuration to the new server.
+            4. Update DNS, monitoring, and dependent services to point at the new server.
+            5. Delete the original server. The finding clears only once no server runs a deprecated image.
+        - id: cli
+          desc: |
+            Rebuilding erases all data on the server's disk; back up anything you need first:
+
+            ```bash
+            hcloud server rebuild <server> --image <current-image>
+            ```
+
+            To migrate to a replacement server instead, create the new server, move the workload, then delete the original server so the deprecated image is no longer in use:
+
+            ```bash
+            hcloud server create \
+              --name <new-name> \
+              --type <server-type> \
+              --image <current-image> \
+              --location <location> \
+              --network <network> \
+              --firewall <firewall> \
+              --ssh-key <ssh-key>
+            hcloud server delete <old-server>
+            ```
+        - id: terraform
+          desc: |
+            Pin `image` on every `hcloud_server` resource to a current, supported OS image. Changing `image` forces server replacement, so plan a data migration before applying:
+
+            ```hcl
+            resource "hcloud_server" "example" {
+              name        = "example"
+              server_type = "cx22"
+              location    = "nbg1"
+              image       = "ubuntu-24.04"
+            }
+            ```
+    refs:
+      - url: https://docs.hetzner.com/cloud/servers/faq/#what-does-it-mean-when-an-image-is-deprecated
+        title: Hetzner image deprecation policy
+
+  # Security-only check (compliance mapping intentionally omitted per maintainer).
+  # No Terraform variants: internetReachable is a runtime-computed exposure signal (IP + security group/firewall reachability) with no static config analog.
+  - uid: mondoo-hetzner-security-server-not-internet-reachable
+    title: Ensure servers are not reachable from the internet
+    impact: 85
+    filters: asset.platform == "hetzner-project"
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-1
+      compliance/vda-isa-5: vda-isa-5-5-2-7
+    mql: |
+      hetzner.servers.all( exposure.internetReachable == false )
+    docs:
+      desc: |
+        This check verifies that no Hetzner Cloud server is reachable from the public internet.
+
+        The `internetReachable` signal correlates two conditions: the server holds a public IP, and firewall ingress actually admits inbound traffic from any address. The second condition includes the case where no firewall is attached at all, since an unfiltered server admits everything. Because both must hold, this is a higher-fidelity view of what is genuinely exposed than a public-IP flag on its own. You close the path either by scoping the world-open inbound rules on the applied firewall under **Firewalls** in the Hetzner Cloud Console, or by removing the server's public IPv4 and IPv6 from its **Networking** tab and reaching it over a private network or a bastion instead.
+
+        **Why this matters**
+
+        A server with no internet-reachable path keeps its listening services off the public scanning grid entirely. Nothing on the internet can enumerate what it runs, so no service on it can be probed or attacked by an arbitrary remote host.
+
+        The two halves of the exposure are independent, which is what makes this fixable from either side. A public IP is harmless until a firewall rule, or a missing firewall, admits traffic to it, so removing either the address or the open ingress closes the path.
+
+        Correlating the address with the ingress also keeps the finding honest. It surfaces the servers that are actually exposed rather than every server that merely holds a public address, so the results stay worth acting on instead of becoming noise that gets filtered out.
+
+        Intentionally public hosts such as bastions and public web servers will fail this check and should be exempted. For those, the meaningful control is narrow per-service rules rather than an absence of public reachability.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to the [Hetzner Cloud Console](https://console.hetzner.com/) and select the project.
+        2. Navigate to **Servers** and open each server, then review the **Networking** tab for an assigned public IPv4 or IPv6 address.
+        3. Open the **Firewalls** tab and review the inbound rules of every applied firewall; a server with no firewall admits all inbound traffic.
+
+        A passing server either has no public IP, or has firewalls whose inbound rules admit no `0.0.0.0/0` or `::/0` source. A failing server has a public IP and a firewall rule (or absent firewall) that admits traffic from any address.
+
+        ### Audit via CLI
+
+        1. List servers and inspect each server's public IP and applied firewalls:
+
+        ```bash
+        hcloud server list -o columns=id,name,ipv4,ipv6
+        hcloud server describe <server> -o json | grep -A5 'firewall'
+        hcloud firewall describe <firewall> -o json
+        ```
+
+        A passing server either reports no public IP, or has firewall inbound rules whose `source_ips` exclude `0.0.0.0/0` and `::/0`. A failing server has a public IP combined with an inbound rule sourced from `0.0.0.0/0` or `::/0`, or no firewall applied.
+      remediation:
+        - id: console
+          desc: |
+            Close the internet-reachable path by restricting the firewall or removing the public edge.
+
+            1. Navigate to **Firewalls** and open the firewall applied to the affected server (create one and apply it first if the server has none).
+            2. Edit any inbound rule whose source is `Any IPv4` (`0.0.0.0/0`) or `Any IPv6` (`::/0`) and scope it to a specific trusted CIDR.
+            3. If the server does not need a public IP at all, open the server's **Networking** tab and remove its public IPv4/IPv6, reaching it over a private network or a bastion instead.
+        - id: cli
+          desc: |
+            Scope every world-open inbound rule on the applied firewall to a trusted CIDR. If the server has no firewall, create one and apply it first:
+
+            ```bash
+            hcloud firewall delete-rule <firewall> \
+              --direction in --protocol tcp --port 443 --source-ips 0.0.0.0/0
+            hcloud firewall add-rule <firewall> \
+              --direction in --protocol tcp --port 443 --source-ips 203.0.113.0/24
+            hcloud firewall apply-to-resource <firewall> --type server --server <server>
+            ```
+
+            A public IP cannot be detached from a running server in place; to remove the public edge entirely, rebuild the server with the public interface disabled (Terraform below).
+        - id: terraform
+          desc: |
+            Keep servers off the public internet by attaching a firewall whose inbound rules are scoped to trusted CIDRs, and disabling the public interface where it is not needed:
+
+            ```hcl
+            resource "hcloud_firewall" "scoped" {
+              name = "scoped"
+
+              rule {
+                direction  = "in"
+                protocol   = "tcp"
+                port       = "443"
+                source_ips = ["203.0.113.0/24"]
+              }
+            }
+
+            resource "hcloud_server" "example" {
+              name         = "example"
+              image        = "ubuntu-24.04"
+              server_type  = "cx22"
+              location     = "nbg1"
+              firewall_ids = [hcloud_firewall.scoped.id]
+
+              public_net {
+                ipv4_enabled = false
+                ipv6_enabled = false
+              }
+
+              network {
+                network_id = hcloud_network.main.id
+              }
+
+              depends_on = [hcloud_network_subnet.main]
+            }
+            ```
+    refs:
+      - url: https://docs.hetzner.com/cloud/firewalls/overview/
+        title: Hetzner Cloud Firewalls overview
+
+  - uid: mondoo-hetzner-security-firewall-no-unrestricted-ssh
+    title: Ensure no firewall allows unrestricted inbound SSH (port 22)
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-1
+      compliance/vda-isa-5: vda-isa-5-5-2-7
+    variants:
+      - uid: mondoo-hetzner-security-firewall-no-unrestricted-ssh-hetzner
+        tags:
+          mondoo.com/filter-title: Hetzner Cloud
+          mondoo.com/filter-icon: hetzner
+      - uid: mondoo-hetzner-security-firewall-no-unrestricted-ssh-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-hetzner-security-firewall-no-unrestricted-ssh-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-hetzner-security-firewall-no-unrestricted-ssh-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+          mondoo.com/filter-icon: terraform
+    docs:
+      desc: |
+        This check verifies that no Hetzner Cloud Firewall allows inbound TCP traffic on port 22 from the public internet.
+
+        An SSH rule is unrestricted when its source is `0.0.0.0/0` or `::/0`, which admits every address on the internet. SSH exposed that way is one of the most common entry points in cloud infrastructure compromises. You scope the rule under **Firewalls** in the Hetzner Cloud Console by changing its source from `Any IPv4` or `Any IPv6` to a specific trusted CIDR, or with `hcloud firewall add-rule` followed by `hcloud firewall delete-rule`. This check requires that no rule leave port 22 open to either unrestricted source.
+
+        **Why this matters**
+
+        Internet-facing SSH attracts constant automated login attempts. Brute-force and credential-stuffing traffic finds a new listener within minutes of it appearing, and a single weak or reused credential turns that background noise into an immediate breach.
+
+        Key-based authentication narrows but does not remove the exposure. An unrestricted listener publishes the SSH daemon itself to the internet, so any future pre-authentication vulnerability in that daemon is reachable by every host that can route to it, regardless of how strong the credentials behind it are.
+
+        Unauthorized SSH access to one server also becomes a pivot. From inside the project an attacker can enumerate the network and reach other resources that were never meant to be reachable from outside, so the blast radius of a single compromised login extends well past the server that accepted it.
+
+        Sessions established through unrestricted SSH are harder to attribute and monitor than sessions routed through a bastion or VPN with centralized logging, which leaves gaps in the audit trail exactly when an investigation needs it.
+
+        Restrict the source to a known trusted CIDR, a bastion host, or a VPN egress range. That eliminates the vast majority of automated attack traffic before it can attempt authentication, and it means that during the interval between a vulnerability disclosure and your patching, only trusted hosts can reach the service at all. Add the restricted rule before deleting the open one, and confirm your own management network falls inside the range, so you do not lock yourself out.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to the [Hetzner Cloud Console](https://console.hetzner.com/) and select the project.
+        2. Navigate to **Firewalls** and open each firewall.
+        3. Review the **Rules** tab, focusing on inbound rules.
+        4. Check whether any inbound TCP rule for port 22 lists `Any IPv4` (`0.0.0.0/0`) or `Any IPv6` (`::/0`) as the source.
+
+        A passing firewall shows no inbound rule for TCP port 22 with a source of `0.0.0.0/0` or `::/0`. A failing firewall shows an inbound TCP rule for port 22 with an unrestricted source.
+
+        ### Audit via CLI
+
+        1. List all firewalls and inspect their rules:
+
+        ```bash
+        hcloud firewall list -o columns=id,name
+        hcloud firewall describe <firewall> -o json
+        ```
+
+        Review the `rules` array for any entry where `direction` is `in`, `protocol` is `tcp`, `port` is `22`, and `source_ips` contains `0.0.0.0/0` or `::/0`.
+
+        A passing firewall returns no such rule. A failing firewall returns at least one rule with direction `in`, protocol `tcp`, port `22`, and source IP `0.0.0.0/0` or `::/0`.
+      remediation:
+        - id: console
+          desc: |
+            1. Navigate to **Firewalls** and open the affected firewall.
+            2. Edit the offending inbound rule for SSH and change the source from `Any IPv4`/`Any IPv6` to a specific trusted CIDR.
+            3. Save the firewall.
+        - id: cli
+          desc: |
+            The `delete-rule` command must match the existing rule exactly, including the complete source IP list and any description, so inspect the rule first and reuse its exact values. Add the restricted rule before deleting the open one so SSH access from your trusted range is never interrupted, and make sure your own management network is inside that range:
+
+            ```bash
+            hcloud firewall describe <firewall> -o json
+            hcloud firewall add-rule <firewall> \
+              --direction in --protocol tcp --port 22 \
+              --source-ips <your-trusted-cidr>
+            hcloud firewall delete-rule <firewall> \
+              --direction in --protocol tcp --port 22 \
+              --source-ips 0.0.0.0/0,::/0
+            ```
+
+            If the unrestricted IPv4 and IPv6 sources are defined in separate rules, run `delete-rule` once per rule with that rule's exact `source-ips` value.
+        - id: terraform
+          desc: |
+            Scope inbound SSH `source_ips` to a specific trusted CIDR. Never use `0.0.0.0/0` or `::/0`:
+
+            ```hcl
+            resource "hcloud_firewall" "default" {
+              name = "default"
+
+              rule {
+                direction  = "in"
+                protocol   = "tcp"
+                port       = "22"
+                source_ips = ["203.0.113.0/24"]
+              }
+            }
+            ```
+    refs:
+      - url: https://docs.hetzner.com/cloud/firewalls/overview/
+        title: Hetzner Cloud Firewalls overview
+
+  - uid: mondoo-hetzner-security-firewall-no-unrestricted-ssh-hetzner
+    filters: asset.platform == "hetzner-firewall"
+    mql: |
+      hetzner.firewall.rules.none(
+        _["direction"] == "in" && _["protocol"] == "tcp" && _["port"] == "22" && _["sourceIps"].contains("0.0.0.0/0")
+      )
+      hetzner.firewall.rules.none(
+        _["direction"] == "in" && _["protocol"] == "tcp" && _["port"] == "22" && _["sourceIps"].contains("::/0")
+      )
+  - uid: mondoo-hetzner-security-firewall-no-unrestricted-ssh-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "hcloud_firewall")
+    mql: |
+      terraform.resources("hcloud_firewall").all(
+        blocks.where(type == "rule").all(
+          arguments['direction'] != "in" ||
+          arguments['protocol'] != "tcp" ||
+          arguments['port'] != "22" ||
+          arguments['source_ips'].containsNone(["0.0.0.0/0", "::/0"])
+        )
+      )
+  - uid: mondoo-hetzner-security-firewall-no-unrestricted-ssh-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "hcloud_firewall")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "hcloud_firewall").all(
+        change.after.rule == null || change.after.rule.all(
+          _['direction'] != "in" ||
+          _['protocol'] != "tcp" ||
+          _['port'] != "22" ||
+          _['source_ips'].containsNone(["0.0.0.0/0", "::/0"])
+        )
+      )
+  - uid: mondoo-hetzner-security-firewall-no-unrestricted-ssh-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "hcloud_firewall")
+    mql: |
+      terraform.state.resources.where(type == "hcloud_firewall").all(
+        values.rule == null || values.rule.all(
+          _['direction'] != "in" ||
+          _['protocol'] != "tcp" ||
+          _['port'] != "22" ||
+          _['source_ips'].containsNone(["0.0.0.0/0", "::/0"])
+        )
+      )
+
+  - uid: mondoo-hetzner-security-firewall-no-unrestricted-rdp
+    title: Ensure no firewall allows unrestricted inbound RDP (port 3389)
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-1
+      compliance/vda-isa-5: vda-isa-5-5-2-7
+    variants:
+      - uid: mondoo-hetzner-security-firewall-no-unrestricted-rdp-hetzner
+        tags:
+          mondoo.com/filter-title: Hetzner Cloud
+          mondoo.com/filter-icon: hetzner
+      - uid: mondoo-hetzner-security-firewall-no-unrestricted-rdp-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-hetzner-security-firewall-no-unrestricted-rdp-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-hetzner-security-firewall-no-unrestricted-rdp-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+          mondoo.com/filter-icon: terraform
+    docs:
+      desc: |
+        This check verifies that no Hetzner Cloud Firewall allows inbound TCP traffic on port 3389 from the public internet.
+
+        An RDP rule is unrestricted when its source is `0.0.0.0/0` or `::/0`. Internet-facing RDP is one of the most common initial access vectors in ransomware campaigns and targeted intrusions. You remove or scope the rule under **Firewalls** in the Hetzner Cloud Console, or with `hcloud firewall delete-rule`, and this check requires that no rule leave port 3389 open to either unrestricted source.
+
+        **Why this matters**
+
+        RDP exposed to the internet is the primary delivery mechanism for many ransomware families. Threat actors scan continuously for open port 3389 and attempt credential-based entry the moment they find one, so exposure is measured in minutes rather than days.
+
+        The protocol also carries a documented history of critical pre-authentication remote code execution vulnerabilities, BlueKeep and CVE-2019-0708 among them. That history makes a directly exposed listener a higher-risk target even on a fully patched system, because the next such flaw is reachable by anyone before a fix exists.
+
+        Reused or weak credentials compound both problems. On an internet-facing RDP service they can be discovered and exploited within minutes of server provisioning, which is well before most hardening or monitoring work is finished.
+
+        Remove direct exposure and route remote desktop sessions through a VPN or bastion instead. Where RDP genuinely must stay reachable, restrict it by source CIDR to a specific trusted range so automated scanning and exploitation by arbitrary internet hosts cannot reach it.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to the [Hetzner Cloud Console](https://console.hetzner.com/) and select the project.
+        2. Navigate to **Firewalls** and open each firewall.
+        3. Review the **Rules** tab, focusing on inbound rules.
+        4. Check whether any inbound TCP rule for port 3389 lists `Any IPv4` (`0.0.0.0/0`) or `Any IPv6` (`::/0`) as the source.
+
+        A passing firewall shows no inbound rule for TCP port 3389 with an unrestricted source. A failing firewall shows an inbound TCP rule for port 3389 sourced from `0.0.0.0/0` or `::/0`.
+
+        ### Audit via CLI
+
+        1. List all firewalls and inspect their rules:
+
+        ```bash
+        hcloud firewall list -o columns=id,name
+        hcloud firewall describe <firewall> -o json
+        ```
+
+        Review the `rules` array for any entry where `direction` is `in`, `protocol` is `tcp`, `port` is `3389`, and `source_ips` contains `0.0.0.0/0` or `::/0`.
+
+        A passing firewall returns no such rule. A failing firewall returns at least one rule with direction `in`, protocol `tcp`, port `3389`, and source IP `0.0.0.0/0` or `::/0`.
+      remediation:
+        - id: console
+          desc: |
+            1. Navigate to **Firewalls** and open the affected firewall.
+            2. Remove the RDP rule entirely, or restrict the source to a specific trusted CIDR.
+            3. Save the firewall.
+        - id: cli
+          desc: |
+            The `delete-rule` command must match the existing rule exactly, including the complete source IP list and any description, so inspect the rule first and reuse its exact values:
+
+            ```bash
+            hcloud firewall describe <firewall> -o json
+            hcloud firewall delete-rule <firewall> \
+              --direction in --protocol tcp --port 3389 \
+              --source-ips 0.0.0.0/0,::/0
+            ```
+
+            If the unrestricted IPv4 and IPv6 sources are defined in separate rules, run `delete-rule` once per rule with that rule's exact `source-ips` value. If RDP must remain reachable, add a replacement rule restricted to a trusted range before deleting the open rule:
+
+            ```bash
+            hcloud firewall add-rule <firewall> \
+              --direction in --protocol tcp --port 3389 \
+              --source-ips <your-trusted-cidr>
+            ```
+        - id: terraform
+          desc: |
+            Remove any RDP `rule` block sourced from `0.0.0.0/0` or `::/0`. If RDP must remain reachable, scope `source_ips` to a specific trusted CIDR:
+
+            ```hcl
+            resource "hcloud_firewall" "default" {
+              name = "default"
+
+              rule {
+                direction  = "in"
+                protocol   = "tcp"
+                port       = "3389"
+                source_ips = ["203.0.113.0/24"]
+              }
+            }
+            ```
+    refs:
+      - url: https://docs.hetzner.com/cloud/firewalls/overview/
+        title: Hetzner Cloud Firewalls overview
+
+  - uid: mondoo-hetzner-security-firewall-no-unrestricted-rdp-hetzner
+    filters: asset.platform == "hetzner-firewall"
+    mql: |
+      hetzner.firewall.rules.none(
+        _["direction"] == "in" && _["protocol"] == "tcp" && _["port"] == "3389" && _["sourceIps"].contains("0.0.0.0/0")
+      )
+      hetzner.firewall.rules.none(
+        _["direction"] == "in" && _["protocol"] == "tcp" && _["port"] == "3389" && _["sourceIps"].contains("::/0")
+      )
+  - uid: mondoo-hetzner-security-firewall-no-unrestricted-rdp-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "hcloud_firewall")
+    mql: |
+      terraform.resources("hcloud_firewall").all(
+        blocks.where(type == "rule").all(
+          arguments['direction'] != "in" ||
+          arguments['protocol'] != "tcp" ||
+          arguments['port'] != "3389" ||
+          arguments['source_ips'].containsNone(["0.0.0.0/0", "::/0"])
+        )
+      )
+  - uid: mondoo-hetzner-security-firewall-no-unrestricted-rdp-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "hcloud_firewall")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "hcloud_firewall").all(
+        change.after.rule == null || change.after.rule.all(
+          _['direction'] != "in" ||
+          _['protocol'] != "tcp" ||
+          _['port'] != "3389" ||
+          _['source_ips'].containsNone(["0.0.0.0/0", "::/0"])
+        )
+      )
+  - uid: mondoo-hetzner-security-firewall-no-unrestricted-rdp-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "hcloud_firewall")
+    mql: |
+      terraform.state.resources.where(type == "hcloud_firewall").all(
+        values.rule == null || values.rule.all(
+          _['direction'] != "in" ||
+          _['protocol'] != "tcp" ||
+          _['port'] != "3389" ||
+          _['source_ips'].containsNone(["0.0.0.0/0", "::/0"])
+        )
+      )
+
+  - uid: mondoo-hetzner-security-firewall-no-unrestricted-db-ports
+    title: Ensure no firewall allows unrestricted inbound on common database ports
+    impact: 90
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-1
+      compliance/vda-isa-5: vda-isa-5-5-2-7
+    variants:
+      - uid: mondoo-hetzner-security-firewall-no-unrestricted-db-ports-hetzner
+        tags:
+          mondoo.com/filter-title: Hetzner Cloud
+          mondoo.com/filter-icon: hetzner
+      - uid: mondoo-hetzner-security-firewall-no-unrestricted-db-ports-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-hetzner-security-firewall-no-unrestricted-db-ports-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-hetzner-security-firewall-no-unrestricted-db-ports-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+          mondoo.com/filter-icon: terraform
+    docs:
+      desc: |
+        This check verifies that no Hetzner Cloud Firewall allows inbound traffic from the public internet to a common database port.
+
+        The ports covered are MySQL on 3306, PostgreSQL on 5432, MongoDB on 27017, Redis on 6379, Kafka on 9092, Elasticsearch and OpenSearch on 9200, and SQL Server on 1433. A rule fails when its source is `Any IPv4` or `Any IPv6`. You remove or scope those rules on the **Rules** tab of the affected firewall in the Hetzner Cloud Console, or with `hcloud firewall delete-rule` once per offending port. Database services should be reachable only from the application tier, ideally over a Hetzner private network, never directly from the internet.
+
+        **Why this matters**
+
+        Databases exposed to the internet are subject to continuous automated login attempts. A guessable or default credential on one of these ports leads directly to data exfiltration, with no intermediate control left to stop it.
+
+        Several of these engines have had widely exploited episodes where a misconfiguration left them accessible with no authentication at all. Those incidents ended in mass data destruction and ransom demands, and the exposure that enabled them was exactly an open port on a public address.
+
+        Direct internet access to a database port also removes the application tier as a layer of access control. An attacker who reaches the port can query or dump data without ever passing through the application's authorization logic, so every permission decision that lives in the application is bypassed at once.
+
+        The engine's own protocol becomes attack surface as well. Any pre-authentication vulnerability in the database software is exploitable by any host on the internet the moment the port is publicly reachable.
+
+        Place databases on a private network and reach them from application servers on that same network, or scope the rule to the trusted CIDR of those servers. Both forms keep the intended access boundary intact and ensure external access is mediated by the application tier.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to the [Hetzner Cloud Console](https://console.hetzner.com/) and select the project.
+        2. Navigate to **Firewalls** and open each firewall.
+        3. Review the **Rules** tab, focusing on inbound rules.
+        4. Check whether any inbound TCP rule specifies a port of `3306`, `5432`, `27017`, `6379`, `9092`, `9200`, or `1433` with a source of `Any IPv4` (`0.0.0.0/0`) or `Any IPv6` (`::/0`).
+
+        A passing firewall shows no inbound rule for those database ports sourced from `0.0.0.0/0` or `::/0`. A failing firewall shows at least one such inbound rule permitting unrestricted internet access to a database port.
+
+        ### Audit via CLI
+
+        1. List all firewalls and inspect their rules:
+
+        ```bash
+        hcloud firewall list -o columns=id,name
+        hcloud firewall describe <firewall> -o json
+        ```
+
+        Review the `rules` array for entries where `direction` is `in`, `protocol` is `tcp`, `port` is any of `3306`, `5432`, `27017`, `6379`, `9092`, `9200`, or `1433`, and `source_ips` contains `0.0.0.0/0` or `::/0`.
+
+        A passing firewall returns no such rule. A failing firewall returns at least one inbound rule matching one of those database ports with an unrestricted source.
+      remediation:
+        - id: console
+          desc: |
+            Database services should be reachable only from the application tier, ideally over a Hetzner private network.
+
+            1. Navigate to **Firewalls** and open the affected firewall.
+            2. On the **Rules** tab, locate each inbound rule for ports `3306`, `5432`, `27017`, `6379`, `9092`, `9200`, or `1433` whose source is `Any IPv4` or `Any IPv6`.
+            3. Delete the rule, or change its source to the trusted CIDR of your application servers.
+            4. Save the firewall and repeat for every offending port.
+        - id: cli
+          desc: |
+            The `delete-rule` command must match the existing rule exactly, including the complete source IP list and any description, so inspect the rule first and reuse its exact values:
+
+            ```bash
+            hcloud firewall describe <firewall> -o json
+            hcloud firewall delete-rule <firewall> \
+              --direction in --protocol tcp --port 5432 \
+              --source-ips 0.0.0.0/0,::/0
+            ```
+
+            If the unrestricted IPv4 and IPv6 sources are defined in separate rules, run `delete-rule` once per rule with that rule's exact `source-ips` value. Repeat for each offending port: `3306`, `5432`, `27017`, `6379`, `9092`, `9200`, `1433`.
+        - id: terraform
+          desc: |
+            Database ports should not be exposed to `0.0.0.0/0` or `::/0`. Either drop the rule entirely (databases are best reached over a `hcloud_network`), or scope `source_ips` to a specific trusted CIDR:
+
+            ```hcl
+            resource "hcloud_firewall" "default" {
+              name = "default"
+
+              rule {
+                direction  = "in"
+                protocol   = "tcp"
+                port       = "5432"
+                source_ips = ["10.0.0.0/16"]
+              }
+            }
+            ```
+    refs:
+      - url: https://docs.hetzner.com/cloud/firewalls/overview/
+        title: Hetzner Cloud Firewalls overview
+
+  - uid: mondoo-hetzner-security-firewall-no-unrestricted-db-ports-hetzner
+    filters: asset.platform == "hetzner-firewall"
+    mql: |
+      hetzner.firewall.rules.none(_["direction"] == "in" && _["protocol"] == "tcp" && _["port"] == "3306" && _["sourceIps"].contains("0.0.0.0/0"))
+      hetzner.firewall.rules.none(_["direction"] == "in" && _["protocol"] == "tcp" && _["port"] == "3306" && _["sourceIps"].contains("::/0"))
+      hetzner.firewall.rules.none(_["direction"] == "in" && _["protocol"] == "tcp" && _["port"] == "5432" && _["sourceIps"].contains("0.0.0.0/0"))
+      hetzner.firewall.rules.none(_["direction"] == "in" && _["protocol"] == "tcp" && _["port"] == "5432" && _["sourceIps"].contains("::/0"))
+      hetzner.firewall.rules.none(_["direction"] == "in" && _["protocol"] == "tcp" && _["port"] == "27017" && _["sourceIps"].contains("0.0.0.0/0"))
+      hetzner.firewall.rules.none(_["direction"] == "in" && _["protocol"] == "tcp" && _["port"] == "27017" && _["sourceIps"].contains("::/0"))
+      hetzner.firewall.rules.none(_["direction"] == "in" && _["protocol"] == "tcp" && _["port"] == "6379" && _["sourceIps"].contains("0.0.0.0/0"))
+      hetzner.firewall.rules.none(_["direction"] == "in" && _["protocol"] == "tcp" && _["port"] == "6379" && _["sourceIps"].contains("::/0"))
+      hetzner.firewall.rules.none(_["direction"] == "in" && _["protocol"] == "tcp" && _["port"] == "9092" && _["sourceIps"].contains("0.0.0.0/0"))
+      hetzner.firewall.rules.none(_["direction"] == "in" && _["protocol"] == "tcp" && _["port"] == "9092" && _["sourceIps"].contains("::/0"))
+      hetzner.firewall.rules.none(_["direction"] == "in" && _["protocol"] == "tcp" && _["port"] == "9200" && _["sourceIps"].contains("0.0.0.0/0"))
+      hetzner.firewall.rules.none(_["direction"] == "in" && _["protocol"] == "tcp" && _["port"] == "9200" && _["sourceIps"].contains("::/0"))
+      hetzner.firewall.rules.none(_["direction"] == "in" && _["protocol"] == "tcp" && _["port"] == "1433" && _["sourceIps"].contains("0.0.0.0/0"))
+      hetzner.firewall.rules.none(_["direction"] == "in" && _["protocol"] == "tcp" && _["port"] == "1433" && _["sourceIps"].contains("::/0"))
+  - uid: mondoo-hetzner-security-firewall-no-unrestricted-db-ports-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "hcloud_firewall")
+    mql: |
+      terraform.resources("hcloud_firewall").all(
+        blocks.where(type == "rule").all(
+          arguments['direction'] != "in" ||
+          arguments['protocol'] != "tcp" ||
+          arguments['port'].notIn(["3306", "5432", "27017", "6379", "9092", "9200", "1433"]) ||
+          arguments['source_ips'].containsNone(["0.0.0.0/0", "::/0"])
+        )
+      )
+  - uid: mondoo-hetzner-security-firewall-no-unrestricted-db-ports-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "hcloud_firewall")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "hcloud_firewall").all(
+        change.after.rule == null || change.after.rule.all(
+          _['direction'] != "in" ||
+          _['protocol'] != "tcp" ||
+          _['port'].notIn(["3306", "5432", "27017", "6379", "9092", "9200", "1433"]) ||
+          _['source_ips'].containsNone(["0.0.0.0/0", "::/0"])
+        )
+      )
+  - uid: mondoo-hetzner-security-firewall-no-unrestricted-db-ports-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "hcloud_firewall")
+    mql: |
+      terraform.state.resources.where(type == "hcloud_firewall").all(
+        values.rule == null || values.rule.all(
+          _['direction'] != "in" ||
+          _['protocol'] != "tcp" ||
+          _['port'].notIn(["3306", "5432", "27017", "6379", "9092", "9200", "1433"]) ||
+          _['source_ips'].containsNone(["0.0.0.0/0", "::/0"])
+        )
+      )
+
+  - uid: mondoo-hetzner-security-firewall-no-all-ports-open
+    title: Ensure no firewall allows unrestricted inbound on all ports
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-1
+      compliance/vda-isa-5: vda-isa-5-5-2-7
+    variants:
+      - uid: mondoo-hetzner-security-firewall-no-all-ports-open-hetzner
+        tags:
+          mondoo.com/filter-title: Hetzner Cloud
+          mondoo.com/filter-icon: hetzner
+      - uid: mondoo-hetzner-security-firewall-no-all-ports-open-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-hetzner-security-firewall-no-all-ports-open-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-hetzner-security-firewall-no-all-ports-open-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+          mondoo.com/filter-icon: terraform
+    docs:
+      desc: |
+        This check verifies that no Hetzner Cloud Firewall has an inbound rule permitting traffic on all ports from the public internet.
+
+        The rule forms that qualify are a port of `any`, `1-65535`, or `0-65535` combined with a source of `0.0.0.0/0` or `::/0`. A rule that opens every port from everywhere is equivalent to having no firewall at all. You replace it on the **Rules** tab of the affected firewall in the Hetzner Cloud Console, or with `hcloud firewall delete-rule`, and this check requires that no such rule exist on any firewall.
+
+        **Why this matters**
+
+        With all ports open to the internet there is no effective perimeter. Every service listening on the attached servers is reachable by every host on the internet, whether that service was published deliberately or not.
+
+        Servers accumulate listening services over time, and an all-ports rule means each new one is internet-accessible the instant it binds. A forgotten debug endpoint, an unintended management interface, or a misconfigured application port needs no separate mistake to become exposed.
+
+        This is the most permissive firewall state that can be expressed, and it represents a complete failure of the network access control layer rather than a partial weakness in it. Nothing narrower elsewhere in the rule set compensates, because the wide rule already admits everything.
+
+        Replace it with explicit narrow rules for only the ports the workload requires, scoped to trusted source CIDRs where possible, so every other port is implicitly denied regardless of what is running on the server. Add the narrow rules before deleting the wide one: Hetzner firewalls deny all other inbound traffic by default, so removing the only inbound rule immediately blocks every connection to the attached servers. Because the check fails on any inbound all-ports rule, remove them for every protocol and for both unrestricted sources, since deleting only the TCP and `0.0.0.0/0` rule leaves UDP, ICMP, and `::/0` rules in place.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to the [Hetzner Cloud Console](https://console.hetzner.com/) and select the project.
+        2. Navigate to **Firewalls** and open each firewall.
+        3. Review the **Rules** tab, focusing on inbound rules.
+        4. Check whether any inbound rule has the port set to `Any`, `1-65535`, or `0-65535` with a source of `Any IPv4` (`0.0.0.0/0`) or `Any IPv6` (`::/0`).
+
+        A passing firewall shows no inbound rule permitting the full port range from the public internet. A failing firewall shows an inbound rule with an unrestricted port range and an unrestricted source.
+
+        ### Audit via CLI
+
+        1. List all firewalls and inspect their rules:
+
+        ```bash
+        hcloud firewall list -o columns=id,name
+        hcloud firewall describe <firewall> -o json
+        ```
+
+        Review the `rules` array for entries where `direction` is `in`, `port` is `any`, `1-65535`, or `0-65535`, and `source_ips` contains `0.0.0.0/0` or `::/0`.
+
+        A passing firewall returns no such rule. A failing firewall returns at least one inbound rule that opens the full port range from an unrestricted source.
+      remediation:
+        - id: console
+          desc: |
+            1. Navigate to **Firewalls** and open the affected firewall.
+            2. On the **Rules** tab, first add narrow inbound rules for only the ports the workload requires, scoped to trusted source CIDRs.
+            3. Delete the inbound rule that allows the full port range from `Any IPv4` or `Any IPv6`.
+            4. Save the firewall.
+
+            Add the narrow rules before deleting the wide-open rule. Hetzner firewalls deny all other inbound traffic by default, so removing the only inbound rule immediately blocks every connection to the attached servers.
+        - id: cli
+          desc: |
+            `delete-rule` removes one rule at a time, matched by direction, protocol, port, and source. Because the check fails on any inbound all-ports rule, you must repeat the deletion for every protocol that has a wide-open rule and for every unrestricted source, including IPv6. Removing only the `tcp` and `0.0.0.0/0` rule leaves UDP, ICMP, and `::/0` rules in place, so the firewall still fails the check.
+
+            Run `hcloud firewall describe <firewall> -o json` first to enumerate the offending rules, then delete each one:
+
+            ```bash
+            hcloud firewall describe <firewall> -o json
+            hcloud firewall add-rule <firewall> \
+              --direction in --protocol tcp --port 443 \
+              --source-ips 0.0.0.0/0,::/0
+            hcloud firewall delete-rule <firewall> \
+              --direction in --protocol tcp --port any --source-ips 0.0.0.0/0
+            hcloud firewall delete-rule <firewall> \
+              --direction in --protocol tcp --port any --source-ips ::/0
+            hcloud firewall delete-rule <firewall> \
+              --direction in --protocol udp --port any --source-ips 0.0.0.0/0
+            hcloud firewall delete-rule <firewall> \
+              --direction in --protocol udp --port any --source-ips ::/0
+            hcloud firewall delete-rule <firewall> \
+              --direction in --protocol icmp --source-ips 0.0.0.0/0
+            hcloud firewall delete-rule <firewall> \
+              --direction in --protocol icmp --source-ips ::/0
+            ```
+
+            Adjust the `--port` value to match the rule actually in place (`any`, `1-65535`, or `0-65535`); `--port` is omitted for `icmp`. After deleting the wide-open rules, add narrow per-service rules that expose only the required ports.
+        - id: terraform
+          desc: |
+            Never declare an inbound `rule` whose `port` is `any`, `1-65535`, or `0-65535` with `source_ips` of `0.0.0.0/0` or `::/0`. Replace it with narrow per-service rules:
+
+            ```hcl
+            resource "hcloud_firewall" "default" {
+              name = "default"
+
+              rule {
+                direction  = "in"
+                protocol   = "tcp"
+                port       = "443"
+                source_ips = ["0.0.0.0/0", "::/0"]
+              }
+
+              rule {
+                direction  = "in"
+                protocol   = "tcp"
+                port       = "22"
+                source_ips = ["203.0.113.0/24"]
+              }
+            }
+            ```
+    refs:
+      - url: https://docs.hetzner.com/cloud/firewalls/overview/
+        title: Hetzner Cloud Firewalls overview
+
+  - uid: mondoo-hetzner-security-firewall-no-all-ports-open-hetzner
+    filters: asset.platform == "hetzner-firewall"
+    mql: |
+      hetzner.firewall.rules.none(_["direction"] == "in" && _["port"] == "any" && _["sourceIps"].contains("0.0.0.0/0"))
+      hetzner.firewall.rules.none(_["direction"] == "in" && _["port"] == "any" && _["sourceIps"].contains("::/0"))
+      hetzner.firewall.rules.none(_["direction"] == "in" && _["port"] == "1-65535" && _["sourceIps"].contains("0.0.0.0/0"))
+      hetzner.firewall.rules.none(_["direction"] == "in" && _["port"] == "1-65535" && _["sourceIps"].contains("::/0"))
+      hetzner.firewall.rules.none(_["direction"] == "in" && _["port"] == "0-65535" && _["sourceIps"].contains("0.0.0.0/0"))
+      hetzner.firewall.rules.none(_["direction"] == "in" && _["port"] == "0-65535" && _["sourceIps"].contains("::/0"))
+  - uid: mondoo-hetzner-security-firewall-no-all-ports-open-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "hcloud_firewall")
+    mql: |
+      terraform.resources("hcloud_firewall").all(
+        blocks.where(type == "rule").all(
+          arguments['direction'] != "in" ||
+          arguments['port'].notIn(["any", "1-65535", "0-65535"]) ||
+          arguments['source_ips'].containsNone(["0.0.0.0/0", "::/0"])
+        )
+      )
+  - uid: mondoo-hetzner-security-firewall-no-all-ports-open-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "hcloud_firewall")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "hcloud_firewall").all(
+        change.after.rule == null || change.after.rule.all(
+          _['direction'] != "in" ||
+          _['port'].notIn(["any", "1-65535", "0-65535"]) ||
+          _['source_ips'].containsNone(["0.0.0.0/0", "::/0"])
+        )
+      )
+  - uid: mondoo-hetzner-security-firewall-no-all-ports-open-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "hcloud_firewall")
+    mql: |
+      terraform.state.resources.where(type == "hcloud_firewall").all(
+        values.rule == null || values.rule.all(
+          _['direction'] != "in" ||
+          _['port'].notIn(["any", "1-65535", "0-65535"]) ||
+          _['source_ips'].containsNone(["0.0.0.0/0", "::/0"])
+        )
+      )
+
+  - uid: mondoo-hetzner-security-firewall-no-unrestricted-egress
+    title: Ensure no firewall allows unrestricted outbound on all ports
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-3-2
+      compliance/soc2-2017: soc2-control-cc6-6-1
+      compliance/vda-isa-5: vda-isa-5-5-2-7
+    variants:
+      - uid: mondoo-hetzner-security-firewall-no-unrestricted-egress-hetzner
+        tags:
+          mondoo.com/filter-title: Hetzner Cloud
+          mondoo.com/filter-icon: hetzner
+      - uid: mondoo-hetzner-security-firewall-no-unrestricted-egress-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-hetzner-security-firewall-no-unrestricted-egress-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-hetzner-security-firewall-no-unrestricted-egress-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+          mondoo.com/filter-icon: terraform
+    docs:
+      desc: |
+        This check verifies that no Hetzner Cloud Firewall defines an outbound rule permitting traffic on all ports to the public internet.
+
+        The rule forms that qualify are a port of `any`, `1-65535`, or `0-65535` combined with a destination of `0.0.0.0/0` or `::/0`. Hetzner already allows all outbound traffic when a firewall defines no egress rules, so this check is aimed at the case where an explicit egress rule widens outbound access back to every port and every destination after narrower rules were put in place. You remove it on the **Rules** tab of the affected firewall in the Hetzner Cloud Console, or with `hcloud firewall delete-rule`.
+
+        **Why this matters**
+
+        An all-ports egress rule to the internet lets a compromised server reach any external host on any port. That is precisely the channel data theft and command-and-control traffic use, so the rule hands an attacker an open path outward that needs no further exploitation.
+
+        It also defeats whatever egress hardening exists elsewhere on the firewall. Narrow egress rules are only effective if no broad all-ports rule sits alongside them re-opening everything, and the broad rule wins.
+
+        Scoping egress to the specific destinations and ports a workload needs limits how far a compromised workload can pivot or call out. It removes the open channel malware uses to reach external infrastructure and reduces the routes by which sensitive data can leave the environment.
+
+        Workloads that legitimately need arbitrary outbound access, such as build agents fetching from unpredictable upstreams, will fail this check. Where that is genuinely the case, prefer routing the traffic through a proxy you can log rather than leaving an unrestricted rule in place, and remove the wide rules for every protocol and both unrestricted destinations when you narrow them.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to the [Hetzner Cloud Console](https://console.hetzner.com/) and select the project.
+        2. Navigate to **Firewalls** and open each firewall.
+        3. Review the **Rules** tab, focusing on outbound rules.
+        4. Check whether any outbound rule has the port set to `Any`, `1-65535`, or `0-65535` with a destination of `Any IPv4` (`0.0.0.0/0`) or `Any IPv6` (`::/0`).
+
+        A passing firewall defines no outbound rule permitting the full port range to the public internet. A failing firewall has an outbound rule with an unrestricted port range and an unrestricted destination.
+
+        ### Audit via CLI
+
+        1. List all firewalls and inspect their rules:
+
+        ```bash
+        hcloud firewall list -o columns=id,name
+        hcloud firewall describe <firewall> -o json
+        ```
+
+        Review the `rules` array for entries where `direction` is `out`, `port` is `any`, `1-65535`, or `0-65535`, and `destination_ips` contains `0.0.0.0/0` or `::/0`.
+
+        A passing firewall returns no such rule. A failing firewall returns at least one outbound rule that opens the full port range to an unrestricted destination.
+      remediation:
+        - id: console
+          desc: |
+            Remove the wide-open outbound rule and replace it with narrow rules that permit only the specific ports and destinations the workload needs to reach.
+        - id: cli
+          desc: |
+            `delete-rule` removes one rule at a time, matched by direction, protocol, port, and destination. Because the check fails on any outbound all-ports rule, repeat the deletion for every protocol that has a wide-open rule and for every unrestricted destination, including IPv6.
+
+            Run `hcloud firewall describe <firewall> -o json` first to enumerate the offending rules, then delete each one:
+
+            ```bash
+            hcloud firewall delete-rule <firewall> \
+              --direction out --protocol tcp --port any --destination-ips 0.0.0.0/0
+            hcloud firewall delete-rule <firewall> \
+              --direction out --protocol tcp --port any --destination-ips ::/0
+            hcloud firewall delete-rule <firewall> \
+              --direction out --protocol udp --port any --destination-ips 0.0.0.0/0
+            hcloud firewall delete-rule <firewall> \
+              --direction out --protocol udp --port any --destination-ips ::/0
+            ```
+
+            Adjust the `--port` value to match the rule actually in place (`any`, `1-65535`, or `0-65535`). After deleting the wide-open rules, add narrow per-destination rules that permit only the required outbound ports.
+        - id: terraform
+          desc: |
+            Never declare an outbound `rule` whose `port` is `any`, `1-65535`, or `0-65535` with `destination_ips` of `0.0.0.0/0` or `::/0`. Replace it with narrow per-destination rules:
+
+            ```hcl
+            resource "hcloud_firewall" "default" {
+              name = "default"
+
+              rule {
+                direction       = "out"
+                protocol        = "tcp"
+                port            = "443"
+                destination_ips = ["0.0.0.0/0", "::/0"]
+              }
+
+              rule {
+                direction       = "out"
+                protocol        = "tcp"
+                port            = "5432"
+                destination_ips = ["10.0.0.0/16"]
+              }
+            }
+            ```
+    refs:
+      - url: https://docs.hetzner.com/cloud/firewalls/overview/
+        title: Hetzner Cloud Firewalls overview
+
+  - uid: mondoo-hetzner-security-firewall-no-unrestricted-egress-hetzner
+    filters: asset.platform == "hetzner-firewall"
+    mql: |
+      hetzner.firewall.rules.none(_["direction"] == "out" && _["port"] == "any" && _["destinationIps"].contains("0.0.0.0/0"))
+      hetzner.firewall.rules.none(_["direction"] == "out" && _["port"] == "any" && _["destinationIps"].contains("::/0"))
+      hetzner.firewall.rules.none(_["direction"] == "out" && _["port"] == "1-65535" && _["destinationIps"].contains("0.0.0.0/0"))
+      hetzner.firewall.rules.none(_["direction"] == "out" && _["port"] == "1-65535" && _["destinationIps"].contains("::/0"))
+      hetzner.firewall.rules.none(_["direction"] == "out" && _["port"] == "0-65535" && _["destinationIps"].contains("0.0.0.0/0"))
+      hetzner.firewall.rules.none(_["direction"] == "out" && _["port"] == "0-65535" && _["destinationIps"].contains("::/0"))
+  - uid: mondoo-hetzner-security-firewall-no-unrestricted-egress-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "hcloud_firewall")
+    mql: |
+      terraform.resources("hcloud_firewall").all(
+        blocks.where(type == "rule").all(
+          arguments['direction'] != "out" ||
+          arguments['port'].notIn(["any", "1-65535", "0-65535"]) ||
+          arguments['destination_ips'].containsNone(["0.0.0.0/0", "::/0"])
+        )
+      )
+  - uid: mondoo-hetzner-security-firewall-no-unrestricted-egress-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "hcloud_firewall")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "hcloud_firewall").all(
+        change.after.rule == null || change.after.rule.all(
+          _['direction'] != "out" ||
+          _['port'].notIn(["any", "1-65535", "0-65535"]) ||
+          _['destination_ips'].containsNone(["0.0.0.0/0", "::/0"])
+        )
+      )
+  - uid: mondoo-hetzner-security-firewall-no-unrestricted-egress-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "hcloud_firewall")
+    mql: |
+      terraform.state.resources.where(type == "hcloud_firewall").all(
+        values.rule == null || values.rule.all(
+          _['direction'] != "out" ||
+          _['port'].notIn(["any", "1-65535", "0-65535"]) ||
+          _['destination_ips'].containsNone(["0.0.0.0/0", "::/0"])
+        )
+      )
+
+  - uid: mondoo-hetzner-security-firewall-has-rules
+    title: Ensure firewalls define at least one rule
+    impact: 40
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-1
+      compliance/vda-isa-5: vda-isa-5-5-2-7
+    variants:
+      - uid: mondoo-hetzner-security-firewall-has-rules-hetzner
+        tags:
+          mondoo.com/filter-title: Hetzner Cloud
+          mondoo.com/filter-icon: hetzner
+      - uid: mondoo-hetzner-security-firewall-has-rules-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-hetzner-security-firewall-has-rules-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-hetzner-security-firewall-has-rules-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+          mondoo.com/filter-icon: terraform
+    docs:
+      desc: |
+        This check verifies that every Hetzner Cloud Firewall defines at least one rule.
+
+        A Hetzner firewall evaluates inbound traffic against its rule set and drops anything not explicitly allowed, while outbound traffic is permitted unless an outbound rule restricts it. A firewall with no rules is therefore almost always an unfinished or mistakenly emptied configuration rather than an intentional control. You populate it on the **Rules** tab of the firewall in the Hetzner Cloud Console, or with `hcloud firewall add-rule`.
+
+        **Why this matters**
+
+        An applied but empty firewall creates a false sense of protection. In the console the attached servers appear to be governed by a rule set, when in fact no inbound service has been deliberately allowed and no egress is constrained at all.
+
+        An empty firewall is also a configuration drift signal. One created during provisioning and never populated indicates an incomplete change, and surfacing it prompts an operator to either finish the configuration or delete the unused artifact so it stops implying coverage that does not exist.
+
+        Because Hetzner allows all outbound traffic by default, the empty firewall does nothing to constrain data leaving the server either. The opportunity to limit exfiltration paths through egress rules is simply unused.
+
+        Requiring at least one rule forces a deliberate decision about which inbound ports are allowed and, where appropriate, which egress destinations are permitted. A populated rule set that admits only required ports, paired with outbound rules where egress control is needed, keeps the firewall doing meaningful work rather than acting as a placeholder.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to the [Hetzner Cloud Console](https://console.hetzner.com/) and select the project.
+        2. Navigate to **Firewalls** and open each firewall.
+        3. Review the **Rules** tab.
+
+        A passing firewall lists at least one inbound or outbound rule. A failing firewall shows an empty rule set.
+
+        ### Audit via CLI
+
+        1. List all firewalls and inspect their rules:
+
+        ```bash
+        hcloud firewall list -o columns=id,name
+        hcloud firewall describe <firewall> -o json
+        ```
+
+        A passing firewall returns a non-empty `rules` array. A failing firewall returns an empty `rules` array (`[]`).
+      remediation:
+        - id: console
+          desc: |
+            1. Navigate to **Firewalls** and open the affected firewall.
+            2. On the **Rules** tab, add the inbound rules required by the workload (scoped to trusted source CIDRs) and any outbound rules needed to constrain egress.
+            3. If the firewall is an unused artifact, delete it instead so it does not imply coverage that does not exist.
+        - id: cli
+          desc: |
+            ```bash
+            hcloud firewall add-rule <firewall> \
+              --direction in --protocol tcp --port 443 --source-ips 0.0.0.0/0
+            ```
+
+            Add the specific rules the workload requires. Delete the firewall instead if it is not needed.
+        - id: terraform
+          desc: |
+            Declare at least one `rule` block on every `hcloud_firewall`:
+
+            ```hcl
+            resource "hcloud_firewall" "default" {
+              name = "default"
+
+              rule {
+                direction  = "in"
+                protocol   = "tcp"
+                port       = "443"
+                source_ips = ["0.0.0.0/0", "::/0"]
+              }
+            }
+            ```
+    refs:
+      - url: https://docs.hetzner.com/cloud/firewalls/overview/
+        title: Hetzner Cloud Firewalls overview
+
+  - uid: mondoo-hetzner-security-firewall-has-rules-hetzner
+    filters: asset.platform == "hetzner-firewall"
+    mql: |
+      hetzner.firewall.rules != empty
+  - uid: mondoo-hetzner-security-firewall-has-rules-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "hcloud_firewall")
+    mql: |
+      terraform.resources("hcloud_firewall").all(blocks.where(type == "rule") != empty)
+  - uid: mondoo-hetzner-security-firewall-has-rules-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "hcloud_firewall")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "hcloud_firewall").all(
+        change.after.rule != null && change.after.rule != []
+      )
+  - uid: mondoo-hetzner-security-firewall-has-rules-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "hcloud_firewall")
+    mql: |
+      terraform.state.resources.where(type == "hcloud_firewall").all(
+        values.rule != null && values.rule != []
+      )
+
+  - uid: mondoo-hetzner-security-lb-http-redirected-to-https
+    title: Ensure load balancers redirect HTTP traffic to HTTPS
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-2-ii-transmission-security-encryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    variants:
+      - uid: mondoo-hetzner-security-lb-http-redirected-to-https-hetzner
+        tags:
+          mondoo.com/filter-title: Hetzner Cloud
+          mondoo.com/filter-icon: hetzner
+      - uid: mondoo-hetzner-security-lb-http-redirected-to-https-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-hetzner-security-lb-http-redirected-to-https-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-hetzner-security-lb-http-redirected-to-https-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+          mondoo.com/filter-icon: terraform
+    docs:
+      desc: |
+        This check verifies that every Hetzner Cloud load balancer redirects plaintext HTTP requests to HTTPS rather than serving a plain HTTP service.
+
+        Hetzner implements the redirect as an option of the HTTPS service, not of the HTTP service. With it enabled, the load balancer answers port 80 itself with a 301 redirect to the HTTPS equivalent, so a separate plain HTTP service is no longer needed. You enable it under **Services** on the load balancer in the Hetzner Cloud Console by deleting the plain HTTP service on port 80 and turning on **Redirect HTTP to HTTPS** on the HTTPS service, or with `hcloud load-balancer update-service --http-redirect-http=true`. Without the redirect, clients that initiate HTTP connections get their responses over an unencrypted channel.
+
+        **Why this matters**
+
+        HTTP traffic is plaintext. Any credential, session cookie, or API token transmitted over it is readable by every host on the network path between the client and the load balancer, and nothing about the eventual HTTPS session retroactively protects what was already sent in the clear.
+
+        A load balancer that silently serves HTTP responses also gives an attacker a window to intercept the connection and strip the TLS layer before the client upgrades, the technique known as SSL stripping. The client never sees an error, because a working HTTP service is exactly what it was offered.
+
+        Cookie protections are undermined in the same window. Cookies without the `Secure` attribute can be sent over HTTP, and even cookies set over HTTPS can be intercepted if the client makes an initial plaintext request before any redirect happens.
+
+        A 301 redirect ensures every subsequent request in the session uses TLS, closing the interception and downgrade window after the first request. Pair it with an HSTS header so clients remember to use HTTPS on their own and future plaintext requests never leave the client at all, which eliminates the initial window as well.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to the [Hetzner Cloud Console](https://console.hetzner.com/) and select the project.
+        2. Navigate to **Load Balancers** and open each load balancer.
+        3. Click the **Services** tab.
+        4. Verify that no plain HTTP service is configured and that the HTTPS service has **Redirect HTTP to HTTPS** enabled.
+
+        A passing load balancer has no plain HTTP service and shows **Redirect HTTP to HTTPS** toggled on for its HTTPS service. A failing load balancer has a plain HTTP service, or none of its HTTPS services has the redirect enabled.
+
+        ### Audit via CLI
+
+        1. List all load balancers and inspect their services:
+
+        ```bash
+        hcloud load-balancer list -o columns=id,name
+        hcloud load-balancer describe <lb> -o json
+        ```
+
+        In the `services` array, verify that no entry has `protocol` set to `http`, and that on a load balancer with HTTPS services at least one of them has `http.redirect_http` set to `true`.
+
+        A passing load balancer has no `http` service and returns `"redirect_http": true` on an HTTPS service. A failing load balancer has a service with `protocol` set to `http`, or HTTPS services that all return `"redirect_http": false`.
+      remediation:
+        - id: console
+          desc: |
+            Hetzner exposes the redirect as an option of the HTTPS service, not the HTTP service. When the redirect is enabled, the load balancer answers port 80 itself with a redirect to HTTPS, so a separate plain HTTP service is no longer needed.
+
+            1. Navigate to **Load Balancers** and open the affected load balancer.
+            2. Go to **Services** and delete the plain HTTP service listening on port 80.
+            3. Edit the HTTPS service and enable **Redirect HTTP to HTTPS**. If no HTTPS service exists yet, create one on port 443 with a certificate and enable the redirect on it.
+
+            Plain HTTP requests go unanswered for the short interval between deleting the HTTP service and enabling the redirect.
+        - id: cli
+          desc: |
+            The redirect option belongs to the HTTPS service. Delete the plain HTTP service on port 80, then enable the redirect on the HTTPS service:
+
+            ```bash
+            hcloud load-balancer delete-service <lb> --listen-port 80
+            hcloud load-balancer update-service <lb> \
+              --listen-port 443 --http-redirect-http=true
+            ```
+        - id: terraform
+          desc: |
+            The `redirect_http` option is only supported on services with `protocol = "https"`. Remove any plain HTTP service on port 80 and enable the redirect on the HTTPS service instead:
+
+            ```hcl
+            resource "hcloud_load_balancer_service" "https" {
+              load_balancer_id = hcloud_load_balancer.example.id
+              protocol         = "https"
+              listen_port      = 443
+              destination_port = 80
+
+              http {
+                certificates  = [hcloud_managed_certificate.example.id]
+                redirect_http = true
+              }
+            }
+            ```
+    refs:
+      - url: https://docs.hetzner.com/networking/load-balancers/overview/
+        title: Hetzner Cloud Load Balancers overview
+
+  - uid: mondoo-hetzner-security-lb-http-redirected-to-https-hetzner
+    filters: asset.platform == "hetzner-loadbalancer"
+    mql: |
+      hetzner.loadBalancer.services.none(protocol == "http")
+      hetzner.loadBalancer.services.where(protocol == "https").all(http["redirectHttp"] == true)
+  - uid: mondoo-hetzner-security-lb-http-redirected-to-https-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "hcloud_load_balancer_service")
+    mql: |
+      terraform.resources("hcloud_load_balancer_service").all(arguments['protocol'] != "http")
+      terraform.resources("hcloud_load_balancer_service").where(arguments['protocol'] == "https").all(
+        blocks.where(type == "http").all(arguments['redirect_http'] == true)
+      )
+  - uid: mondoo-hetzner-security-lb-http-redirected-to-https-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "hcloud_load_balancer_service")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "hcloud_load_balancer_service").all(
+        change.after.protocol != "http"
+      )
+      terraform.plan.resourceChanges.where(type == "hcloud_load_balancer_service" && change.after.protocol == "https").all(
+        change.after.http.all(_['redirect_http'] == true)
+      )
+  - uid: mondoo-hetzner-security-lb-http-redirected-to-https-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "hcloud_load_balancer_service")
+    mql: |
+      terraform.state.resources.where(type == "hcloud_load_balancer_service").all(
+        values.protocol != "http"
+      )
+      terraform.state.resources.where(type == "hcloud_load_balancer_service" && values.protocol == "https").all(
+        values.http.all(_['redirect_http'] == true)
+      )
+
+  - uid: mondoo-hetzner-security-lb-https-service-has-certificate
+    title: Ensure HTTPS load balancer services have a TLS certificate attached
+    impact: 90
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-2-ii-transmission-security-encryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    variants:
+      - uid: mondoo-hetzner-security-lb-https-service-has-certificate-hetzner
+        tags:
+          mondoo.com/filter-title: Hetzner Cloud
+          mondoo.com/filter-icon: hetzner
+      - uid: mondoo-hetzner-security-lb-https-service-has-certificate-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-hetzner-security-lb-https-service-has-certificate-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-hetzner-security-lb-https-service-has-certificate-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+          mondoo.com/filter-icon: terraform
+    docs:
+      desc: |
+        This check verifies that every Hetzner Cloud load balancer service configured for HTTPS has at least one TLS certificate attached.
+
+        An HTTPS listener with no certificate cannot complete a TLS handshake, so clients either receive certificate errors or fall back to unencrypted connections. You attach one under **Services** on the load balancer in the Hetzner Cloud Console by editing the HTTPS service and adding an existing certificate or creating a Hetzner-managed certificate for the domain, or with `hcloud load-balancer update-service --http-certificates`. The service is identified by its listen port, so the update must target the port the existing HTTPS service already listens on.
+
+        **Why this matters**
+
+        Without a certificate the load balancer cannot establish a valid TLS session at all. Clients receive certificate errors that degrade trust in the service and, worse, condition users to click through the very warnings that are supposed to stop a real attack.
+
+        Some client configurations respond to a failed HTTPS handshake by falling back to HTTP. That silently removes encryption from the connection and exposes the traffic to interception without anyone seeing a failure, which is the fail-open outcome the listener was meant to prevent.
+
+        Certificate-related TLS failures also tend to surface as hard-to-diagnose connectivity errors rather than clear messages. They disrupt users and dependent services, which makes a missing certificate an availability concern as much as a security one.
+
+        Attaching a certificate lets the load balancer complete handshakes and deliver encrypted sessions to every client. Prefer Hetzner-managed certificates so renewal is handled automatically through Let's Encrypt and no one has to track expiry dates by hand.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to the [Hetzner Cloud Console](https://console.hetzner.com/) and select the project.
+        2. Navigate to **Load Balancers** and open each load balancer.
+        3. Click the **Services** tab.
+        4. Find any service configured for HTTPS (port 443) and verify that at least one certificate is listed under **Certificates**.
+
+        A passing load balancer shows at least one certificate attached to every HTTPS service. A failing load balancer shows an HTTPS service with no certificates attached.
+
+        ### Audit via CLI
+
+        1. List all load balancers and inspect their services:
+
+        ```bash
+        hcloud load-balancer list -o columns=id,name
+        hcloud load-balancer describe <lb> -o json
+        ```
+
+        In the `services` array, find entries where `protocol` is `https` and check whether `http.certificates` is a non-empty array.
+
+        A passing load balancer returns a non-empty `certificates` array for every HTTPS service. A failing load balancer returns an empty `certificates` array (`[]`) for an HTTPS service.
+      remediation:
+        - id: console
+          desc: |
+            1. Navigate to **Load Balancers** and open the affected load balancer.
+            2. Go to **Services** and edit the HTTPS service.
+            3. Under **Certificates**, attach an existing certificate or create a Hetzner-managed certificate for the domain.
+        - id: cli
+          desc: |
+            The check fails when an HTTPS service already exists but has no certificate attached. Use `update-service` to attach a certificate to that existing listener; `add-service` would attempt to create a second service on the same listen port and fail because the listener already exists.
+
+            ```bash
+            hcloud load-balancer update-service <lb> \
+              --listen-port 443 \
+              --http-certificates <certificate>
+            ```
+
+            The service is identified by its listen port, so `--listen-port` must match the existing HTTPS service. Use `add-service` only when no HTTPS service exists yet on that port.
+        - id: terraform
+          desc: |
+            Attach at least one certificate to every HTTPS `hcloud_load_balancer_service` via `http.certificates`:
+
+            ```hcl
+            resource "hcloud_managed_certificate" "example" {
+              name         = "example"
+              domain_names = ["example.com"]
+            }
+
+            resource "hcloud_load_balancer_service" "https" {
+              load_balancer_id = hcloud_load_balancer.example.id
+              protocol         = "https"
+              listen_port      = 443
+              destination_port = 80
+
+              http {
+                certificates = [hcloud_managed_certificate.example.id]
+              }
+            }
+            ```
+    refs:
+      - url: https://docs.hetzner.com/networking/load-balancers/overview/
+        title: Hetzner Cloud Load Balancers overview
+
+  - uid: mondoo-hetzner-security-lb-https-service-has-certificate-hetzner
+    filters: asset.platform == "hetzner-loadbalancer"
+    mql: |
+      hetzner.loadBalancer.services.where(protocol == "https").all(certificates != empty)
+  - uid: mondoo-hetzner-security-lb-https-service-has-certificate-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "hcloud_load_balancer_service")
+    mql: |
+      terraform.resources("hcloud_load_balancer_service").all(
+        arguments['protocol'] != "https" ||
+        blocks.where(type == "http").any(arguments['certificates'] != null && arguments['certificates'] != [])
+      )
+  - uid: mondoo-hetzner-security-lb-https-service-has-certificate-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "hcloud_load_balancer_service")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "hcloud_load_balancer_service").all(
+        change.after.protocol != "https" ||
+        change.after.http.any(_['certificates'] != null && _['certificates'] != [])
+      )
+  - uid: mondoo-hetzner-security-lb-https-service-has-certificate-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "hcloud_load_balancer_service")
+    mql: |
+      terraform.state.resources.where(type == "hcloud_load_balancer_service").all(
+        values.protocol != "https" ||
+        values.http.any(_['certificates'] != null && _['certificates'] != [])
+      )
+
+  # No Terraform variants: a load balancer's private-network attachment is expressed
+  # by a separate `hcloud_load_balancer_network` resource keyed by `load_balancer_id`,
+  # not by an argument on `hcloud_load_balancer`. Asserting "every load balancer has an
+  # attachment" requires correlating that separate resource back to each load balancer,
+  # which is awkward to express reliably in MQL on Terraform sources. The runtime variant
+  # reads the resolved private-network attachments directly. Terraform remediation is
+  # still provided below because the fix is a self-contained resource.
+  - uid: mondoo-hetzner-security-lb-in-private-network
+    title: Ensure load balancers are attached to a private network
+    impact: 70
+    filters: asset.platform == "hetzner-loadbalancer"
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-22
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-5
+      compliance/vda-isa-5: vda-isa-5-5-2-7
+    mql: |
+      hetzner.loadBalancer.privateNet != empty
+    docs:
+      desc: |
+        This check verifies that every Hetzner Cloud load balancer is attached to at least one private network.
+
+        When a load balancer reaches its targets only over the public network, traffic between the load balancer and the backend servers crosses public-facing interfaces instead of staying on an isolated RFC-1918 network. You attach a network from the load balancer's **Networking** tab in the Hetzner Cloud Console with **Attach to Network**, enabling **Use private IP for targets** so forwarding actually takes the private path, or run `hcloud load-balancer attach-to-network`.
+
+        **Why this matters**
+
+        A load balancer on a private network forwards to its targets over private IPs, which keeps the hop from the load balancer to the backend entirely inside the project rather than out on public addresses where it can be observed.
+
+        Without that attachment the backend servers have no choice but to expose the forwarded ports on their public interface, because that is the only address the load balancer can reach them on. The internet-facing surface of every backend widens as a direct consequence of the load balancer's own configuration.
+
+        Shared private-network membership also lets firewall rules treat the load balancer and its backends as an internal trust zone, which is not expressible while the forwarding path is public. With the private path in place, backends can restrict the forwarded ports to the private network range instead of accepting them from the internet.
+
+        Setting the attachment alone is not sufficient if targets are still addressed publicly, so enable private-IP targeting at the same time.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to the [Hetzner Cloud Console](https://console.hetzner.com/) and select the project.
+        2. Navigate to **Load Balancers** and open each load balancer.
+        3. Click the **Networking** tab and review the **Private Networks** section.
+
+        A passing load balancer shows at least one private network attached. A failing load balancer shows an empty **Private Networks** section.
+
+        ### Audit via CLI
+
+        1. List all load balancers and inspect their private network attachments:
+
+        ```bash
+        hcloud load-balancer list -o columns=id,name
+        hcloud load-balancer describe <lb> -o json | grep -A5 'private_net'
+        ```
+
+        A passing load balancer returns a non-empty `private_net` array. A failing load balancer returns an empty `private_net` array (`[]`).
+      remediation:
+        - id: console
+          desc: |
+            1. Navigate to **Networks** and create a network if one does not already exist.
+            2. Open the affected load balancer and go to **Networking**.
+            3. Click **Attach to Network** and select the target network. Enable **Use private IP for targets** so forwarding uses the private path.
+        - id: cli
+          desc: |
+            ```bash
+            hcloud load-balancer attach-to-network <lb> --network <network>
+            ```
+        - id: terraform
+          desc: |
+            Attach every `hcloud_load_balancer` to a network with an `hcloud_load_balancer_network` resource. `use_private_ip` lives on `hcloud_load_balancer_target`, so set it there as well and the load balancer forwards to its targets over the private path:
+
+            ```hcl
+            resource "hcloud_network" "main" {
+              name     = "main"
+              ip_range = "10.0.0.0/16"
+            }
+
+            resource "hcloud_network_subnet" "main" {
+              network_id   = hcloud_network.main.id
+              type         = "cloud"
+              network_zone = "eu-central"
+              ip_range     = "10.0.1.0/24"
+            }
+
+            resource "hcloud_load_balancer" "example" {
+              name               = "example"
+              load_balancer_type = "lb11"
+              location           = "nbg1"
+            }
+
+            resource "hcloud_load_balancer_network" "example" {
+              load_balancer_id = hcloud_load_balancer.example.id
+              network_id       = hcloud_network.main.id
+              depends_on       = [hcloud_network_subnet.main]
+            }
+
+            resource "hcloud_load_balancer_target" "example" {
+              type             = "server"
+              load_balancer_id = hcloud_load_balancer.example.id
+              server_id        = hcloud_server.example.id
+              use_private_ip   = true
+              depends_on       = [hcloud_load_balancer_network.example]
+            }
+            ```
+    refs:
+      - url: https://docs.hetzner.com/networking/load-balancers/overview/
+        title: Hetzner Cloud Load Balancers overview
+
+  # No Terraform variants: certificate expiration (`notValidAfter`) is runtime metadata derived from the certificate material, not a configurable field on `hcloud_managed_certificate` / `hcloud_uploaded_certificate`. The Terraform config carries no signal about the current expiry date.
+  - uid: mondoo-hetzner-security-cert-not-expired
+    title: Ensure TLS certificates are not expired
+    impact: 100
+    filters: asset.platform == "hetzner-project"
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-2-ii-transmission-security-encryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-17
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-10
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-1
+    mql: |
+      hetzner.certificates.all(notValidAfter > time.now)
+    docs:
+      desc: |
+        This check verifies that no TLS certificate managed in Hetzner Cloud has passed its expiration date.
+
+        Each certificate carries a `notValidAfter` timestamp, and once that moment has passed standard TLS clients reject the certificate and the trust chain that encrypted connections depend on no longer holds. You replace it under **Certificates** in the Hetzner Cloud Console, repoint every HTTPS load balancer service that references the old certificate, and delete the expired one, or perform the same sequence with `hcloud certificate create`, `hcloud load-balancer update-service`, and `hcloud certificate delete`.
+
+        **Why this matters**
+
+        Once a certificate expires the handshake fails and the encrypted channel is no longer established as intended. Users see certificate warnings in place of the service, and the protection TLS was providing lapses at a moment nobody chose.
+
+        Repeated certificate warnings also train users to click through security errors. That normalized bypass behavior persists long after the certificate is fixed, and it undermines the warning that would otherwise stop a genuine interception attempt.
+
+        API clients and service-to-service integrations behave differently but no better. They typically fail closed on certificate errors rather than falling back, so an expired certificate becomes an availability incident on top of a security failure, with dependent systems breaking in ways that are slow to trace back to the certificate.
+
+        Prefer Hetzner-managed certificates so renewal is delegated to Hetzner through Let's Encrypt and the manual tracking that leads to missed expirations disappears. Monitor expiry and trigger renewal well before the `notValidAfter` date so the interruption window never opens. If a managed certificate did expire, find out why renewal failed before re-creating it; a common cause is the domain's DNS no longer pointing at the load balancer.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to the [Hetzner Cloud Console](https://console.hetzner.com/) and select the project.
+        2. Navigate to **Certificates**.
+        3. Review the **Expires** column for each certificate.
+
+        A passing certificate shows an expiry date in the future. A failing certificate shows an expiry date that has already passed.
+
+        ### Audit via CLI
+
+        1. List all certificates and check the expiry date for each:
+
+        ```bash
+        hcloud certificate list -o columns=id,name,not_valid_after
+        ```
+
+        A passing certificate shows a `not_valid_after` date that is later than today. A failing certificate shows a `not_valid_after` date that is in the past.
+      remediation:
+        - id: console
+          desc: |
+            1. Navigate to **Certificates** and create a replacement. For managed certificates, create a new managed certificate for the affected domains; for uploaded certificates, upload the renewed certificate and key.
+            2. Navigate to **Load Balancers** and update every HTTPS service that references the expired certificate to use the replacement.
+            3. Delete the expired certificate so it no longer exists in the project.
+
+            Managed certificates normally renew automatically through Let's Encrypt. If one expired, investigate why renewal failed before re-creating it; a common cause is the domain's DNS no longer pointing at the load balancer.
+        - id: cli
+          desc: |
+            Create a replacement certificate, repoint every load balancer service that uses the expired certificate, then delete the expired certificate:
+
+            ```bash
+            hcloud certificate create \
+              --type managed \
+              --name <new-name> \
+              --domain <domain>
+            hcloud load-balancer update-service <lb> \
+              --listen-port 443 --http-certificates <new-certificate>
+            hcloud certificate delete <expired-certificate>
+            ```
+        - id: terraform
+          desc: |
+            Prefer `hcloud_managed_certificate` so Hetzner auto-renews via Let's Encrypt and certificates do not silently expire:
+
+            ```hcl
+            resource "hcloud_managed_certificate" "example" {
+              name         = "example"
+              domain_names = ["example.com", "*.example.com"]
+            }
+            ```
+
+            For uploaded certificates, replace the certificate material before expiry:
+
+            ```hcl
+            resource "hcloud_uploaded_certificate" "example" {
+              name        = "example"
+              certificate = file("${path.module}/cert.pem")
+              private_key = file("${path.module}/key.pem")
+            }
+            ```
+    refs:
+      - url: https://docs.hetzner.com/networking/certificates/overview/
+        title: Hetzner Cloud Certificates overview
+
+  # No Terraform variants: the `blocked` flag is set by Hetzner's abuse team based on observed traffic; it is not a configurable field on `hcloud_floating_ip` and Terraform carries no signal about it.
+  - uid: mondoo-hetzner-security-floating-ip-not-blocked
+    title: Ensure floating IPs are not blocked by Hetzner abuse
+    impact: 70
+    filters: asset.platform == "hetzner-project"
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: false
+      compliance/dora: false
+      compliance/hipaa: false
+      compliance/iso-27001-2022: false
+      compliance/nis-2: false
+      compliance/nist-csf-1: false
+      compliance/nist-csf-2: false
+      compliance/nist-sp-800-53-rev5: false
+      compliance/nist-sp-800-171: false
+      compliance/owasp-top-10-2025: false
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: false
+    mql: |
+      hetzner.floatingIps.all(blocked == false)
+    docs:
+      desc: |
+        This check verifies that no floating IP in the Hetzner Cloud project is in a blocked state.
+
+        Hetzner sets the `blocked` flag on a floating IP when its abuse team determines that the address is originating malicious traffic such as outbound attacks, spam, scanning, or malware distribution. The flag is visible on the floating IP in the Hetzner Cloud Console, and it is lifted by Hetzner support once the underlying issue is remediated, not by any setting you control.
+
+        **Why this matters**
+
+        A blocked floating IP is a strong indicator of compromise. It means the workload attached to the address is compromised, misconfigured in a way that emits abusive traffic, or being actively misused by a threat actor, and the block is Hetzner reporting that from outside your environment.
+
+        While the block stands, the underlying workload may keep generating abusive traffic. That causes ongoing harm to external recipients and accrues further abuse history against the project, which affects how the next incident is handled.
+
+        The block is also operationally disruptive. A blocked IP cannot deliver outbound traffic normally, so any service depending on it for egress or inbound reachability is degraded until the root cause is resolved.
+
+        Treat a blocked IP as a confirmed incident rather than an inconvenience to be unblocked. Identify the attached server, review recent logs, outbound traffic, and authentication events, and if the workload is compromised rebuild it from a known-good image and rotate every credential it held so the attacker cannot regain access afterward. Contact Hetzner support to discuss the abuse case only once the underlying issue is remediated.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to the [Hetzner Cloud Console](https://console.hetzner.com/) and select the project.
+        2. Navigate to **Floating IPs**.
+        3. Review each floating IP for a blocked or suspended status indicator.
+
+        A passing floating IP shows a normal active status with no blocked indicator. A failing floating IP shows a blocked status, typically surfaced by a warning or abuse notice from Hetzner.
+
+        ### Audit via CLI
+
+        1. List all floating IPs and inspect the `blocked` field for each:
+
+        ```bash
+        hcloud floating-ip list -o columns=id,name,ip,server
+        hcloud floating-ip describe <floating-ip> -o json | grep '"blocked"'
+        ```
+
+        A passing floating IP returns `"blocked": false`. A failing floating IP returns `"blocked": true`.
+      remediation:
+        - id: console
+          desc: |
+            Investigate before unblocking.
+
+            1. Identify the server the floating IP is attached to and review recent logs, outbound traffic, and authentication events for signs of compromise.
+            2. If the workload is compromised, rebuild the server from a known-good image and rotate any credentials it held.
+            3. Contact Hetzner support to discuss the abuse case and request unblocking once the underlying issue is remediated.
+        # No CLI remediation: the `blocked` flag is set and cleared only by Hetzner's abuse team; neither the hcloud CLI nor the API can modify it.
+        # No Terraform remediation: the `blocked` flag is set by Hetzner's abuse team based on observed traffic; it is not a configurable field on `hcloud_floating_ip`. The fix is investigation and remediation of the underlying workload, then a support request.
+    refs:
+      - url: https://docs.hetzner.com/cloud/floating-ips/overview/
+        title: Hetzner Cloud Floating IPs overview
+
+  # No Terraform variants: the `blocked` flag is set by Hetzner's abuse team based on observed traffic; it is not a configurable field on `hcloud_primary_ip` and Terraform carries no signal about it.
+  - uid: mondoo-hetzner-security-primary-ip-not-blocked
+    title: Ensure primary IPs are not blocked by Hetzner abuse
+    impact: 70
+    filters: asset.platform == "hetzner-project"
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: false
+      compliance/dora: false
+      compliance/hipaa: false
+      compliance/iso-27001-2022: false
+      compliance/nis-2: false
+      compliance/nist-csf-1: false
+      compliance/nist-csf-2: false
+      compliance/nist-sp-800-53-rev5: false
+      compliance/nist-sp-800-171: false
+      compliance/owasp-top-10-2025: false
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: false
+    mql: |
+      hetzner.primaryIps.all(blocked == false)
+    docs:
+      desc: |
+        This check verifies that no primary IP in the Hetzner Cloud project is in a blocked state.
+
+        Hetzner sets the `blocked` flag on a primary IP when its abuse team determines that the server it is assigned to is originating malicious traffic. The flag is visible on the primary IP in the Hetzner Cloud Console, and only Hetzner support can lift it once the underlying issue is remediated.
+
+        **Why this matters**
+
+        A blocked primary IP is a strong indicator that the server it is assigned to is compromised or misconfigured in a way that emits abusive outbound traffic, including spam, scanning, or attack traffic aimed at third parties.
+
+        While the underlying issue is unresolved the server may keep generating that traffic, worsening the abuse history for the project and continuing to harm external recipients who have no way to stop it themselves.
+
+        Because the primary IP carries the server's public connectivity, the block disrupts all inbound and outbound traffic for that server. It is therefore an availability incident and a security incident at the same time, and it requires immediate investigation rather than a ticket to have the block removed.
+
+        Treat it as a security incident first so the root cause, compromise or misconfiguration, is identified and remediated before you request that Hetzner lift the block. If the investigation shows the server was compromised, rebuild it from a clean image and rotate all credentials it held so the attacker cannot reuse them against the rebuilt host.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to the [Hetzner Cloud Console](https://console.hetzner.com/) and select the project.
+        2. Navigate to **Primary IPs**.
+        3. Review each primary IP for a blocked or suspended status indicator.
+
+        A passing primary IP shows a normal active status with no blocked indicator. A failing primary IP shows a blocked status, typically surfaced by a warning or abuse notice from Hetzner.
+
+        ### Audit via CLI
+
+        1. List all primary IPs and inspect the `blocked` field for each:
+
+        ```bash
+        hcloud primary-ip list -o columns=id,name,ip,server
+        hcloud primary-ip describe <primary-ip> -o json | grep '"blocked"'
+        ```
+
+        A passing primary IP returns `"blocked": false`. A failing primary IP returns `"blocked": true`.
+      remediation:
+        - id: console
+          desc: |
+            Investigate before unblocking.
+
+            1. Identify the server the primary IP is assigned to and review recent logs, outbound traffic, and authentication events for signs of compromise.
+            2. If the workload is compromised, rebuild the server from a known-good image and rotate any credentials it held.
+            3. Contact Hetzner support to discuss the abuse case and request unblocking once the underlying issue is remediated.
+        # No CLI remediation: the `blocked` flag is set and cleared only by Hetzner's abuse team; neither the hcloud CLI nor the API can modify it.
+        # No Terraform remediation: the `blocked` flag is set by Hetzner's abuse team based on observed traffic; it is not a configurable field on `hcloud_primary_ip`. The fix is investigation and remediation of the underlying workload, then a support request.
+    refs:
+      - url: https://docs.hetzner.com/cloud/servers/primary-ips/overview/
+        title: Hetzner Cloud Primary IPs overview
+
+  # No Terraform variants: the key algorithm and size are parsed from the SSH
+  # public-key material. In Terraform, hcloud_ssh_key.public_key is almost always
+  # a file() or variable reference rather than a literal, so the algorithm and bit
+  # length cannot be read from the source, and a weak key is remediated by
+  # generating a new key pair — not by changing a Terraform argument.
+  - uid: mondoo-hetzner-security-ssh-key-strong-algorithm
+    title: Ensure SSH keys use strong algorithms and key sizes
+    impact: 70
+    filters: asset.platform == "hetzner-project"
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-10
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ac-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-10
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-1-11
+      compliance/vda-isa-5: vda-isa-5-5-1-1
+    mql: |
+      hetzner.sshKeys.none(algorithm == "ssh-dss")
+      hetzner.sshKeys.where(algorithm == "ssh-rsa").all(bits >= 2048)
+    docs:
+      desc: |
+        This check verifies that SSH keys uploaded to Hetzner Cloud use strong cryptography.
+
+        It rejects DSA keys, identified by the `ssh-dss` algorithm, outright, and requires RSA keys to be at least 2048 bits. DSA keys are capped at 1024 bits and use a fragile signing scheme, and RSA keys below 2048 bits no longer meet accepted strength for authentication credentials. You manage the key set under **Security** and then **SSH Keys** in the Hetzner Cloud Console, or with `hcloud ssh-key create` and `hcloud ssh-key delete`.
+
+        **Why this matters**
+
+        `ssh-dss` keys are limited to 1024 bits and leak the private key outright if the per-signature nonce is ever reused or predictable. Modern OpenSSH disables the algorithm by default for exactly that reason, so a DSA key in the project is both weak and on borrowed time.
+
+        RSA keys shorter than 2048 bits are within reach of factoring attacks and fall below current baselines for authentication key strength. They offer materially less protection than their presence in the key list suggests.
+
+        The stakes are higher than for most secrets because an SSH key is a standing credential. It authorizes interactive and automated access to servers and typically stays valid far longer than any password, which makes a weak key a durable, high-value target rather than a transient one.
+
+        Prefer Ed25519 keys for new access, with ECDSA as an acceptable alternative. Where RSA is required, generate keys of at least 2048 bits, with 3072 or 4096 preferred. Migrating off deprecated algorithms also avoids sudden lockout when a client or server drops `ssh-dss` support. Create the replacement key and update the servers and automation that reference the old one before deleting it, so nothing loses its authorized key mid-migration.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to the [Hetzner Cloud Console](https://console.hetzner.com/) and select the project.
+        2. Navigate to **Security** > **SSH Keys**.
+        3. Review the algorithm of each stored key.
+
+        A passing key is Ed25519, ECDSA, or RSA with at least 2048 bits. A failing key is DSA (`ssh-dss`) or an RSA key smaller than 2048 bits.
+
+        ### Audit via CLI
+
+        1. List the SSH keys in the project and inspect each key's fingerprint and public key:
+
+        ```bash
+        hcloud ssh-key list
+        ```
+
+        A passing key's public key begins with `ssh-ed25519`, `ecdsa-sha2-*`, or `ssh-rsa` with a 2048-bit-or-larger modulus. A failing key begins with `ssh-dss` or is a shorter RSA key.
+      remediation:
+        - id: console
+          desc: |
+            To replace a weak SSH key in the Hetzner Cloud Console:
+
+            1. Generate a new key locally, for example `ssh-keygen -t ed25519 -C "you@example.com"`.
+            2. Navigate to **Security** > **SSH Keys** and add the new public key.
+            3. Update the servers and automation that reference the old key, then delete the weak key.
+        - id: cli
+          desc: |
+            To replace a weak SSH key using the `hcloud` CLI:
+
+            ```bash
+            ssh-keygen -t ed25519 -f ~/.ssh/hetzner_ed25519 -C "you@example.com"
+            hcloud ssh-key create --name my-ed25519-key --public-key-from-file ~/.ssh/hetzner_ed25519.pub
+            hcloud ssh-key delete <weak-key-name>
+            ```
+
+            Create the new key before deleting the old one so servers that reference it do not lose their authorized key.
+        # No Terraform remediation: the key algorithm and size are properties of the
+        # key material generated with ssh-keygen, not an hcloud_ssh_key argument; the
+        # fix is to generate and register a new key pair.
+    refs:
+      - url: https://docs.hetzner.com/cloud/servers/getting-started/connecting-to-the-server/
+        title: Connecting to your Server
+
+  # No Terraform variants: selfSigned and signatureAlgorithm are derived by parsing
+  # the certificate PEM at runtime. Terraform sources carry the certificate as an
+  # opaque string (commonly a file() reference), and MQL cannot parse the signature
+  # algorithm or self-signed status from it on terraform-hcl/plan/state assets.
+  - uid: mondoo-hetzner-security-cert-not-self-signed
+    title: Ensure TLS certificates are not self-signed or weakly signed
+    impact: 70
+    filters: asset.platform == "hetzner-project"
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-2-ii-transmission-security-encryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-17
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-11
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc6-1-11
+      compliance/vda-isa-5: vda-isa-5-5-1-1
+    mql: |
+      hetzner.certificates.all(selfSigned == false)
+      hetzner.certificates.none(signatureAlgorithm.downcase.contains("sha1"))
+      hetzner.certificates.none(signatureAlgorithm.downcase.contains("md5"))
+    docs:
+      desc: |
+        This check verifies that no TLS certificate managed in Hetzner Cloud is self-signed or signed with a weak algorithm.
+
+        A certificate fails if it is self-signed, or if its signature algorithm is SHA-1 or MD5. A self-signed certificate is not anchored to a trusted certificate authority, and SHA-1 and MD5 signatures can be forged through collision attacks, so either one undermines the trust TLS is meant to provide. You replace the certificate under **Certificates** in the Hetzner Cloud Console, or with `hcloud certificate create`, then repoint any load balancer that referenced the old one and delete it.
+
+        **Why this matters**
+
+        A self-signed certificate has no trust anchor. No default root store trusts it, so clients cannot distinguish it from a certificate an attacker supplied, and they either fail the connection or are trained to click through the warning until warnings stop meaning anything.
+
+        SHA-1 and MD5 are broken against collision attacks. An adversary can craft a certificate that appears validly signed, which turns the signature from a proof of identity into a formality that no longer establishes who is on the other end.
+
+        The practical result in both cases is downgraded protection: connections remain open to interception and man-in-the-middle attacks even though TLS appears to be in use, and the appearance is what keeps the problem from being noticed.
+
+        Use Hetzner-managed certificates, which are issued and auto-renewed by Let's Encrypt, or upload certificates issued by a trusted CA with a SHA-256-or-stronger signature. CA-issued certificates let clients verify server identity and reject impostors, and they remove the persistent browser warnings that condition users to ignore certificate errors.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to the [Hetzner Cloud Console](https://console.hetzner.com/) and select the project.
+        2. Navigate to **Certificates**.
+        3. Review the type and issuer of each certificate.
+
+        A passing certificate is CA-issued (for example a managed Let's Encrypt certificate) and uses a SHA-256-or-stronger signature. A failing certificate is self-signed or uses a SHA-1 or MD5 signature.
+
+        ### Audit via CLI
+
+        1. List all certificates and inspect each certificate's details:
+
+        ```bash
+        hcloud certificate list
+        hcloud certificate describe <certificate>
+        ```
+
+        A passing certificate shows a recognized issuer distinct from its subject and a strong signature algorithm. A failing certificate shows the subject and issuer as identical (self-signed) or a SHA-1/MD5 signature algorithm.
+      remediation:
+        - id: console
+          desc: |
+            To replace a self-signed or weakly signed certificate in the Hetzner Cloud Console:
+
+            1. Navigate to **Certificates**.
+            2. Create a managed certificate (issued and auto-renewed by Let's Encrypt) for the domain, or upload a certificate issued by a trusted CA with a SHA-256-or-stronger signature.
+            3. Update any load balancers referencing the old certificate to use the new one, then delete the self-signed or weak certificate.
+        - id: cli
+          desc: |
+            Create a managed certificate so Hetzner issues a CA-signed, strongly signed certificate via Let's Encrypt:
+
+            ```bash
+            hcloud certificate create --type managed --name <new-name> --domain <domain>
+            ```
+
+            To upload a CA-issued certificate instead:
+
+            ```bash
+            hcloud certificate create --type uploaded --name <new-name> --cert-file cert.pem --key-file key.pem
+            ```
+        - id: terraform
+          desc: |
+            Prefer `hcloud_managed_certificate` so Hetzner issues and renews a CA-signed certificate with a strong signature, rather than uploading a self-signed one:
+
+            ```hcl
+            resource "hcloud_managed_certificate" "example" {
+              name         = "example"
+              domain_names = ["example.com", "*.example.com"]
+            }
+            ```
+
+            If you must upload a certificate, ensure it is issued by a trusted CA with a SHA-256-or-stronger signature:
+
+            ```hcl
+            resource "hcloud_uploaded_certificate" "example" {
+              name        = "example"
+              certificate = file("${path.module}/cert.pem")
+              private_key = file("${path.module}/key.pem")
+            }
+            ```
+    refs:
+      - url: https://docs.hetzner.com/networking/certificates/overview/
+        title: Hetzner Cloud Certificates overview
+
+  # No Terraform variants: Hetzner Storage Boxes are not managed by the hcloud
+  # Terraform provider; reachableExternally is an access setting of the Storage Box
+  # surfaced only through the live Hetzner API, with no Terraform resource to
+  # evaluate on terraform-hcl/plan/state assets.
+  - uid: mondoo-hetzner-security-storage-box-not-externally-reachable
+    title: Ensure Storage Boxes are not reachable from the public internet
+    impact: 85
+    filters: asset.platform == "hetzner-project"
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-22
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-5
+      compliance/vda-isa-5: vda-isa-5-5-2-7
+    mql: |
+      hetzner.storageBoxes.all(reachableExternally == false)
+    docs:
+      desc: |
+        This check verifies that no Hetzner Storage Box is reachable from outside the Hetzner network.
+
+        A Storage Box holds backups and file data and serves it over protocols including Samba/CIFS, WebDAV, and SSH/SFTP. When external reachability is on, those enabled protocols are published to the public internet rather than restricted to hosts inside the Hetzner network. You turn it off in the access settings of the box under **Storage Boxes** in the Hetzner Cloud Console by disabling **Reachable externally**, or with `hcloud storage-box update-access-settings --reachable-externally=false`.
+
+        **Why this matters**
+
+        Storage Boxes typically hold backups and archives, which is exactly the data an attacker wants. Exposing them to the internet puts the most sensitive copies of your data within reach of remote attackers, often with weaker monitoring than the production systems the data came from.
+
+        External reachability also opens a broad protocol attack surface. The box's file-sharing protocols become subject to internet-wide scanning and credential attacks against SMB, WebDAV, and SSH, each with its own history of vulnerabilities and its own authentication to guess.
+
+        Internet-reachable backup stores are a primary target for ransomware operators specifically. Destroying or encrypting recovery data before triggering the payload is what removes the victim's ability to recover without paying, so an exposed backup store converts a recoverable incident into an unrecoverable one.
+
+        Access the Storage Box from servers inside the Hetzner network, and confirm your backup jobs and clients still reach it after you disable external access. If external access is genuinely required, restrict it tightly and disable the protocols that are not in use so only the one you depend on is reachable.
+      audit: |
+        ### Audit via Console
+
+        1. Log in to the [Hetzner Cloud Console](https://console.hetzner.com/) and select the project.
+        2. Navigate to **Storage Boxes** and open each Storage Box.
+        3. Review the access settings for external reachability.
+
+        A passing Storage Box has external reachability disabled. A failing Storage Box is reachable from outside the Hetzner network.
+
+        ### Audit via CLI
+
+        1. List the Storage Boxes and inspect each box's access settings:
+
+        ```bash
+        hcloud storage-box list
+        hcloud storage-box describe <storage-box>
+        ```
+
+        A passing Storage Box reports external reachability as disabled. A failing Storage Box reports it as enabled.
+      remediation:
+        - id: console
+          desc: |
+            To disable external reachability in the Hetzner Cloud Console:
+
+            1. Navigate to **Storage Boxes** and open the affected box.
+            2. In the access settings, disable **Reachable externally** (and disable any file-sharing protocols the box does not need).
+            3. Confirm that your backup jobs and clients reach the box over the internal Hetzner network.
+        - id: cli
+          desc: |
+            To disable external reachability using the `hcloud` CLI:
+
+            ```bash
+            hcloud storage-box update-access-settings <storage-box> --reachable-externally=false
+            ```
+
+            Verify that internal clients can still reach the box afterward.
+        # No Terraform remediation: Hetzner Storage Boxes are not managed by the
+        # hcloud Terraform provider; external reachability can only be changed through
+        # the Hetzner Cloud Console or the hcloud CLI.
+    refs:
+      - url: https://docs.hetzner.com/storage/storage-box/general/
+        title: Hetzner Storage Box overview

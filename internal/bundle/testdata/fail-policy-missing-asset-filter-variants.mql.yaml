@@ -1,0 +1,45 @@
+policies:
+  - uid: mondoo-aws-security
+    name: Mondoo AWS Security
+    version: 4.0.0
+    license: BUSL-1.1
+    tags:
+      mondoo.com/category: security
+      mondoo.com/platform: aws,cloud
+    require:
+      - provider: os
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    docs:
+      desc: |
+        Testing Policy from here: scottford/aws-variant-v4
+    groups:
+      - title: AWS IAM
+        checks:
+          - uid: mondoo-aws-security-access-keys-rotated
+          - uid: mondoo-aws-security-iam-user-no-inline-policies-check
+queries:
+  - uid: mondoo-aws-security-access-keys-rotated
+    title: Ensure IAM user access keys are rotated
+    impact: 70
+    props:
+      - uid: mondooAWSSecurityMaxAccessKeyAge
+        title: Define the maximum number of days an IAM skey is allowed to exist before rotation
+        mql: "90"
+    mql: |
+      file("/etc/passwd").exists
+  - uid: mondoo-aws-security-iam-user-no-inline-policies-check
+    title: Ensure IAM users receive permissions only through groups
+    impact: 70
+    variants:
+      - uid: mondoo-aws-security-iam-user-no-inline-policies-check-account
+      - uid: mondoo-aws-security-iam-user-no-inline-policies-check-single-user
+  - uid: mondoo-aws-security-iam-user-no-inline-policies-check-account
+    filters: asset.platform == "aws"
+    mql: |
+      file("/etc/passwd").exists
+  - uid: mondoo-aws-security-iam-user-no-inline-policies-check-single-user
+    filters: asset.platform == "aws-iam-user"
+    mql: |
+      file("/etc/passwd").exists

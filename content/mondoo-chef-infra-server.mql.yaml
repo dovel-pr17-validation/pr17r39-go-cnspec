@@ -1,0 +1,1418 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+policies:
+  - uid: chef-infra-server
+    name: Mondoo Chef Infra Server Security
+    version: 1.3.5
+    license: BUSL-1.1
+    tags:
+      mondoo.com/category: security
+      mondoo.com/platform: linux
+      mondoo.com/icon: chef
+    require:
+      - provider: os
+    authors:
+      - name: Mondoo, Inc.
+        email: hello@mondoo.com
+    summary: Secure Chef Infra Server components and configurations
+    docs:
+      desc: |
+        The Mondoo Chef Infra Server Security policy identifies misconfigurations and end-of-life components on Chef Infra Server that could expose node credentials, configuration data, and the keys to your fleet. This policy helps organizations detect and remediate weaknesses before attackers can exploit them to read or alter cookbook content, harvest client keys, or compromise every system the server manages.
+
+        This policy provides security checks across key Chef Infra Server areas:
+
+        - File and directory permissions on critical configuration and key material
+        - End-of-life add-on components such as Push Jobs, Analytics, and Reporting
+        - Insecure server settings, including weak TLS support and legacy add-on compatibility
+
+        Have suggestions for new checks in this policy? Visit our [cnspec repository](https://github.com/mondoohq/cnspec).
+    groups:
+      - title: EOL components
+        filters: |
+          asset.family.contains('linux')
+          file("/opt/opscode").exists
+        checks:
+          - uid: eol-analytics-addon
+          - uid: eol-ha-addon
+          - uid: eol-push-jobs-addon
+          - uid: eol-reporting-addon
+          - uid: non-eol-infra-server
+      - title: Insecure configurations
+        filters: |
+          asset.family.contains('linux')
+          file("/opt/opscode").exists
+        checks:
+          - uid: disable-insecure-addon-compat
+          - uid: postgresql-not-externally-accessible
+          - uid: search-not-externally-accessible
+          - uid: secure-tls-only
+      - title: Insecure permissions
+        filters: |
+          asset.family.contains('linux')
+          file("/opt/opscode").exists
+        checks:
+          - uid: chef-server-rb-permissions
+          - uid: webui-pem-permissions
+          - uid: etc-opscode-directory-permissions
+          - uid: pivotal-pem-permissions
+          - uid: secrets-file-permissions
+          - uid: remediate-cve-2023-28864
+queries:
+  - uid: etc-opscode-directory-permissions
+    title: Ensure /etc/opscode/ is owned by root:root with 755 permissions
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-3
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-5
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: |
+      file("/etc/opscode") {
+        user.name == 'root'
+        group.name == 'root'
+        permissions.user_readable == true
+        permissions.user_writeable == true
+        permissions.user_executable == true
+        permissions.group_writeable == false
+        permissions.other_writeable == false
+      }
+    docs:
+      desc: |
+        This check verifies that only `root` can write to Chef Infra Server's configuration directory.
+
+        `/etc/opscode` holds the files that define the server and authorize it: `chef-server.rb`, the superuser key `pivotal.pem`, the management console key `webui_priv.pem`, and the `private-chef-secrets.json` credential store. The check requires owner `root`, group `root`, and that neither the group nor other users can write, so only `root` can add, replace, or remove entries. It asserts nothing about read or traverse permission, so `0755`, `0750`, and `0700` all pass and a server that has been tightened beyond the default is not penalized for it.
+
+        **Why this matters**
+
+        Write access to a directory defeats the modes on the files inside it. An attacker who can write to `/etc/opscode` does not need to modify `chef-server.rb`; they unlink it and create their own, and the mode `640` on the original is irrelevant. The replacement is Ruby, and `chef-server-ctl reconfigure` evaluates it as `root`. Reconfigure runs during ordinary maintenance, so the attacker only has to wait.
+
+        The same move works against the keys. Substituting `pivotal.pem` or `webui_priv.pem` with an attacker-generated key, or dropping in a modified `private-chef-secrets.json`, redirects the server's own identity and credentials without ever reading the originals.
+
+        Mode `755` is deliberate here rather than an oversight. The server's service accounts need to traverse the directory to reach the files they are entitled to read, and those files carry their own restrictive modes, which companion checks in this policy verify. The directory's job is to make sure nobody but `root` can change what is in it.
+      audit: |
+        Run the following command to inspect the directory ownership and permissions:
+
+        ```bash
+        stat -c '%a %U:%G %n' /etc/opscode
+        ```
+
+        If the output is `755 root:root /etc/opscode`, the directory is correctly owned and restricted and the check passes. Any other owner, group, or mode (in particular a group- or world-writable directory) means the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            **Using CLI**
+
+            Run these commands to set proper permissions on your /etc/opscode directory:
+
+            ```bash
+            chown root:root /etc/opscode
+            chmod 755 /etc/opscode
+            ```
+
+            To verify the permissions were applied correctly:
+
+            ```bash
+            stat -c '%a %U:%G %n' /etc/opscode
+            ```
+
+            Expected output: `755 root:root /etc/opscode`
+        - id: chef
+          desc: |
+            **Using Chef Infra**
+
+            Use this recipe code to set the permissions on the /etc/opscode directory:
+
+            ```ruby
+            directory '/etc/opscode' do
+              owner 'root'
+              group 'root'
+              mode '0755'
+            end
+            ```
+    refs:
+      - url: https://docs.chef.io/server/server_security/
+        title: Chef Infra Server Security
+  - uid: pivotal-pem-permissions
+    title: Ensure pivotal.pem has correct ownership and 600 permissions
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-3
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-5
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: |
+      file("/etc/opscode/pivotal.pem") {
+        user.name == 'opscode'
+        group.name == 'root'
+        permissions.atLeast(0600)
+        permissions.atMost(0600)
+      }
+    docs:
+      desc: |
+        This check verifies that Chef Infra Server's superuser key is readable only by the account that runs the server.
+
+        `/etc/opscode/pivotal.pem` is the private key of `pivotal`, the built-in superuser that bypasses every authorization check the server performs. It is not scoped to an organization and it is not attached to a person. The check requires owner `opscode`, group `root`, and mode `600`.
+
+        **Why this matters**
+
+        Reading this key is total control of the Chef estate, not of one organization within it. The holder can enumerate and create organizations, read every data bag item on the server, and in most deployments that is where the database passwords, TLS private keys, and service tokens for the whole environment live. They can also replace any user's public key and lock the real administrators out.
+
+        The reach extends past the server itself. Node objects carry run lists, and the superuser can rewrite any of them. Chef Infra Client on the target node fetches that run list and executes the resulting recipes as `root` at its next converge, so the key is effectively root on every machine the server manages, delivered by the estate's own automation.
+
+        Use of the key is also close to unattributable. It authenticates no individual, it is not covered by whatever single sign-on or multi-factor requirement protects the console, and server request logs record the `pivotal` identity rather than the human behind it. Restricting who can obtain a local shell on the server host matters as much as the file mode, because a local read is all this attack requires.
+      audit: |
+        Run the following command to inspect the key ownership and permissions:
+
+        ```bash
+        stat -c '%a %U:%G %n' /etc/opscode/pivotal.pem
+        ```
+
+        If the output is `600 opscode:root /etc/opscode/pivotal.pem`, the key is correctly restricted and the check passes. Any other owner, group, or mode (in particular a group- or world-readable key) means the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            **Using CLI**
+
+            Run these commands to set proper permissions on your /etc/opscode/pivotal.pem file:
+
+            ```bash
+            chown opscode:root /etc/opscode/pivotal.pem
+            chmod 600 /etc/opscode/pivotal.pem
+            ```
+
+            To verify the permissions were applied correctly:
+
+            ```bash
+            stat -c '%a %U:%G %n' /etc/opscode/pivotal.pem
+            ```
+
+            Expected output: `600 opscode:root /etc/opscode/pivotal.pem`
+        - id: chef
+          desc: |
+            **Using Chef Infra**
+
+            Use this recipe code to set the permissions on the /etc/opscode/pivotal.pem file. The guard matters here: a `file` resource with no content creates an empty file when the path is missing, and a zero-byte superuser key would break server authentication:
+
+            ```ruby
+            file '/etc/opscode/pivotal.pem' do
+              owner 'opscode'
+              group 'root'
+              mode '0600'
+              only_if { ::File.exist?('/etc/opscode/pivotal.pem') }
+            end
+            ```
+    refs:
+      - url: https://docs.chef.io/server/server_security/
+        title: Chef Infra Server Security
+  - uid: secrets-file-permissions
+    title: Ensure private-chef-secrets.json has correct ownership and 600 perms
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-3
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-5
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: |
+      file("/etc/opscode/private-chef-secrets.json") {
+        user.name == 'root'
+        group.name == 'root'
+        permissions.atLeast(0600)
+        permissions.atMost(0600)
+      }
+    docs:
+      desc: |
+        This check verifies that Chef Infra Server's credential store is readable only by `root`.
+
+        `/etc/opscode/private-chef-secrets.json` holds the credentials the server generates for itself: the PostgreSQL passwords for the `opscode_chef`, `bifrost`, `bookshelf`, and `oc_id` databases, the access keys for bookshelf cookbook storage, the `oc_id` secret key base, and the tokens for search and for Chef Automate integration. The check requires owner `root`, group `root`, and mode `600`.
+
+        **Why this matters**
+
+        Every credential in this file is a way around the server's own access control. The `opscode_chef` password is direct SQL access to users, organizations, clients, and their public keys. The `bifrost` credentials reach the authorization service's own data, where an attacker can grant themselves rights rather than steal them. The bookshelf keys serve raw cookbook objects, which is both the source code of the estate's configuration and the content nodes execute as `root`.
+
+        None of these paths go through the Chef API, so none of them appear in the server's request logs or in whatever monitoring watches the API. An attacker reading data bag contents out of PostgreSQL leaves the same trace as a backup job.
+
+        The `oc_id` secret key base is worth separate attention because it signs session material for the identity service. Someone who has it can mint sessions rather than authenticate, which survives a password reset.
+
+        `chef-server-ctl reconfigure` rewrites this file, so a permission fix applied by hand should be verified again after the next reconfigure.
+      audit: |
+        Run the following command to inspect the file ownership and permissions:
+
+        ```bash
+        stat -c '%a %U:%G %n' /etc/opscode/private-chef-secrets.json
+        ```
+
+        If the output is `600 root:root /etc/opscode/private-chef-secrets.json`, the file is correctly restricted and the check passes. Any other owner, group, or mode (in particular a group- or world-readable file) means the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            **Using CLI**
+
+            Run these commands to set proper permissions on your /etc/opscode/private-chef-secrets.json file:
+
+            ```bash
+            chown root:root /etc/opscode/private-chef-secrets.json
+            chmod 600 /etc/opscode/private-chef-secrets.json
+            ```
+
+            To verify the permissions were applied correctly:
+
+            ```bash
+            stat -c '%a %U:%G %n' /etc/opscode/private-chef-secrets.json
+            ```
+
+            Expected output: `600 root:root /etc/opscode/private-chef-secrets.json`
+        - id: chef
+          desc: |
+            **Using Chef Infra**
+
+            Use this recipe code to set the permissions on the /etc/opscode/private-chef-secrets.json file. The guard keeps the recipe from replacing a missing secrets vault with an empty file that the next reconfigure would fail on:
+
+            ```ruby
+            file '/etc/opscode/private-chef-secrets.json' do
+              owner 'root'
+              group 'root'
+              mode '0600'
+              only_if { ::File.exist?('/etc/opscode/private-chef-secrets.json') }
+            end
+            ```
+    refs:
+      - url: https://docs.chef.io/server/server_security/
+        title: Chef Infra Server Security
+  - uid: webui-pem-permissions
+    title: Ensure webui_priv.pem has correct ownership and 600 permissions
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-3
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-5
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: |
+      if (file("/etc/opscode/webui_priv.pem").exists) {
+        file("/etc/opscode/webui_priv.pem") {
+          user.name == 'opscode'
+          group.name == 'root'
+          permissions.atLeast(0600)
+          permissions.atMost(0600)
+        }
+      }
+    docs:
+      desc: |
+        This check verifies that the private key used by the Chef management console is readable only by the account that runs the server.
+
+        `/etc/opscode/webui_priv.pem` is what Chef Manage presents to the Chef Infra Server API when acting for a signed-in user. It is the reason a browser session works without the user's own private key: the server accepts requests signed with this key as being made on behalf of the named user. The check requires owner `opscode`, group `root`, and mode `600` when the file exists.
+
+        **Why this matters**
+
+        Because the key stands in for users rather than for a service, whoever reads it can act as any user on the server without that user's credentials. Password policy, single sign-on, and multi-factor authentication all sit in front of the console login and none of them sit in front of the key. Picking an organization administrator as the identity to impersonate gives full control of that organization straight away.
+
+        From there the path to the managed nodes is short. An organization administrator can upload a cookbook and edit run lists, and Chef Infra Client executes both as `root` at the next converge on every node in the organization. The compromise moves from one file on one host to the entire fleet without another exploit.
+
+        The file only exists where Chef Manage is installed. On a server without the console the check passes because there is nothing to protect, and that is the safer configuration: if the management console is not in use, removing the add-on removes the key along with it.
+      audit: |
+        Run the following command to inspect the key ownership and permissions:
+
+        ```bash
+        stat -c '%a %U:%G %n' /etc/opscode/webui_priv.pem
+        ```
+
+        If the file does not exist, Chef Manage is not installed and the check passes. If the file exists and the output is `600 opscode:root /etc/opscode/webui_priv.pem`, the key is correctly restricted and the check passes. Any other owner, group, or mode means the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            **Using CLI**
+
+            Run these commands to set proper permissions on your /etc/opscode/webui_priv.pem file:
+
+            ```bash
+            chown opscode:root /etc/opscode/webui_priv.pem
+            chmod 600 /etc/opscode/webui_priv.pem
+            ```
+
+            To verify the permissions were applied correctly:
+
+            ```bash
+            stat -c '%a %U:%G %n' /etc/opscode/webui_priv.pem
+            ```
+
+            Expected output: `600 opscode:root /etc/opscode/webui_priv.pem`
+        - id: chef
+          desc: |
+            **Using Chef Infra**
+
+            Use this recipe code to set the permissions on the /etc/opscode/webui_priv.pem file:
+
+            ```ruby
+            file '/etc/opscode/webui_priv.pem' do
+              owner 'opscode'
+              group 'root'
+              mode '0600'
+            end
+            ```
+    refs:
+      - url: https://docs.chef.io/server/server_security/
+        title: Chef Infra Server Security
+  - uid: chef-server-rb-permissions
+    title: Ensure chef-server.rb has correct ownership and 640 permissions
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-3
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-5
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: |
+      file("/etc/opscode/chef-server.rb") {
+        user.name == 'root'
+        group.name == 'root'
+        permissions.atLeast(0640)
+        permissions.atMost(0640)
+      }
+    docs:
+      desc: |
+        This check verifies that Chef Infra Server's main configuration cannot be read or modified by unprivileged local users.
+
+        `/etc/opscode/chef-server.rb` is Ruby, read and evaluated by `chef-server-ctl reconfigure`. Beyond tuning, it is where a deployment records its integrations: LDAP or Active Directory bind credentials, connection settings for an external PostgreSQL, S3 access keys for bookshelf storage, and the Chef Automate data collector token. The check requires owner `root`, group `root`, and mode `640`.
+
+        **Why this matters**
+
+        Write access is arbitrary code execution as `root`, deferred until the next reconfigure. That is not a distant trigger: reconfigure runs on upgrades, on certificate replacement, and on any routine configuration change, so the attacker's code is executed by an administrator doing their job, in a context where unusual output is easy to miss.
+
+        Read access yields whatever credentials the deployment put in the file, and the directory bind account is usually the worst of them. It is a real account in Active Directory or LDAP, it is rarely scoped tightly, and it frequently has read across the whole directory, so a credential intended to let Chef authenticate users becomes a credential for enumerating every user, group, and attribute in the organization.
+
+        The Automate token and the bookshelf keys in the same file extend the reach to the reporting pipeline and to raw cookbook storage. Mode `640` keeps all of it available to the server and to `root`, and to nobody else with a shell on the host.
+      audit: |
+        Run the following command to inspect the file ownership and permissions:
+
+        ```bash
+        stat -c '%a %U:%G %n' /etc/opscode/chef-server.rb
+        ```
+
+        If the output is `640 root:root /etc/opscode/chef-server.rb`, the file is correctly restricted and the check passes. Any other owner, group, or mode (in particular a group-writable or world-readable file) means the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            **Using CLI**
+
+            Run these commands to set proper permissions on your /etc/opscode/chef-server.rb file:
+
+            ```bash
+            chown root:root /etc/opscode/chef-server.rb
+            chmod 640 /etc/opscode/chef-server.rb
+            ```
+
+            To verify the permissions were applied correctly:
+
+            ```bash
+            stat -c '%a %U:%G %n' /etc/opscode/chef-server.rb
+            ```
+
+            Expected output: `640 root:root /etc/opscode/chef-server.rb`
+        - id: chef
+          desc: |
+            **Using Chef Infra**
+
+            Use this recipe code to set the permissions on the /etc/opscode/chef-server.rb file. The guard keeps the recipe from creating an empty configuration file on a host where Chef Infra Server is not configured:
+
+            ```ruby
+            file '/etc/opscode/chef-server.rb' do
+              owner 'root'
+              group 'root'
+              mode '0640'
+              only_if { ::File.exist?('/etc/opscode/chef-server.rb') }
+            end
+            ```
+    refs:
+      - url: https://docs.chef.io/server/config_rb_server/
+        title: Chef Infra Server Configuration Reference
+  - uid: non-eol-infra-server
+    title: Ensure a non-EOL Chef Infra Server release is used
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-12
+      compliance/nist-csf-2: nist-csf-2-pr-ps-02
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-1
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a03
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-5
+    # Supported major releases and their end-of-life dates, last checked on 26 September 2026
+    # against https://docs.chef.io/versions/. Chef Infra Server 14 reached end of life on
+    # 31 December 2025, and 15 is deprecated with the Chef 360 Platform named as its replacement.
+    # A major release Chef adds fails here until it gets a clause.
+    mql: |
+      file("/opt/opscode/version-manifest.txt").content == /^chef-server 15\./ && time.now < parse.date("2026-11-30")
+    docs:
+      desc: |
+        This check verifies that Chef Infra Server is a release that still receives security maintenance.
+
+        Chef publishes an end-of-life date for each major release of Chef Infra Server on its supported versions page, and has named the Chef 360 Platform as the replacement for the product line. The check reads `/opt/opscode/version-manifest.txt`, which the omnibus package writes at install time, and requires a major release whose end-of-life date is still ahead, so a server fails from the published date onward, and a major release that is not yet in that comparison fails until it is added.
+
+        **Why this matters**
+
+        Chef Infra Server ships as an omnibus package with nginx, PostgreSQL, Erlang, Ruby, and a search engine embedded inside it. Those components are not the ones the host's package manager updates, so a diligently patched operating system does nothing for them. Running an end-of-life release means a known-vulnerable nginx terminating TLS on a port the whole fleet connects to, and a known-vulnerable database underneath it, with no upstream fix arriving.
+
+        The consequence of a breach here is unusually large. This one host stores every node's public key, every data bag in every organization, and the run lists that decide what each managed machine executes as `root`. Compromising it does not require compromising anything else afterward, because the estate's own convergence loop distributes whatever the attacker leaves behind.
+
+        Upgrading is a `chef-server-ctl reconfigure` and an `upgrade` away, but it is a stateful service. Take a `chef-server-ctl backup` first and read the release notes for the intervening majors, since the search backend changed from Solr to Elasticsearch and then to OpenSearch across that range.
+      audit: |
+        Run the following command to display the installed server version:
+
+        ```bash
+        head -1 /opt/opscode/version-manifest.txt
+        ```
+
+        Compare the reported major version against the [Chef Supported Versions documentation](https://docs.chef.io/versions/). If the reported major version is listed as supported and its end-of-life date is still ahead, the check passes. If it is listed as end of life, or its end-of-life date has passed, the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            **Using CLI**
+
+            1. Check your current Chef Infra Server version:
+
+            ```bash
+            head -1 /opt/opscode/version-manifest.txt
+            ```
+
+            2. Review the [Chef Infra Server upgrade documentation](https://docs.chef.io/server/upgrades/) for your upgrade path.
+
+            3. Download and install the latest supported version from the [Chef Downloads page](https://www.chef.io/downloads).
+
+            **Upgrade Planning Considerations**:
+
+            - Schedule a maintenance window as the server will be unavailable during upgrade
+            - Back up your Chef server data before upgrading: `chef-server-ctl backup`
+            - Review release notes for breaking changes between your current and target versions
+            - Test the upgrade in a non-production environment first
+            - Notify users that Chef client runs may fail during the upgrade window
+        - id: chef
+          desc: |
+            **Using Chef Infra**
+
+            If you manage your Chef Infra Server package with Chef, update the cookbook that installs it to pin a currently supported release. Using the `chef-ingredient` cookbook:
+
+            ```ruby
+            chef_ingredient 'chef-server' do
+              version 'latest'
+              action :upgrade
+            end
+            ```
+
+            **Important**: Always back up server data with `chef-server-ctl backup` and test the upgrade in a non-production environment before rolling it out broadly.
+    refs:
+      - url: https://docs.chef.io/versions/
+        title: Chef Supported Versions
+  - uid: eol-reporting-addon
+    title: Ensure EOL Reporting add-on package is not installed
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-12
+      compliance/nist-csf-2: nist-csf-2-pr-ps-02
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-1
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a03
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-5
+    mql: |
+      package("opscode-reporting").installed == false
+    docs:
+      desc: |
+        This check verifies that the deprecated Chef Reporting add-on is not installed.
+
+        The `opscode-reporting` package stored Chef Infra Client run history in its own database on the server and exposed a reporting API through the same nginx front end as the Chef API. It was superseded by Chef Automate data collection and is no longer built or patched. The check requires that the package is absent.
+
+        **Why this matters**
+
+        An unmaintained add-on does not sit quietly. It keeps an API endpoint published on the server's TLS port, reachable by anything that can reach the Chef API at all, and no fix will ever be issued for a flaw found in it. That is a permanent unpatched entry point on the most valuable host in the estate.
+
+        Its database is a second problem. The reporting store accumulates the details of every converge on every node, including resource names, file paths, and the properties of resources that changed, which is where a rendered template carrying a secret leaves a copy. The history grows without bound and is rarely reviewed, so a compromise of it goes unnoticed and returns years of infrastructure detail.
+
+        Nothing removes the add-on during a server upgrade. A server carried forward from Chef 12 keeps serving reporting until an operator explicitly removes the package with `chef-server-ctl uninstall`, which is why this needs checking rather than assuming.
+      audit: |
+        Run the following command to check whether the Reporting add-on is installed:
+
+        ```bash
+        dpkg -l | grep opscode-reporting || rpm -qa | grep opscode-reporting
+        ```
+
+        If the command returns no output, the add-on is not installed and the check passes. If a package line is printed, the deprecated add-on is present and the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            **Using CLI**
+
+            1. Shut down the Reporting add-on services:
+
+            ```bash
+            opscode-reporting-ctl uninstall
+            ```
+
+            2. Remove the package with your platform package manager.
+
+            On Debian and Ubuntu systems:
+
+            ```bash
+            dpkg -P opscode-reporting
+            ```
+
+            On Red Hat family systems:
+
+            ```bash
+            rpm -e opscode-reporting
+            ```
+
+            3. Regenerate the server configuration so the add-on endpoints are removed:
+
+            ```bash
+            chef-server-ctl reconfigure
+            ```
+
+            4. Verify the package is removed:
+
+            ```bash
+            dpkg -l | grep opscode-reporting || rpm -qa | grep opscode-reporting
+            ```
+
+            **Note**: Running `chef-server-ctl reconfigure` restarts server services and briefly interrupts client requests. Do not run `chef-server-ctl uninstall`; that command removes the entire Chef Infra Server application.
+        - id: chef
+          desc: |
+            **Using Chef Infra**
+
+            Use this recipe code to uninstall the Reporting package:
+
+            ```ruby
+            package 'opscode-reporting' do
+              action :remove
+              notifies :run, 'execute[reconfigure chef server]', :immediately
+            end
+
+            execute 'reconfigure chef server' do
+              command 'chef-server-ctl reconfigure'
+              action :nothing
+            end
+            ```
+    refs:
+      - url: https://docs.chef.io/server/
+        title: Chef Infra Server Documentation
+  - uid: eol-push-jobs-addon
+    title: Ensure EOL Push Jobs Server add-on package is not installed
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-12
+      compliance/nist-csf-2: nist-csf-2-pr-ps-02
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-1
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a03
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-5
+    mql: |
+      package("opscode-push-jobs-server").installed == false
+    docs:
+      desc: |
+        This check verifies that the deprecated Push Jobs Server add-on is not installed.
+
+        The `opscode-push-jobs-server` package let an operator run a command immediately across many nodes, over a persistent connection each node held open to the server, instead of waiting for the next converge. It is deprecated and no longer maintained. The check requires that the package is absent.
+
+        **Why this matters**
+
+        Push Jobs is remote command execution as a service, with the Chef Infra Server as its controller and every managed node as a listener. Anyone who takes over the server takes over synchronous execution across the fleet, without waiting for a converge interval and without uploading a cookbook that other operators might notice. Compared with the usual Chef path to the same outcome, it is faster and quieter.
+
+        The listener side is its own exposure. Each node runs the push jobs client with its own key material, holding a connection to the server, and neither the client nor the server component receives fixes any more. A vulnerability in the protocol handling is a vulnerability reachable on every node in the estate at once.
+
+        If ad-hoc execution is still a requirement, move it to a supported mechanism and then remove the package with `chef-server-ctl uninstall` on the server and the corresponding client package on the nodes. Leaving it installed but unused keeps the full exposure and none of the value.
+      audit: |
+        Run the following command to check whether the Push Jobs Server add-on is installed:
+
+        ```bash
+        dpkg -l | grep opscode-push-jobs-server || rpm -qa | grep opscode-push-jobs-server
+        ```
+
+        If the command returns no output, the add-on is not installed and the check passes. If a package line is printed, the deprecated add-on is present and the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            **Using CLI**
+
+            1. Shut down the Push Jobs Server services:
+
+            ```bash
+            opscode-push-jobs-server-ctl uninstall
+            ```
+
+            2. Remove the package with your platform package manager.
+
+            On Debian and Ubuntu systems:
+
+            ```bash
+            dpkg -P opscode-push-jobs-server
+            ```
+
+            On Red Hat family systems:
+
+            ```bash
+            rpm -e opscode-push-jobs-server
+            ```
+
+            3. Regenerate the server configuration so the add-on endpoints are removed:
+
+            ```bash
+            chef-server-ctl reconfigure
+            ```
+
+            4. Verify the package is removed:
+
+            ```bash
+            dpkg -l | grep opscode-push-jobs-server || rpm -qa | grep opscode-push-jobs-server
+            ```
+
+            **Note**: You will also need to remove the `push-jobs-client` package from managed nodes to complete the migration. Running `chef-server-ctl reconfigure` restarts server services and briefly interrupts client requests. Do not run `chef-server-ctl uninstall`; that command removes the entire Chef Infra Server application.
+        - id: chef
+          desc: |
+            **Using Chef Infra**
+
+            Use this recipe code to uninstall the Push Jobs Server package:
+
+            ```ruby
+            package 'opscode-push-jobs-server' do
+              action :remove
+              notifies :run, 'execute[reconfigure chef server]', :immediately
+            end
+
+            execute 'reconfigure chef server' do
+              command 'chef-server-ctl reconfigure'
+              action :nothing
+            end
+            ```
+    refs:
+      - url: https://docs.chef.io/server/
+        title: Chef Infra Server Documentation
+  - uid: eol-analytics-addon
+    title: Ensure EOL Analytics add-on package is not installed
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-12
+      compliance/nist-csf-2: nist-csf-2-pr-ps-02
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-1
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a03
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-5
+    mql: |
+      package("opscode-analytics").installed == false
+    docs:
+      desc: |
+        This check verifies that the deprecated Chef Analytics add-on is not installed.
+
+        The `opscode-analytics` package consumed a feed of Chef Infra Server actions, stored them for search, and ran rules over them to raise notifications. Its functionality moved into Chef Automate, and the add-on is no longer maintained. The check requires that the package is absent.
+
+        **Why this matters**
+
+        Analytics brings its own RabbitMQ broker and its own web application onto the server, and both listen whether or not anyone still looks at the console. Two unmaintained network services on the host that holds the estate's keys is a poor trade for a feature that has a supported replacement, and message brokers are a well-worn target because a broker that accepts a connection usually accepts instructions.
+
+        What it stores is also sensitive on its own. The action feed is a complete record of who changed which cookbook, data bag, node, and role across every organization, with timestamps. For an attacker that is a map of the estate and of the people who administer it, showing which accounts are worth phishing and which cookbooks reach the most hosts.
+
+        Removal is `chef-server-ctl uninstall` for the package, followed by confirming that the broker port is no longer listening. Migrate any rules still in use to Chef Automate first, so the notifications they produce are not silently lost.
+      audit: |
+        Run the following command to check whether the Analytics add-on is installed:
+
+        ```bash
+        dpkg -l | grep opscode-analytics || rpm -qa | grep opscode-analytics
+        ```
+
+        If the command returns no output, the add-on is not installed and the check passes. If a package line is printed, the deprecated add-on is present and the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            **Using CLI**
+
+            1. Shut down the Analytics services:
+
+            ```bash
+            opscode-analytics-ctl uninstall
+            ```
+
+            2. Remove the package with your platform package manager.
+
+            On Debian and Ubuntu systems:
+
+            ```bash
+            dpkg -P opscode-analytics
+            ```
+
+            On Red Hat family systems:
+
+            ```bash
+            rpm -e opscode-analytics
+            ```
+
+            3. Regenerate the server configuration:
+
+            ```bash
+            chef-server-ctl reconfigure
+            ```
+
+            4. Verify the package is removed:
+
+            ```bash
+            dpkg -l | grep opscode-analytics || rpm -qa | grep opscode-analytics
+            ```
+
+            **Note**: Running `chef-server-ctl reconfigure` restarts server services and briefly interrupts client requests. Do not run `chef-server-ctl uninstall`; that command removes the entire Chef Infra Server application.
+        - id: chef
+          desc: |
+            **Using Chef Infra**
+
+            Use this recipe code to uninstall the Opscode Analytics package:
+
+            ```ruby
+            package 'opscode-analytics' do
+              action :remove
+              notifies :run, 'execute[reconfigure chef server]', :immediately
+            end
+
+            execute 'reconfigure chef server' do
+              command 'chef-server-ctl reconfigure'
+              action :nothing
+            end
+            ```
+    refs:
+      - url: https://docs.chef.io/server/
+        title: Chef Infra Server Documentation
+  - uid: eol-ha-addon
+    title: Ensure EOL Chef HA add-on package is not installed
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-12
+      compliance/nist-csf-2: nist-csf-2-pr-ps-02
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-1
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a03
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-5
+    mql: |
+      package("chef-ha").installed == false
+    docs:
+      desc: |
+        This check verifies that the deprecated Chef HA add-on is not installed.
+
+        The `chef-ha` package provided active and passive failover for Chef Infra Server using DRBD to replicate the underlying block device between two hosts, with keepalived moving a virtual IP address between them. It was superseded by Chef Backend and by external PostgreSQL clustering, and it is no longer maintained. The check requires that the package is absent.
+
+        **Why this matters**
+
+        DRBD replicates raw blocks, not API calls, so the replication link carries the server's database and cookbook store in a form that has no relationship to Chef's authentication or authorization. Anything that can reach the replication port can read or corrupt that volume without ever presenting a key to Chef Infra Server, and the packaged DRBD and keepalived receive no fixes for whatever is found in them.
+
+        keepalived adds a second exposure on the local segment. Its failover election trusts the segment it runs on, so a host that can inject on that network can claim the virtual IP and become the Chef Infra Server the fleet talks to. That is a position from which cookbooks are served, and cookbooks execute as `root` on every node.
+
+        Split-brain is the operational half of the same problem. When both nodes believe they are primary, the two copies of the database diverge, and the reconciliation is manual with no support path behind it. Migrate to Chef Backend or to an external PostgreSQL cluster and remove the package.
+      audit: |
+        Run the following command to check whether the Chef HA add-on is installed:
+
+        ```bash
+        dpkg -l | grep chef-ha || rpm -qa | grep chef-ha
+        ```
+
+        If the command returns no output, the add-on is not installed and the check passes. If a package line is printed, the deprecated add-on is present and the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            **Using CLI**
+
+            **Important**: Before removing Chef HA, migrate to a supported high availability solution such as Chef Backend or an external PostgreSQL cluster. Removing DRBD replication from an active failover pair without a migration plan can cause an outage or data loss.
+
+            1. Stop the HA services before removing the package. The Chef HA add-on has no dedicated ctl uninstall command, so unlike the other add-ons nothing stops its services for you; removing the package while keepalived or DRBD replication is active can pull files out from under running processes.
+
+            ```bash
+            chef-server-ctl stop keepalived
+            ```
+
+            Confirm DRBD is not active on the node (for example with `drbdadm status`) before continuing.
+
+            2. Remove the package with your platform package manager.
+
+            On Debian and Ubuntu systems:
+
+            ```bash
+            dpkg -P chef-ha
+            ```
+
+            On Red Hat family systems:
+
+            ```bash
+            rpm -e chef-ha
+            ```
+
+            3. Regenerate the server configuration:
+
+            ```bash
+            chef-server-ctl reconfigure
+            ```
+
+            4. Verify the package is removed:
+
+            ```bash
+            dpkg -l | grep chef-ha || rpm -qa | grep chef-ha
+            ```
+
+            **Note**: Running `chef-server-ctl reconfigure` restarts server services and briefly interrupts client requests. Do not run `chef-server-ctl uninstall`; that command removes the entire Chef Infra Server application.
+        - id: chef
+          desc: |
+            **Using Chef Infra**
+
+            Use this recipe code to uninstall the Chef HA package:
+
+            ```ruby
+            package 'chef-ha' do
+              action :remove
+              notifies :run, 'execute[reconfigure chef server]', :immediately
+            end
+
+            execute 'reconfigure chef server' do
+              command 'chef-server-ctl reconfigure'
+              action :nothing
+            end
+            ```
+    refs:
+      - url: https://docs.chef.io/server/
+        title: Chef Infra Server Documentation
+  - uid: secure-tls-only
+    title: Ensure TLS versions before 1.2 are disabled
+    impact: 90
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: |
+      file("/var/opt/opscode/nginx/etc/chef_https_lb.conf").content.contains(/ssl_protocols TLSv1\.2( TLSv1\.3)?;/)
+    docs:
+      desc: |
+        This check verifies that Chef Infra Server accepts only TLS 1.2 or later.
+
+        Every HTTPS connection to the server terminates at its bundled nginx: client converges, `knife`, direct API use, and the management console. The protocol list is generated into `/var/opt/opscode/nginx/etc/chef_https_lb.conf` from `nginx['ssl_protocols']` in `chef-server.rb`. The check requires that list to be TLS 1.2, optionally with TLS 1.3, and nothing older.
+
+        **Why this matters**
+
+        TLS 1.0 and 1.1 depend on MD5 and SHA-1 in the handshake and on CBC constructions that BEAST and Lucky 13 target directly. Their presence is exploitable even when both sides would prefer something modern, because an on-path attacker can force the negotiation down to the weakest version offered. Removing them from the list is what makes the downgrade fail rather than succeed.
+
+        What crosses this port makes the difference concrete. Node data, `knife` requests carrying data bag contents, and cookbook downloads all travel here, and the cookbooks are executed as `root` by the node that receives them. An attacker who breaks or manipulates the session is not reading logs, they are choosing what the fleet runs.
+
+        The generated nginx configuration is overwritten on every `chef-server-ctl reconfigure`, so editing it in place does not survive. Set `nginx['ssl_protocols']` in `/etc/opscode/chef-server.rb` and reconfigure. Confirm first that any old `knife` workstations and clients in the estate can negotiate TLS 1.2, because they will lose access at the moment the older protocols are withdrawn.
+      audit: |
+        Run the following command to check the TLS protocols offered by the nginx front end:
+
+        ```bash
+        grep ssl_protocols /var/opt/opscode/nginx/etc/chef_https_lb.conf
+        ```
+
+        If the output shows `ssl_protocols TLSv1.2;` or `ssl_protocols TLSv1.2 TLSv1.3;`, only modern TLS is offered and the check passes. If TLS 1.0 or 1.1 is listed, or the directive is missing, the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            **Using CLI**
+
+            The reliable fix is to explicitly restrict the protocols nginx offers. A default-driven TLS version is not enough: even on releases that default to TLS 1.2, the server can still negotiate TLS 1.0 and 1.1 unless you remove them explicitly. Setting `nginx['ssl_protocols']` guarantees that only the protocols you list are offered, which is exactly what this check verifies.
+
+            1. Edit `/etc/opscode/chef-server.rb` and add one of the following:
+
+            ```ruby
+            # On releases that support TLS 1.3:
+            nginx['ssl_protocols'] = 'TLSv1.2 TLSv1.3'
+
+            # On older releases without TLS 1.3 support:
+            nginx['ssl_protocols'] = 'TLSv1.2'
+            ```
+
+            2. Reconfigure the server:
+
+            ```bash
+            chef-server-ctl reconfigure
+            ```
+
+            3. Verify the configuration:
+
+            ```bash
+            grep ssl_protocols /var/opt/opscode/nginx/etc/chef_https_lb.conf
+            ```
+
+            Keeping Chef Infra Server on a current, supported release is a baseline that ships sensible TLS defaults and security fixes, but it does not replace the explicit `ssl_protocols` restriction above. Apply both.
+
+            **Note**: Reconfiguring restarts the nginx front end and briefly interrupts client connections, so schedule this during a maintenance window. Ensure all Chef Infra Clients support TLS 1.2. Clients older than version 12.0 may need to be upgraded.
+        - id: chef
+          desc: |
+            **Using Chef Infra**
+
+            If you manage your Chef Infra Server configuration with Chef, use a `ruby_block` to safely append the setting without overwriting existing configuration:
+
+            ```ruby
+            ruby_block 'configure TLS 1.2 in chef-server.rb' do
+              block do
+                file = Chef::Util::FileEdit.new('/etc/opscode/chef-server.rb')
+                file.insert_line_if_no_match(/nginx\['ssl_protocols'\]/, "nginx['ssl_protocols'] = 'TLSv1.2'")
+                file.write_file
+              end
+              notifies :run, 'execute[reconfigure chef server]', :immediately
+            end
+
+            execute 'reconfigure chef server' do
+              command 'chef-server-ctl reconfigure'
+              action :nothing
+            end
+            ```
+
+            **Note**: Do not use a `file` resource with `content` here, as it would overwrite the entire chef-server.rb file and erase any existing configuration.
+    refs:
+      - url: https://docs.chef.io/server/config_rb_server_optional_settings/
+        title: Chef Infra Server Optional Configuration Settings
+  - uid: disable-insecure-addon-compat
+    title: Disable insecure_addon_compat feature
+    impact: 90
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-pt-3
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-6
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      file("/etc/opscode/chef-server.rb").content.contains("insecure_addon_compat false")
+    docs:
+      desc: |
+        This check verifies that Chef Infra Server keeps its credentials only in the encrypted secrets store.
+
+        Since version 12.14 the server holds its generated credentials in `/etc/opscode/private-chef-secrets.json`. The `insecure_addon_compat` setting in `chef-server.rb` controls a backward compatibility mode that additionally writes those same credentials into the individual service configuration files in cleartext, so that older add-ons which only knew how to read them there keep working. The mode is on by default. The check requires `insecure_addon_compat false`.
+
+        **Why this matters**
+
+        With the mode enabled, the same database passwords and service tokens exist in several files at once, under different owners and different modes. Locking down the secrets store then protects nothing, because the same values are sitting in a service configuration file next to it. Security becomes whichever copy has the loosest permissions, and that copy is generated automatically on every reconfigure.
+
+        The duplicates are also what get collected by accident. Backups, support bundles gathered for a vendor ticket, and configuration management repositories that manage `/etc/opscode` all pick up service configuration files as a matter of course, and each copy carries the credentials out of the server with them. One deliberately protected secrets file is a far easier thing to reason about than five incidental copies.
+
+        Turning the mode off requires that no legacy add-on still depends on the old layout, so remove the deprecated add-ons first. Companion checks in this policy cover those packages, and running `chef-server-ctl reconfigure` after the change is what regenerates the service configuration without the embedded secrets.
+      audit: |
+        Run the following command to check whether the insecure compatibility mode is disabled:
+
+        ```bash
+        grep insecure_addon_compat /etc/opscode/chef-server.rb
+        ```
+
+        If the output shows `insecure_addon_compat false`, the legacy secrets mode is disabled and the check passes. If the line is absent or set to `true`, the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            **Using CLI**
+
+            1. First, ensure all your Chef add-ons are updated to versions that support secure secrets:
+               - Chef Manage: 2.5.0 or later
+               - Chef Automate: Any currently supported version
+
+            2. Edit `/etc/opscode/chef-server.rb` and add:
+
+            ```ruby
+            insecure_addon_compat false
+            ```
+
+            3. Reconfigure the server:
+
+            ```bash
+            chef-server-ctl reconfigure
+            ```
+
+            4. Verify the setting is applied by checking that no errors occur and add-ons continue to function.
+
+            **Important**: Test this change in a non-production environment first to ensure all add-ons are compatible.
+        - id: chef
+          desc: |
+            **Using Chef Infra**
+
+            If you manage your Chef Infra Server configuration with Chef, use a `ruby_block` to safely append the setting without overwriting existing configuration:
+
+            ```ruby
+            ruby_block 'disable insecure addon compat' do
+              block do
+                file = Chef::Util::FileEdit.new('/etc/opscode/chef-server.rb')
+                file.insert_line_if_no_match(/insecure_addon_compat/, 'insecure_addon_compat false')
+                file.write_file
+              end
+              notifies :run, 'execute[reconfigure chef server]', :immediately
+            end
+
+            execute 'reconfigure chef server' do
+              command 'chef-server-ctl reconfigure'
+              action :nothing
+            end
+            ```
+
+            **Note**: Do not use a `file` resource with `content` here, as it would overwrite the entire chef-server.rb file and erase any existing configuration.
+    refs:
+      - url: https://docs.chef.io/server/config_rb_server_optional_settings/
+        title: Chef Infra Server Optional Configuration Settings
+  - uid: postgresql-not-externally-accessible
+    title: Ensure embedded PostgreSQL is not bound to external interfaces
+    impact: 90
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-22
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-1
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-1
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      // An absent setting means the Chef Infra Server default applies, which binds to
+      // loopback, so a config that never names the key passes. Any line that does set it
+      // must set it to a loopback address; a specific routable address is as exposed as
+      // the 0.0.0.0 wildcard.
+      configLines = file("/etc/opscode/chef-server.rb").content.lines
+      loopback = /=\s*['"](127\.0\.0\.1|localhost|::1|\[::1\])['"]\s*$/
+      configLines.where(_ == /^\s*postgresql\['listen_address'\]\s*=/).all(_ == loopback)
+      configLines.where(_ == /^\s*postgresql\['vip'\]\s*=/).all(_ == loopback)
+    docs:
+      desc: |
+        This check verifies that Chef Infra Server's embedded database is reachable only from the server itself.
+
+        The bundled PostgreSQL instance holds everything the server knows: users, organizations, clients and their public keys, node objects with their run lists and attributes, data bag items, and the authorization graph. `postgresql['listen_address']` and `postgresql['vip']` in `/etc/opscode/chef-server.rb` determine what it binds to, and the default is the loopback interface. The check reads any line that sets either key and requires the value to be a loopback address, so a specific routable address such as `10.0.0.5` fails just as the `0.0.0.0` wildcard does. A configuration that never names the key passes, because the built-in default already binds to loopback.
+
+        **Why this matters**
+
+        Binding to all interfaces puts port 5432 on every network the host touches, which usually includes the one the entire managed fleet sits on. The database is where the server's authorization decisions are stored, not where they are enforced, so a client that connects directly is not subject to them at all. It can read data bag items outright, take encrypted ones away as ciphertext to attack offline, replace a user's public key with its own, or edit a node's run list so that node executes attacker-chosen cookbooks as `root` at the next converge.
+
+        None of that appears in the Chef API request log, because none of it is an API request. The monitoring and audit trail that an operator would look at to reconstruct an incident describes a different interface entirely.
+
+        Multi-server deployments that use an external PostgreSQL are a legitimate exception. There the database is a separate host by design and access is constrained at the network layer with security groups or firewall rules, so this setting on the Chef Infra Server host is not what governs the exposure.
+      audit: |
+        Run the following command to check whether the embedded PostgreSQL service is bound to all interfaces:
+
+        ```bash
+        grep -E "postgresql\['(listen_address|vip)'\]" /etc/opscode/chef-server.rb
+        ```
+
+        If the command returns no output, or the configured address is `127.0.0.1` or `localhost`, the database is not exposed and the check passes. If a `postgresql['listen_address']` line is set to `0.0.0.0` or `*`, or a `postgresql['vip']` line is set to `0.0.0.0`, the check fails. A `postgresql['vip']` pointing at a dedicated external PostgreSQL host in a multi-server deployment is a valid exception.
+      remediation:
+        - id: cli
+          desc: |
+            **Using CLI**
+
+            If using embedded PostgreSQL, edit `/etc/opscode/chef-server.rb` and remove any `postgresql['listen_address']` or `postgresql['vip']` line that binds the database to `0.0.0.0` or `*`. The default of `localhost` keeps the database on the loopback interface. Then reconfigure:
+
+            ```bash
+            chef-server-ctl reconfigure
+            ```
+
+            **Note**: Reconfiguring restarts server services and briefly interrupts client requests.
+
+            If using external PostgreSQL in a multi-server deployment, ensure your PostgreSQL server has appropriate firewall rules and authentication configured.
+        - id: chef
+          desc: |
+            **Using Chef Infra**
+
+            If you manage your Chef Infra Server configuration with Chef, use a `ruby_block` to remove the insecure bindings without overwriting the rest of the file:
+
+            ```ruby
+            ruby_block 'remove external postgresql bindings' do
+              block do
+                file = Chef::Util::FileEdit.new('/etc/opscode/chef-server.rb')
+                file.search_file_delete_line(/postgresql\['listen_address'\]\s*=\s*['"](0\.0\.0\.0|\*)['"]/)
+                file.search_file_delete_line(/postgresql\['vip'\]\s*=\s*['"]0\.0\.0\.0['"]/)
+                file.write_file
+              end
+              notifies :run, 'execute[reconfigure chef server]', :immediately
+            end
+
+            execute 'reconfigure chef server' do
+              command 'chef-server-ctl reconfigure'
+              action :nothing
+            end
+            ```
+    refs:
+      - url: https://docs.chef.io/server/config_rb_server_optional_settings/
+        title: Chef Infra Server Optional Configuration Settings
+  - uid: search-not-externally-accessible
+    title: Ensure embedded search is not bound to external interfaces
+    impact: 90
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-22
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-1
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-1
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      // An absent setting means the Chef Infra Server default applies, which binds to
+      // loopback, so a config that never names the key passes. Any line that does set it
+      // must set it to a loopback address; a specific routable address is as exposed as
+      // the 0.0.0.0 wildcard.
+      configLines = file("/etc/opscode/chef-server.rb").content.lines
+      loopback = /=\s*['"](127\.0\.0\.1|localhost|::1|\[::1\])['"]\s*$/
+      configLines.where(_ == /^\s*opscode_solr4\['ip_address'\]\s*=/).all(_ == loopback)
+      configLines.where(_ == /^\s*elasticsearch\['listen'\]\s*=/).all(_ == loopback)
+      configLines.where(_ == /^\s*opensearch\['listen'\]\s*=/).all(_ == loopback)
+    docs:
+      desc: |
+        This check verifies that Chef Infra Server's search index is reachable only from the server itself.
+
+        The server indexes every node object so that recipes and `knife` can query the fleet. The engine has changed over time, from Solr through Chef Infra Server 12, to Elasticsearch in versions 13 and 14, and to OpenSearch from version 15, and each is bound to the loopback interface by default. The check reads any line in `/etc/opscode/chef-server.rb` that sets `opscode_solr4['ip_address']`, `elasticsearch['listen']`, or `opensearch['listen']`, and requires the value to be a loopback address. A specific routable address fails just as the `0.0.0.0` wildcard does. A configuration that never names these keys passes, because each engine already binds to loopback by default.
+
+        **Why this matters**
+
+        The index is a searchable copy of every node's attributes: hostnames and addresses, installed packages with their versions, running processes, mounted filesystems, local user accounts, and cloud instance metadata. In this deployment the engine has no authentication in front of it, so an exposed port is an unauthenticated query interface over the whole estate. That is not just disclosure, it is a target list sorted by vulnerable version, assembled without touching a single managed host.
+
+        Write access to the index is worse than read. Recipes call `search()` to build load balancer pools, monitoring targets, cluster peer lists, and firewall allowlists, and they render the results into files on the nodes. An attacker who can insert a document into the index chooses what those generated files say, on every node that runs the cookbook.
+
+        Keep the engine on the loopback interface and let the server proxy the queries it is willing to answer. Where a separate search host is genuinely required, constrain it with network controls and enable the engine's own authentication rather than leaving it open.
+      audit: |
+        Run the following command to check whether the embedded search service is bound to all interfaces:
+
+        ```bash
+        grep -E "opscode_solr4\['ip_address'\]|elasticsearch\['listen'\]|opensearch\['listen'\]" /etc/opscode/chef-server.rb
+        ```
+
+        If the command returns no output, or the configured address is `127.0.0.1`, the search service is not exposed and the check passes. If any of these lines is set to `0.0.0.0`, the check fails.
+      remediation:
+        - id: cli
+          desc: |
+            **Using CLI**
+
+            Edit `/etc/opscode/chef-server.rb` and remove any `opscode_solr4['ip_address']`, `elasticsearch['listen']`, or `opensearch['listen']` line that binds the search service to `0.0.0.0`. The default of `127.0.0.1` keeps search on the loopback interface. Then reconfigure:
+
+            ```bash
+            chef-server-ctl reconfigure
+            ```
+
+            **Note**: Reconfiguring restarts server services and briefly interrupts client requests.
+        - id: chef
+          desc: |
+            **Using Chef Infra**
+
+            If you manage your Chef Infra Server configuration with Chef, use a `ruby_block` to remove the insecure bindings without overwriting the rest of the file:
+
+            ```ruby
+            ruby_block 'remove external search bindings' do
+              block do
+                file = Chef::Util::FileEdit.new('/etc/opscode/chef-server.rb')
+                file.search_file_delete_line(/opscode_solr4\['ip_address'\]\s*=\s*['"]0\.0\.0\.0['"]/)
+                file.search_file_delete_line(/elasticsearch\['listen'\]\s*=\s*['"]0\.0\.0\.0['"]/)
+                file.search_file_delete_line(/opensearch\['listen'\]\s*=\s*['"]0\.0\.0\.0['"]/)
+                file.write_file
+              end
+              notifies :run, 'execute[reconfigure chef server]', :immediately
+            end
+
+            execute 'reconfigure chef server' do
+              command 'chef-server-ctl reconfigure'
+              action :nothing
+            end
+            ```
+    refs:
+      - url: https://docs.chef.io/server/config_rb_server_optional_settings/
+        title: Chef Infra Server Optional Configuration Settings
+  - uid: remediate-cve-2023-28864
+    title: Remediate against CVE-2023-28864
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-12
+      compliance/nist-csf-2: nist-csf-2-pr-ps-02
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-1
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a03
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-5
+    mql: |
+      // The directory is not created until the first `chef-server-ctl reconfigure`, so a
+      // freshly installed server has nothing to stat. Guard on existence rather than
+      // failing a server that has simply not reconfigured yet.
+      if (file("/var/opt/opscode/local-mode-cache/backup").exists) {
+        file("/var/opt/opscode/local-mode-cache/backup") {
+          user.name == 'root'
+          group.name == 'root'
+          permissions.user_readable == true
+          permissions.user_writeable == true
+          permissions.group_readable == false
+          permissions.group_writeable == false
+          permissions.other_readable == false
+          permissions.other_writeable == false
+        }
+      }
+    docs:
+      desc: |
+        This check verifies that the configuration backup directory Chef Infra Server writes during reconfigure is not readable by unprivileged local users.
+
+        Each `chef-server-ctl reconfigure` copies the previous service configuration into `/var/opt/opscode/local-mode-cache/backup` before writing new files. In Chef Infra Server 12.0 through 15.6.2 that directory was created world readable, which is CVE-2023-28864. The check requires owner `root`, group `root`, and no access for group or other. The directory does not exist until the first reconfigure runs, so a freshly installed server is skipped rather than failed for a path that has not been created yet.
+
+        **Why this matters**
+
+        The copies keep their contents, and among them is the `oc_erchef` configuration, which carries the credentials for the embedded search service. Any local account on the server can read them, and from there query the index directly for every node's attributes: addresses, packages and versions, processes, local users, and cloud metadata for the entire fleet. It is a local read on one host that returns reconnaissance on all of them.
+
+        The exposure is not a one-off. A new copy is written on every reconfigure, so the window is not the moment of the vulnerable install but the whole life of the server, and the accumulated backups reflect every configuration the server has ever had, including credentials that were rotated but never invalidated.
+
+        Upgrading to a fixed release stops new backups being created world readable but does not correct a directory that already exists. On any server that was reconfigured while running an affected version, tighten the permissions on the existing directory as well, and treat the search credentials it exposed as compromised until they are rotated.
+      audit: |
+        Run the following command to inspect the configuration backup directory:
+
+        ```bash
+        stat -c '%a %U:%G %n' /var/opt/opscode/local-mode-cache/backup
+        ```
+
+        If the directory is owned by `root:root` and the mode denies group and other access (for example `700`), the backup path is restricted and the check passes. If group or other can read the directory, the check fails. Chef Infra Server 15.7 and later set this path to restrictive permissions automatically on each `chef-server-ctl` run.
+      remediation:
+        - id: cli
+          desc: |
+            **Using CLI**
+
+            The permanent fix is to upgrade to Chef Infra Server 15.7 or later, which restricts the configuration backup path automatically on each `chef-server-ctl` execution.
+
+            Until you can upgrade, run these commands to set proper permissions on your /var/opt/opscode/local-mode-cache/backup directory:
+
+            ```bash
+            chown root:root /var/opt/opscode/local-mode-cache/backup
+            chmod 700 /var/opt/opscode/local-mode-cache/backup
+            ```
+
+            To verify the permissions were applied correctly:
+
+            ```bash
+            stat -c '%a %U:%G %n' /var/opt/opscode/local-mode-cache/backup
+            ```
+
+            Expected output: `700 root:root /var/opt/opscode/local-mode-cache/backup`
+        - id: chef
+          desc: |
+            **Using Chef Infra**
+
+            Use this recipe code to set the permissions on the /var/opt/opscode/local-mode-cache/backup directory:
+
+            ```ruby
+            directory '/var/opt/opscode/local-mode-cache/backup' do
+              owner 'root'
+              group 'root'
+              mode '0700'
+              action :create
+            end
+            ```
+
+            Note: Chef Infra Server 15.7 and later automatically set the configuration backup path to `600` permissions on each `chef-server-ctl` execution.
+    refs:
+      - url: https://www.cve.org/CVERecord?id=CVE-2023-28864
+        title: CVE-2023-28864

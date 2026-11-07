@@ -1,0 +1,103 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+
+packs:
+  - uid: mondoo-ssl-tls-certificate-incident-response
+    name: SSL/TLS Certificate Incident Response Pack
+    version: 1.2.0
+    license: BUSL-1.1
+    require:
+      - provider: network
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    tags:
+      mondoo.com/platform: host
+      mondoo.com/category: security
+      mondoo.com/icon: policy
+    summary: Gather TLS certificate evidence for incident response
+    docs:
+      desc: |
+        Collects a domain's SSL/TLS certificate evidence for incident investigation: negotiated protocol versions, cipher suites, and per-certificate details of the chains served with and without SNI.
+
+        Enable this query pack in [Mondoo Platform](https://mondoo.com/platform) to automatically gather this evidence from your domains, or scan a domain manually with cnspec:
+
+        ```bash
+        cnspec scan host <domain> -f mondoo-ssl-tls-certificate-incident-response.mql.yaml
+        ```
+    filters: asset.family.contains('network')
+    queries:
+      - uid: mondoo-ssl-tls-certificate-incident-response-domain-name
+        title: Domain Name
+        docs:
+          desc: Returns the domain name being inspected.
+        mql: |
+          tls.domainName
+      - uid: mondoo-ssl-tls-certificate-incident-response-versions
+        title: Supported SSL and TLS versions
+        docs:
+          desc: SSL and TLS protocol versions the server accepts.
+        mql: |
+          tls.versions
+      - uid: mondoo-ssl-tls-certificate-incident-response-ciphers
+        title: Supported SSl/TLS ciphers
+        docs:
+          desc: Cipher suites the server accepts.
+        mql: |
+          tls.ciphers
+      - uid: mondoo-ssl-tls-certificate-incident-response-signing-algo
+        title: Signature algorithm of all certificates in the certificate chain
+        docs:
+          desc: Signing algorithm of each certificate in the chain.
+        mql: |
+          tls.certificates {
+            signingAlgorithm
+            subject.commonName
+          }
+      - uid: mondoo-ssl-tls-certificate-incident-response-is-revoked
+        title: Revoked, verified, and CA status of all certificates in the certificate chain
+        docs:
+          desc: Revocation, verification, and CA status per certificate.
+        mql: |
+          tls.certificates {
+            subject.commonName
+            isCA
+            isRevoked
+            isVerified
+          }
+      - uid: mondoo-ssl-tls-certificate-incident-response-when-expire
+        title: Expiration dates for all certificates in the certificate chain
+        docs:
+          desc: Validity window and time to expiry per certificate.
+        mql: |
+          tls.certificates {
+            subject.commonName
+            expiresIn
+            notAfter
+            notBefore
+          }
+      - uid: mondoo-ssl-tls-certificate-incident-response-identifiers
+        title: Identifiers of all certificates in the certificate chain
+        docs:
+          desc: Fingerprints, serial, and DNS names per certificate.
+        mql: |
+          tls.certificates {
+            subject.commonName
+            fingerprints
+            serial
+            sanExtension.dnsNames
+          }
+      - uid: mondoo-ssl-tls-certificate-incident-response-non-sni-identifiers
+        title: Identifiers of all certificates served without SNI
+        docs:
+          desc: |
+            Fingerprints, serial, and DNS names served without SNI.
+
+            The chain a client receives when it sends no server name, as when it connects by IP address. A server that hosts several sites can answer with a different chain than the one it serves for the domain.
+        mql: |
+          tls.nonSniCertificates {
+            subject.commonName
+            fingerprints
+            serial
+            sanExtension.dnsNames
+          }

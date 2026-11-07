@@ -1,0 +1,79 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+policies:
+  - uid: example1
+    name: Example policy 1
+    version: "1.0.0"
+    tags:
+      mondoo.com/category: test
+      mondoo.com/platform: test
+    authors:
+      - name: Mondoo
+        email: hello@mondoo.com
+    groups:
+      - title: Common SSH checks
+        filters: asset.family.contains("unix")
+        checks:
+          - uid: sshd-01
+            title: Set the port to 22
+            mql: sshd.config.params.Port == 22
+            impact: 30
+
+          - uid: sshd-02
+            title: Configure the address family
+            mql: sshd.config.params.AddressFamily == /inet|inet6|any/
+            impact: 40
+
+          - uid: sshd-03
+            title: Enable strict mode
+            mql: sshd.config.params.StrictModes == "yes"
+            impact: 70
+
+  # This is a second policy in the same bundle
+  - uid: example2
+    name: Another policy
+    version: "1.0.0"
+    tags:
+      mondoo.com/category: test
+      mondoo.com/platform: test
+    groups:
+      # It pulls in the policy above and depends on it
+      - type: import
+        policies:
+          - uid: example1
+
+      # Additionally it defines some queries of its own
+      - type: chapter
+        title: Some uname infos
+        queries:
+          # In this case, we are using a shared query that is defined below
+          - uid: uname
+        checks:
+          - uid: check-os
+            title: check os
+            variants:
+              - uid: check-os-unix
+              - uid: check-os-windows
+
+queries:
+  # This is a composed query which has two variants: one for unix type systems
+  # and one for windows, where we don't run the additional argument.
+  # If you run the `uname` query, it will pick matching sub-queries for you.
+  - uid: uname
+    title: Collect uname info
+    variants:
+      - uid: unix-uname
+      - uid: windows-uname
+  - uid: unix-uname
+    mql: command("uname -a").stdout
+    filters: asset.family.contains("unix")
+  - uid: windows-uname
+    mql: command("uname").stdout
+    filters: asset.family.contains("windows")
+
+  - uid: check-os-unix
+    filters: asset.family.contains("unix")
+    mql: users.contains(name == "root")
+  - uid: check-os-windows
+    filters: asset.family.contains("windows")
+    mql: users.contains(name == "Administrator")

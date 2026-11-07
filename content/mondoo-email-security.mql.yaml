@@ -1,0 +1,1368 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+policies:
+  - uid: mondoo-email-security
+    name: Mondoo Email Security
+    version: 1.4.3
+    license: BUSL-1.1
+    tags:
+      mondoo.com/category: security
+      mondoo.com/platform: host
+      mondoo.com/icon: mail
+    require:
+      - provider: network
+    authors:
+      - name: Mondoo, Inc.
+        email: hello@mondoo.com
+    summary: Secure email with SPF, DKIM, and DMARC validation
+    docs:
+      desc: |
+        The Mondoo Email Security policy identifies missing or misconfigured email authentication that could enable email spoofing, phishing, and business email compromise targeting your domain. This policy helps organizations detect and remediate authentication gaps before attackers can exploit them to send fraudulent mail, steal credentials, defraud customers, or damage brand reputation.
+
+        This policy provides security checks across key email authentication areas:
+
+        - Sender Policy Framework (SPF) record presence and strictness
+        - DomainKeys Identified Mail (DKIM) signing and key strength
+        - Domain-based Message Authentication, Reporting and Conformance (DMARC) policy and alignment
+        - Supporting DNS records and BIMI configuration
+        - Common spoofing-friendly DNS misconfigurations
+
+        Have suggestions for new checks in this policy? Visit our [cnspec repository](https://github.com/mondoohq/cnspec).
+    groups:
+      # Two different gates below, on purpose.
+      #
+      # Checks about how a domain *handles* mail need a real mail exchanger, and
+      # `dns.mx != empty` was not that test: RFC 7505 lets a domain publish a
+      # null MX (a single "." target) to declare that it handles no mail at all,
+      # and that satisfies `!= empty`. example.com does exactly this, so every
+      # check here ran against a domain that had explicitly opted out of email.
+      # `dns.mx.where(domainName != ".")` excludes it.
+      #
+      # Checks that stop someone *spoofing* a domain must not depend on MX at
+      # all — a domain with no mail servers is the easiest to forge and the most
+      # important to cover, yet the old gate skipped it entirely. Those groups
+      # gate on the apex instead. The apex restriction is required because
+      # dns.dmarc resolves `_dmarc.<fqdn>` with no organizational-domain
+      # fallback, so it is null on any subdomain; without it, scanning
+      # www.example.com would report spurious DMARC failures. `dns.fqdn != empty`
+      # comes first so && short-circuits before domainName is dereferenced,
+      # which errors on an IP target and on a name that is itself a public suffix.
+      - title: DNS Configuration
+        filters: |
+          asset.platform == "host" && dns.mx.where(domainName != ".") != empty
+        checks:
+          - uid: mondoo-email-security-txt-record
+          - uid: mondoo-email-security-a-record
+          - uid: mondoo-email-security-reverse-ip-ptr-record-set
+      - title: SPF (Sender Policy Framework)
+        filters: |
+          asset.platform == "host" && dns.fqdn != empty && domainName.fqdn == domainName.effectiveTLDPlusOne
+        checks:
+          - uid: mondoo-email-security-spf
+          - uid: mondoo-email-security-single-spf
+          - uid: mondoo-email-security-spf-length
+          - uid: mondoo-email-security-spf-whitespaces
+          - uid: mondoo-email-security-spf-fail
+          - uid: mondoo-email-security-spf-no-permit-all
+          - uid: mondoo-email-security-spf-dns-record
+      - title: DKIM (DomainKeys Identified Mail)
+        filters: |
+          asset.platform == "host" && dns.mx.where(domainName != ".") != empty
+        checks:
+          - uid: mondoo-email-security-dkim
+      - title: DMARC (Domain-based Message Authentication)
+        filters: |
+          asset.platform == "host" && dns.fqdn != empty && domainName.fqdn == domainName.effectiveTLDPlusOne
+        checks:
+          - uid: mondoo-email-security-dmarc
+          - uid: mondoo-email-security-dmarc-version
+          - uid: mondoo-email-security-dmarc-policy
+          - uid: mondoo-email-security-dmarc-rua
+          - uid: mondoo-email-security-dmarc-ruf
+    scoring_system: highest impact
+queries:
+  - uid: mondoo-email-security-reverse-ip-ptr-record-set
+    title: Ensure Reverse IP Lookup PTR record is set (DNS Forward confirmed)
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      dns.reverseRecords.any(rdata.any(_.contains(domainName.fqdn)))
+    docs:
+      desc: |
+        This check verifies that the sending mail server's address resolves back to a hostname that resolves forward to the same address.
+
+        A PTR record maps an IP address to a hostname, published under `in-addr.arpa` for IPv4 with the octets reversed. When the hostname that PTR returns has a forward record pointing back to the original address, the address is in a forward-confirmed reverse DNS state. The check requires that the reverse record resolves to a name within the domain being scanned.
+
+        **Why this matters**
+
+        Forward-confirmed reverse DNS is one of the oldest and most widely applied filtering signals in email, and it is applied before any content is examined. A sending address with no PTR record, or one whose PTR does not confirm, is treated as unlikely to be a legitimate mail server, because legitimate mail servers are configured deliberately and compromised machines and consumer connections generally are not.
+
+        The consequence is delivery failure that looks like a mystery. Major providers reject or heavily penalize mail from addresses without matching reverse DNS, sometimes with an SMTP error that names the reason and sometimes by silently filing the message in spam. The mail leaves your server successfully, so the sending side sees no error.
+
+        This is also the one control here you may not be able to set yourself. PTR records are published by whoever controls the address block, which is your hosting or connectivity provider, so fixing it usually means a request to them rather than an edit in your own DNS.
+      audit: |
+        Run the `dig -t PTR <special-reverse-domain>` command and verify that it points to your mail domain.
+
+        Example:
+        For the IP address `123.123.123.123`, the reverse domain would be `123.123.123.123.in-addr.arpa`. The output should show:
+
+        ```text
+        123.123.123.123.in-addr.arpa  name = mail.example.com.
+        ```
+      remediation:
+        - id: console
+          desc: |
+            A PTR record lives in the reverse zone for the IP address, which is controlled by whoever owns the IP range, not by your domain registrar. To publish one:
+
+            1. Identify the public IP addresses your outbound mail servers send from.
+            2. Sign in to the control panel of the hosting or cloud provider that owns those addresses and open its reverse DNS or PTR settings. On most clouds this is a property of the instance or the allocated public IP, not of your DNS zone.
+            3. Set the PTR for each address to a fully qualified hostname in your own domain, such as `mail.lunalectric.com`.
+            4. In your own DNS zone, publish a matching forward `A` record so `mail.lunalectric.com` resolves back to the same address. Without both halves the lookup is not forward-confirmed.
+            5. Where the provider does not expose PTR settings, open a support request naming the address and the desired hostname.
+        - id: cli
+          desc: |
+            To confirm the round trip resolves in both directions:
+
+            1. Look up the PTR for the sending address:
+
+                ```bash
+                dig -x 203.0.113.10 +short
+                ```
+
+                A configured address returns a hostname such as `mail.lunalectric.com.`
+
+            2. Look up the forward record for that hostname:
+
+                ```bash
+                dig +short A mail.lunalectric.com
+                ```
+
+            3. The check passes only when step 2 returns the address used in step 1. A PTR that points at a hostname which resolves elsewhere, or not at all, is not forward-confirmed and receiving mail servers treat it as unverified.
+        - id: terraform
+          desc: |
+            To publish the forward record and, where the provider supports it, the PTR:
+
+            ```hcl
+            # Forward record in your own zone
+            resource "aws_route53_record" "mail" {
+              zone_id = aws_route53_zone.primary.zone_id
+              name    = "mail.lunalectric.com"
+              type    = "A"
+              ttl     = 3600
+              records = ["203.0.113.10"]
+            }
+
+            # Reverse record, set on the IP allocation rather than the domain zone
+            resource "google_compute_instance" "mail" {
+              name         = "mail"
+              machine_type = "e2-medium"
+              zone         = "us-central1-a"
+
+              boot_disk {
+                initialize_params {
+                  image = "debian-cloud/debian-12"
+                }
+              }
+
+              network_interface {
+                network = "default"
+                access_config {
+                  nat_ip                 = google_compute_address.mail.address
+                  public_ptr_domain_name = "mail.lunalectric.com."
+                }
+              }
+            }
+            ```
+
+            AWS does not expose EC2 reverse DNS through Terraform; request the PTR for an Elastic IP through AWS Support and manage only the forward record here.
+    refs:
+      - url: https://en.wikipedia.org/wiki/Reverse_DNS_lookup
+        title: Reverse DNS Lookup
+      - url: https://en.wikipedia.org/wiki/Forward-confirmed_reverse_DNS
+        title: Forward-confirmed reverse DNS
+      - url: https://support.google.com/mail/answer/81126?hl=en#ip
+        title: Google Email sender guidelines - IP Addresses
+  - uid: mondoo-email-security-txt-record
+    title: Domain Apex should have a TXT record
+    impact: 40
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-1
+      compliance/owasp-top-10-2025: false
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: dns.records.any(type == "TXT")
+    docs:
+      desc: |
+        This check verifies that the domain apex returns at least one TXT record.
+
+        TXT records at the apex carry the text-based policies other systems look for, including SPF and the verification strings services publish to prove domain control, for example `v=spf1 include:_spf.google.com ~all`. The check requires that at least one TXT record exists.
+
+        **Why this matters**
+
+        This is a broad precondition rather than a specific control, and it is worth being straightforward about that. It confirms the apex serves TXT records at all; it does not evaluate what they contain.
+
+        Its value is as an early failure. A domain apex returning no TXT records cannot be publishing SPF, cannot hold a domain verification token, and has not completed the setup steps that mail providers and other services require. When this fails, the more specific checks in this policy that look for SPF and DMARC are failing for the same underlying reason, and fixing the DNS configuration resolves several findings at once.
+
+        The condition usually means something structural: a newly delegated domain whose records were never added, a nameserver migration where TXT records were not carried across, or a zone serving from an unexpected provider.
+
+        Treat a failure here as a signal to check the zone as a whole rather than to add a placeholder record. A TXT record added only to satisfy this check achieves nothing.
+      audit: |
+        Run the `dig +short TXT <domain>` command and verify that at least one TXT record is returned.
+
+        Example output:
+
+        ```text
+        "atlassian-domain-verification=12345"
+        "google-site-verification=678910"
+        ```
+
+        If one or more TXT records are returned, the check passes. If the output is empty, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            To publish a TXT record at the domain apex using your DNS provider's control panel:
+
+            1. Sign in to the control panel for the provider that hosts the zone and open the DNS records for the domain.
+            2. Add a `TXT` record with the name left blank or set to `@`, which both mean the apex.
+            3. If the domain has no TXT records at all, the SPF policy is the most useful first one to publish: `v=spf1 include:_spf.google.com ~all`, adjusted to the mail services the domain actually uses.
+            4. Save the zone.
+        - id: cli
+          desc: |
+            To confirm the apex publishes at least one TXT record:
+
+            ```bash
+            dig +short TXT lunalectric.com
+            ```
+
+            A configured domain returns one or more quoted strings, for example:
+
+            ```text
+            "v=spf1 include:_spf.google.com ~all"
+            ```
+
+            No output means the apex has no TXT record.
+        - id: terraform
+          desc: |
+            To publish an apex TXT record with Terraform:
+
+            ```hcl
+            resource "aws_route53_record" "apex_txt" {
+              zone_id = aws_route53_zone.primary.zone_id
+              name    = "lunalectric.com"
+              type    = "TXT"
+              ttl     = 3600
+              records = ["v=spf1 include:_spf.google.com ~all"]
+            }
+            ```
+    refs:
+      - url: https://en.wikipedia.org/wiki/TXT_record
+        title: TXT Record
+  - uid: mondoo-email-security-a-record
+    title: Domain Apex should have an address (A) record
+    impact: 40
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-1
+      compliance/owasp-top-10-2025: false
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: dns.records.any(type == "A")
+    docs:
+      desc: |
+        This check verifies that the domain apex returns an address record.
+
+        An A record maps a name to an IPv4 address, so that `example.com` resolves to something a client can connect to. The check requires at least one A record at the apex.
+
+        **Why this matters**
+
+        This is a domain health check rather than a security control, and it belongs in an email policy for a reason worth stating: receiving mail servers use the apparent legitimacy of a sending domain as a filtering input, and a domain that does not resolve at all reads as disposable.
+
+        Throwaway domains registered for a single phishing campaign frequently have mail records and nothing else, because nobody intends to serve a website from them. Reputation systems know this, so a domain with no address record starts from a worse position, and mail sent from it is more likely to be filtered regardless of how correctly SPF, DKIM, and DMARC are configured.
+
+        A failure here is also often a symptom rather than the problem. An apex with no A record usually means an incomplete delegation, a migration that moved some records and not others, or a zone that is not the one you think is authoritative, and each of those affects more than mail.
+
+        Note that a domain served entirely over IPv6, or one using an ALIAS or ANAME record at the apex rather than an A record, may fail this check while being correctly configured.
+      audit: |
+        Run the `dig +short A <domain>` command and verify that an A record is returned.
+
+        If the command returns one or more IPv4 addresses, the check passes. If the output is empty or returns `NXDOMAIN`, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            To publish an address record at the domain apex using your DNS provider's control panel:
+
+            1. Sign in to the control panel for the provider that hosts the zone and open the DNS records for the domain.
+            2. Add an `A` record with the name left blank or set to `@`, pointing to the server that serves the root domain.
+            3. If nothing is hosted on the root domain, point it at a web server that redirects to your main site rather than leaving the apex unresolvable.
+            4. Save the zone.
+        - id: cli
+          desc: |
+            To confirm the apex resolves to an address:
+
+            ```bash
+            dig +short A lunalectric.com
+            ```
+
+            A configured domain returns the address of the server hosting the root domain. No output means the apex has no `A` record.
+        - id: terraform
+          desc: |
+            To publish an apex address record with Terraform:
+
+            ```hcl
+            resource "aws_route53_record" "apex_a" {
+              zone_id = aws_route53_zone.primary.zone_id
+              name    = "lunalectric.com"
+              type    = "A"
+              ttl     = 300
+              records = ["203.0.113.10"]
+            }
+            ```
+    refs:
+      - url: https://www.urllo.com/resources/learn/what-is-an-apex-domain
+        title: A Record
+  - uid: mondoo-email-security-spf
+    title: Ensure SPF record is set
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/mitre-attack: mitre-attack-t1566
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      dns.spf.length >= 1
+    docs:
+      desc: |
+        This check verifies that the domain publishes a Sender Policy Framework record.
+
+        SPF is a TXT record at the domain apex naming the servers permitted to send mail using that domain in the envelope sender. A receiving server looks it up and compares the connecting IP address against it. The check requires at least one SPF record to exist, for example `v=spf1 ip4:192.168.0.1 include:_spf.example.com -all`.
+
+        **Why this matters**
+
+        Without SPF, nothing connects a message claiming to come from your domain to any particular server. Anyone can open an SMTP connection anywhere in the world, put your domain in the envelope sender, and the receiving server has no published record to weigh it against.
+
+        That is the mechanic behind domain impersonation. An attacker sending as your finance team, your CEO, or your support address does not need to compromise anything to do it; the absence of a record is what makes the claim unfalsifiable.
+
+        The cost falls on your own mail too. Receivers treat an unauthenticated domain as lower reputation, so legitimate mail is more likely to land in spam, and the usual response is to investigate deliverability rather than the missing record causing it.
+
+        SPF alone is not sufficient. It authenticates the envelope sender, which recipients never see, not the `From:` header they do see. It also breaks on forwarding, which is why it needs DKIM and DMARC alongside it, both of which have their own checks in this policy.
+      audit: |
+        Run the `dig +short TXT <domain>` command and look for a record beginning with `v=spf1`.
+
+        If exactly one TXT record starting with `v=spf1` is returned, the check passes. If no such record is returned, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            To publish an SPF policy using your DNS provider's control panel:
+
+            1. Sign in to the control panel for the provider that hosts the zone and open the DNS records for the domain.
+            2. Add a single `TXT` record at the apex (name blank or `@`) listing every server allowed to send mail for the domain, for example `v=spf1 ip4:203.0.113.10 include:_spf.google.com ~all`.
+            3. Use only the `include`, `ip4`, `ip6`, `a`, and `mx` mechanisms for senders you actually use. Authorizing a provider you do not use weakens the policy; omitting one you do use makes legitimate mail fail.
+            4. Choose the trailing qualifier deliberately. `~all` (soft fail) marks unlisted senders suspicious and is the safe starting point; `-all` (hard fail) tells receivers to reject them and is the recommended end state.
+            5. Save the zone, confirm from DMARC aggregate reports that every legitimate sender passes, then tighten `~all` to `-all`.
+        - id: cli
+          desc: |
+            To confirm the domain publishes exactly one SPF policy:
+
+            ```bash
+            dig +short TXT lunalectric.com
+            ```
+
+            The output must include one record starting with `v=spf1`. No such record means SPF is not configured.
+        - id: terraform
+          desc: |
+            To publish the SPF record with Terraform:
+
+            ```hcl
+            resource "aws_route53_record" "spf" {
+              zone_id = aws_route53_zone.primary.zone_id
+              name    = "lunalectric.com"
+              type    = "TXT"
+              ttl     = 3600
+              records = ["v=spf1 ip4:203.0.113.10 include:_spf.google.com ~all"]
+            }
+            ```
+    refs:
+      - url: https://en.wikipedia.org/wiki/Sender_Policy_Framework
+        title: SPF Record
+  - uid: mondoo-email-security-single-spf
+    title: Ensure there are not multiple SPF records
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/mitre-attack: mitre-attack-t1566
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: dns.spf.length <= 1
+    docs:
+      desc: |
+        This check verifies that the domain publishes exactly one SPF record.
+
+        The check counts SPF records at the apex and requires no more than one, so a domain with two or more fails even when each record is individually valid.
+
+        **Why this matters**
+
+        RFC 7208 is explicit that a domain publishing more than one SPF record is a permanent error, and receiving servers that follow it stop evaluating rather than choosing between the records or merging them.
+
+        The practical effect is that SPF stops working entirely. Not partially, not with the stricter record winning: the evaluation returns permerror and the receiver falls back to whatever it does for domains with no usable policy. A domain in this state has SPF configured, believes itself protected, and is not.
+
+        Duplicates arrive through ordinary work. A new mail provider is onboarded and their documented TXT record is added alongside the existing one, because adding is safer-looking than editing. Both records are correct in isolation, which is why the mistake survives review.
+
+        Merge them into a single record by combining the mechanisms into one `v=spf1` string, and watch the ten DNS lookup limit while doing it, since each `include:` counts against it. Confirm afterward that exactly one record is returned rather than assuming the edit replaced rather than added.
+      audit: |
+        Run the `dig +short TXT <domain>` command and count the records beginning with `v=spf1`.
+
+        If zero or one record starting with `v=spf1` is returned, the check passes. If two or more such records are returned, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            Receivers treat two records starting with `v=spf1` as a permanent error, so the policy fails open. Merge them rather than deleting one:
+
+            1. Sign in to the control panel for the provider that hosts the zone and open the DNS records for the domain.
+            2. List every apex `TXT` record starting with `v=spf1` and collect the mechanisms from all of them.
+            3. Create one combined record carrying every mechanism, for example merging `v=spf1 include:_spf.google.com ~all` and `v=spf1 ip4:203.0.113.10 ~all` into `v=spf1 ip4:203.0.113.10 include:_spf.google.com ~all`.
+            4. Delete the remaining SPF records only after the merged record is in place. Removing one without carrying its mechanisms across silently stops authorizing those senders.
+            5. Save the zone.
+        - id: cli
+          desc: |
+            To confirm only one SPF policy is published:
+
+            ```bash
+            dig +short TXT lunalectric.com
+            ```
+
+            Exactly one returned string may start with `v=spf1`. Two or more is a permanent error and SPF stops protecting the domain entirely.
+        - id: terraform
+          desc: |
+            To keep a single merged SPF record under Terraform, declare one resource carrying every mechanism:
+
+            ```hcl
+            resource "aws_route53_record" "spf" {
+              zone_id = aws_route53_zone.primary.zone_id
+              name    = "lunalectric.com"
+              type    = "TXT"
+              ttl     = 3600
+              records = ["v=spf1 ip4:203.0.113.10 include:_spf.google.com ~all"]
+            }
+            ```
+    refs:
+      - url: https://en.wikipedia.org/wiki/Sender_Policy_Framework
+        title: SPF Record
+  - uid: mondoo-email-security-spf-length
+    title: Ensure SPF record is not too long
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: dns.spf.all(dnsTxt.length <= 255)
+    docs:
+      desc: |
+        This check verifies that no SPF record exceeds the DNS length limit for a single character string.
+
+        A TXT record is made of one or more character strings, each capped at 255 bytes. The check requires each SPF record's text to stay within that limit, for example `v=spf1 include:_spf.example.com ~all`.
+
+        **Why this matters**
+
+        An SPF record longer than 255 bytes has to be split into multiple strings, which receivers are expected to concatenate before parsing. Not all of them do it correctly, and the ones that get it wrong produce a record that parses as malformed rather than as the record you wrote.
+
+        The result is inconsistent authentication. Mail authenticates at some receivers and fails at others, which is considerably harder to diagnose than a uniform failure, because a report of undelivered mail from one recipient looks like a problem at their end.
+
+        Length problems also travel with growth. Records lengthen as services are onboarded, so a record that was fine at creation crosses the limit during a routine addition, and nothing about that change signals it.
+
+        Shorten by removing mechanisms for services no longer in use, replacing long `ip4` lists with an `include:` where the provider offers one, or consolidating multiple provider includes. Watch the ten DNS lookup limit while doing this, since it is a separate constraint that consolidation can push you into.
+      audit: |
+        Run the `dig +short TXT <domain>` command and measure the length of the record beginning with `v=spf1`.
+
+        If the SPF record is 255 characters or fewer, the check passes. If it exceeds 255 characters, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            SPF has two separate limits: the 255-character cap on a single DNS string that this check measures, and a hard cap of 10 DNS lookups (each `include`, `a`, `mx`, `ptr`, and `exists` counts) that breaks evaluation when exceeded. Shorten the record by consolidating, not by deleting senders:
+
+            1. Sign in to the control panel for the provider that hosts the zone and open the DNS records for the domain.
+            2. Remove `include:` mechanisms for services the domain no longer sends through.
+            3. Merge providers where one `include` already covers another.
+            4. Flatten an `include:` by replacing it with the `ip4:` and `ip6:` addresses it resolves to. This cuts both the character count and the lookup count, at the cost of having to track the provider's address changes yourself.
+            5. Save the zone.
+        - id: cli
+          desc: |
+            To measure the published record:
+
+            ```bash
+            dig +short TXT lunalectric.com | grep 'v=spf1' | tr -d '"' | tr -d '\n' | wc -c
+            ```
+
+            The record starting with `v=spf1` must be 255 characters or fewer. Strip the quotes and the trailing newline before counting, because `dig +short` wraps each string in double quotes and `wc -c` otherwise reports three characters more than the record actually holds. A record dig prints as two quoted strings is already over the 255-character limit for a single DNS string, which is what this check measures.
+        - id: terraform
+          desc: |
+            To keep the record short under Terraform, prefer explicit addresses over deep include chains:
+
+            ```hcl
+            resource "aws_route53_record" "spf" {
+              zone_id = aws_route53_zone.primary.zone_id
+              name    = "lunalectric.com"
+              type    = "TXT"
+              ttl     = 3600
+              records = ["v=spf1 ip4:203.0.113.10 ip4:203.0.113.11 -all"]
+            }
+            ```
+    refs:
+      - url: https://datatracker.ietf.org/doc/html/rfc7208#section-3.3
+        title: Sender Policy Framework (SPF) for Authorizing Use of Domains in Email, Version 1
+  - uid: mondoo-email-security-spf-whitespaces
+    title: Ensure SPF record does not contain any excess whitespace
+    impact: 40
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: dns.spf.none(dnsTxt == /\s{2,}/)
+    docs:
+      desc: |
+        This check verifies that the SPF record does not contain runs of consecutive whitespace.
+
+        SPF terms are separated by single spaces. The check fails a record containing two or more whitespace characters in a row, for example `v=spf1  include:_spf.example.com ~all` with a double space.
+
+        **Why this matters**
+
+        This is a hygiene check rather than a direct exposure, and it earns its place because SPF parsers disagree about how forgiving to be.
+
+        A record with irregular spacing may be parsed correctly by one receiver, parsed with a term skipped by another, and rejected as malformed by a third. That inconsistency is the problem: mail authenticates for some recipients and not others, and the resulting reports look like an intermittent delivery fault rather than a record defect.
+
+        The spacing is almost always accidental. SPF records are edited by hand in a DNS console, often by copying a mechanism from a provider's documentation, and a stray space is invisible in the interface where it was introduced and in the record as displayed afterward.
+
+        Rewrite the record with single spaces between terms and no leading or trailing whitespace. Verify by fetching the record rather than by reading the DNS console field, since some interfaces normalize what they display without normalizing what they serve.
+      audit: |
+        Run the `dig +short TXT <domain>` command and inspect the record beginning with `v=spf1` for runs of consecutive spaces.
+
+        If the SPF record contains no excess whitespace, the check passes. If it contains two or more consecutive spaces, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            To normalize whitespace in the SPF record using your DNS provider's control panel:
+
+            1. Sign in to the control panel for the provider that hosts the zone and open the DNS records for the domain.
+            2. Edit the apex `TXT` record starting with `v=spf1` so mechanisms are separated by exactly one space, with no leading or trailing whitespace.
+            3. For example, replace `v=spf1  include:_spf.google.com   ~all` with `v=spf1 include:_spf.google.com ~all`.
+            4. Save the zone.
+        - id: cli
+          desc: |
+            To inspect the published record for doubled spaces:
+
+            ```bash
+            dig +short TXT lunalectric.com
+            ```
+
+            The record starting with `v=spf1` must contain no consecutive spaces.
+        - id: terraform
+          desc: |
+            To publish a normalized record with Terraform:
+
+            ```hcl
+            resource "aws_route53_record" "spf" {
+              zone_id = aws_route53_zone.primary.zone_id
+              name    = "lunalectric.com"
+              type    = "TXT"
+              ttl     = 3600
+              records = ["v=spf1 include:_spf.google.com ~all"]
+            }
+            ```
+    refs:
+      - url: https://en.wikipedia.org/wiki/Sender_Policy_Framework
+        title: SPF Record
+  - uid: mondoo-email-security-spf-fail
+    title: SPF should be set to fail or soft fail all
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/mitre-attack: mitre-attack-t1566
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      dns.spf.all(
+        allQualifier == "-" || allQualifier == "~" ||
+        (allQualifier == "" && mechanisms.where(_ == /^redirect=/i).length == 1 &&
+          mechanisms.where(_ == /^redirect=/i).all(
+            dns(fqdn: _.split("=").last).spf.length == 1 &&
+            dns(fqdn: _.split("=").last).spf.all(allQualifier == "-" || allQualifier == "~")))
+      )
+    docs:
+      desc: |
+        This check verifies that the SPF record ends with an enforcing `all` mechanism.
+
+        The final mechanism tells receivers what to do with mail from servers the record does not list. The check requires `-all`, which is a hard fail, or `~all`, which is a soft fail. It fails on `?all`, which is neutral, and on a record with no `all` mechanism at all.
+
+        A record without an `all` mechanism can instead hand evaluation to another domain with a `redirect=` modifier, for example `v=spf1 redirect=_spf.example.net`, which mail providers commonly publish so customers do not have to copy their sender list. Receivers then apply the target domain's record, so the check follows the redirect one level and requires the target's single SPF record to end with `-all` or `~all`. A `redirect=` next to an `all` mechanism is ignored, as receivers ignore it.
+
+        **Why this matters**
+
+        Everything before the `all` mechanism lists who may send. The `all` mechanism decides whether that list means anything, and a neutral qualifier makes it advisory.
+
+        With `?all`, an unlisted server produces a neutral result, which receivers treat almost exactly as they treat a domain with no SPF record. The record still resolves, still looks correct in a DNS lookup, and still appears in a compliance review as SPF being configured, while providing no basis to reject anything.
+
+        That gap is why this matters more than it first appears: the failure is silent and looks like success. Someone verifying that SPF exists gets a green answer.
+
+        `-all` is the correct end state and tells receivers to reject unlisted senders outright. `~all` marks the message suspicious instead, which is the right choice while you are still discovering which services legitimately send as your domain. Move to `-all` once the aggregate reports show no legitimate sender failing, and be aware that under DMARC the policy there governs enforcement, so `~all` with `p=reject` still results in rejection.
+      audit: |
+        Run the `dig +short TXT <domain>` command and inspect the end of the record beginning with `v=spf1`.
+
+        If the SPF record ends with `-all` (hard fail) or `~all` (soft fail), the check passes. If the record has no `all` mechanism but a `redirect=<target>` modifier, run `dig +short TXT <target>` and apply the same test to the target's record. If neither record ends with `-all` or `~all`, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            The trailing `all` mechanism decides what receivers do with mail from servers you have not authorized. A bare `all` or `+all` permits everyone and must not be used:
+
+            1. Sign in to the control panel for the provider that hosts the zone and open the DNS records for the domain.
+            2. Edit the apex `TXT` record starting with `v=spf1` so it ends with `~all` or `-all`.
+            3. `~all` is a soft fail: receivers usually accept the message but treat it as suspicious. Use it while confirming every legitimate sender is listed.
+            4. `-all` is a hard fail: receivers reject the mail. Move to it once DMARC reports show all legitimate mail passes SPF.
+            5. Save the zone.
+        - id: cli
+          desc: |
+            To confirm the record ends with a failing qualifier:
+
+            ```bash
+            dig +short TXT lunalectric.com
+            ```
+
+            The record starting with `v=spf1` must end with `-all` or `~all`.
+        - id: terraform
+          desc: |
+            To publish a record with a failing qualifier under Terraform:
+
+            ```hcl
+            resource "aws_route53_record" "spf" {
+              zone_id = aws_route53_zone.primary.zone_id
+              name    = "lunalectric.com"
+              type    = "TXT"
+              ttl     = 3600
+              records = ["v=spf1 include:_spf.google.com ~all"]
+            }
+            ```
+    refs:
+      - url: https://www.m3aawg.org/sites/default/files/legacy/m3aawg-email-authentication-recommended-best-practices-09-2020.pdf
+        title: M3AAWG Email Authentication Recommended Best Practices (2020)
+  - uid: mondoo-email-security-spf-no-permit-all
+    title: Ensure SPF does not use permissive +all
+    impact: 90
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/mitre-attack: mitre-attack-t1566
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: dns.spf.none(allQualifier == "+")
+    docs:
+      desc: |
+        This check verifies that the SPF record does not use the `+all` mechanism.
+
+        `+all` explicitly authorizes every server on the internet to send mail as the domain. The check requires that no SPF record ends with it.
+
+        **Why this matters**
+
+        This is worse than publishing no SPF record at all, and it is the only SPF misconfiguration with that property.
+
+        With no record, a receiver has no policy and applies its own judgment, which increasingly means treating unauthenticated mail with suspicion. With `+all`, the domain owner has published an explicit statement that every sender is authorized, and a conforming receiver honors it. SPF returns a pass for the attacker.
+
+        That inverts the control completely. The attacker's phishing message now carries an SPF pass from your domain, which raises its reputation score, helps it through filtering, and can satisfy a DMARC alignment check if the sender is aligned. Your own record is doing the work.
+
+        It usually arrives from troubleshooting. Mail was being rejected, `+all` made the rejections stop, and the change was never revisited because nothing looked broken afterward.
+
+        Replace it with the specific mechanisms your senders need and an enforcing `-all` or `~all`. If the original problem was mail being rejected, the fix is finding which sender was missing from the record, not authorizing everyone.
+      audit: |
+        Run the `dig +short TXT <domain>` command and check the SPF record for the `+all` mechanism.
+
+        Example of a dangerous SPF record:
+
+        ```text
+        "v=spf1 +all"
+        ```
+
+        A safe SPF record uses `-all` or `~all`:
+
+        ```text
+        "v=spf1 include:_spf.google.com -all"
+        ```
+      remediation:
+        - id: console
+          desc: |
+            `+all` authorizes every server on the internet to send as your domain, which is worse than publishing no SPF at all. Replace it, but list your real senders first:
+
+            1. Sign in to the control panel for the provider that hosts the zone and open the DNS records for the domain.
+            2. Before tightening the qualifier, add the `include`, `ip4`, `ip6`, `a`, and `mx` mechanisms for every service that legitimately sends mail for the domain. A record such as `v=spf1 +all` authorizes everything, so it has never been tested against your real senders.
+            3. Replace `+all` with `~all` and save the zone.
+            4. Review DMARC aggregate reports for legitimate senders failing SPF, fix them, then tighten to `-all`.
+        - id: cli
+          desc: |
+            To confirm the permissive qualifier is gone:
+
+            ```bash
+            dig +short TXT lunalectric.com
+            ```
+
+            The record starting with `v=spf1` must end with `-all` or `~all`, never `+all` or a bare `all`.
+        - id: terraform
+          desc: |
+            To publish a restrictive qualifier with Terraform:
+
+            ```hcl
+            resource "aws_route53_record" "spf" {
+              zone_id = aws_route53_zone.primary.zone_id
+              name    = "lunalectric.com"
+              type    = "TXT"
+              ttl     = 3600
+              records = ["v=spf1 include:_spf.google.com -all"]
+            }
+            ```
+    refs:
+      - url: https://datatracker.ietf.org/doc/html/rfc7208#section-5.1
+        title: 'RFC 7208: Sender Policy Framework - "all" Mechanism'
+      - url: https://www.m3aawg.org/sites/default/files/legacy/m3aawg-email-authentication-recommended-best-practices-09-2020.pdf
+        title: M3AAWG Email Authentication Recommended Best Practices (2020)
+  - uid: mondoo-email-security-spf-dns-record
+    title: Do not use deprecated SPF DNS Record Type
+    impact: 40
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: dns.records.none(type == "SPF")
+    docs:
+      desc: |
+        This check verifies that the domain does not publish SPF policy using the deprecated SPF DNS record type.
+
+        SPF was originally allocated its own record type, number 99, alongside publication in a TXT record. RFC 7208 removed it in 2014, and SPF policy now lives in TXT records only. The check requires that no record of type SPF exists for the domain.
+
+        **Why this matters**
+
+        Modern receivers do not query the SPF record type. A domain publishing policy only in that form is publishing policy nobody reads, which leaves it unauthenticated while appearing configured.
+
+        The more damaging case is a domain publishing both. The two records drift, because an update made in the TXT record is not made in the other, and the deprecated record then holds an older policy: a wider set of permitted senders, or an `all` qualifier that was since tightened. Anything still consulting it applies the stale version.
+
+        It also confuses the humans. Someone auditing the domain sees two records claiming to define SPF and has to work out which one is authoritative, and the answer is not visible from the records themselves.
+
+        Delete the type 99 record and keep the TXT record. Confirm the TXT record carries the current policy before removing the other one, since on some domains the deprecated record is the one that was maintained.
+      audit: |
+        Run the `dig +short SPF <domain>` command to query for the deprecated `SPF` DNS record type.
+
+        If the command returns no records, the check passes. If any `SPF`-type record is returned, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            RFC 7208 obsoleted the dedicated SPF record type; receivers only evaluate the TXT version. Remove the deprecated record, but confirm the TXT record carries the policy first:
+
+            1. Sign in to the control panel for the provider that hosts the zone and open the DNS records for the domain.
+            2. Confirm an apex `TXT` record starting with `v=spf1` exists. If the policy lives only in the SPF-type record, copy it into a TXT record first.
+            3. If both exist, compare them before deleting anything. The deprecated record may have drifted, and the TXT record must end up carrying the policy you intend to keep.
+            4. Delete the record of type `SPF` and save the zone.
+        - id: cli
+          desc: |
+            To confirm no deprecated SPF-type record remains while the TXT policy is intact:
+
+            ```bash
+            dig +short SPF lunalectric.com
+            dig +short TXT lunalectric.com
+            ```
+
+            The first command must return no output. The second must still include the record starting with `v=spf1`.
+        - id: terraform
+          desc: |
+            To publish the policy as TXT under Terraform, declare only a `TXT` resource and remove any resource declaring the deprecated SPF record type:
+
+            ```hcl
+            resource "aws_route53_record" "spf" {
+              zone_id = aws_route53_zone.primary.zone_id
+              name    = "lunalectric.com"
+              type    = "TXT"
+              ttl     = 3600
+              records = ["v=spf1 include:_spf.google.com ~all"]
+            }
+            ```
+    refs:
+      - url: https://en.wikipedia.org/wiki/Sender_Policy_Framework#DNS_SPF_Records
+        title: DNS SPF Records
+  - uid: mondoo-email-security-dmarc
+    title: Ensure DMARC DNS entry exists
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/mitre-attack: mitre-attack-t1566
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: dns.dmarc.dnsTxt != empty
+    docs:
+      desc: |
+        This check verifies that the domain publishes a DMARC record.
+
+        DMARC is a TXT record at `_dmarc.<domain>` that tells receivers what to do when a message claiming to be from the domain fails authentication, and where to send reports about it. The check requires the record to exist, for example `v=DMARC1; p=reject; rua=mailto:dmarc-reports@example.com`.
+
+        **Why this matters**
+
+        SPF and DKIM authenticate mail but neither instructs the receiver what to do with a failure, and neither protects the address a recipient actually sees. SPF checks the envelope sender and DKIM checks a signature; the `From:` header displayed in the mail client is covered by neither.
+
+        DMARC is what closes that. It requires the authenticated identity to align with the visible `From:` domain, and it publishes a policy the receiver applies when alignment fails. Without it, an attacker can pass SPF for a domain they control while displaying yours in the `From:` header, and the recipient sees your brand on their message.
+
+        Without a record you also see nothing. DMARC reporting is how a domain owner learns that spoofing is happening at all, and which senders are failing authentication, and a domain without it has no visibility into either.
+
+        Publish the record starting at `p=none` with a `rua` address, use the reports to find legitimate senders that fail, then move to `quarantine` and `reject`. Deploying enforcement before reading the reports is how legitimate mail gets blocked.
+      audit: |
+        Run the `dig _dmarc.<domain>` command and verify that the DMARC DNS entry exists.
+
+        Example output:
+
+        ```text
+        _dmarc.lunalectric.com.  300 IN TXT "v=DMARC1; p=reject; pct=100; rua=mailto:dmarc-aggregate@lunalectric.com; ruf=mailto:dmarc-forensic@lunalectric.com; fo=1;"
+        ```
+      remediation:
+        - id: console
+          desc: |
+            DMARC is published as a TXT record on the `_dmarc` subdomain. Start in monitoring mode so you can see who sends as your domain before enforcing anything:
+
+            1. Sign in to the control panel for the provider that hosts the zone and open the DNS records for the domain.
+            2. Add a `TXT` record named `_dmarc` with the value `v=DMARC1; p=none; rua=mailto:dmarc-aggregate@lunalectric.com;`.
+            3. The `rua` tag must point to a mailbox, not a bare domain.
+            4. Review the aggregate reports that arrive, fix any legitimate sender failing SPF or DKIM, then raise the policy to `p=quarantine` and finally `p=reject`. Going straight to `p=reject` rejects legitimate mail that has not yet been fixed.
+            5. Save the zone.
+
+            The separate DMARC policy check fails while `p=none` is in place. That is expected during monitoring and resolves when you raise the policy.
+        - id: cli
+          desc: |
+            To confirm the DMARC record is published:
+
+            ```bash
+            dig +short TXT _dmarc.lunalectric.com
+            ```
+
+            A configured domain returns a record starting with `v=DMARC1`. No output means DMARC is not set up. Note the record lives at `_dmarc.<domain>`, not at the apex.
+        - id: terraform
+          desc: |
+            To publish the DMARC record with Terraform:
+
+            ```hcl
+            resource "aws_route53_record" "dmarc" {
+              zone_id = aws_route53_zone.primary.zone_id
+              name    = "_dmarc.lunalectric.com"
+              type    = "TXT"
+              ttl     = 3600
+              records = ["v=DMARC1; p=none; rua=mailto:dmarc-aggregate@lunalectric.com;"]
+            }
+            ```
+    refs:
+      - url: https://www.m3aawg.org/sites/default/files/legacy/m3aawg-email-authentication-recommended-best-practices-09-2020.pdf
+        title: M3AAWG Email Authentication Recommended Best Practices (2020)
+      - url: https://en.wikipedia.org/wiki/DMARC
+        title: DMARC
+  - uid: mondoo-email-security-dmarc-version
+    title: Ensure DMARC version 1
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/mitre-attack: mitre-attack-t1566
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: dns.dmarc.version == "DMARC1"
+    docs:
+      desc: |
+        This check verifies that the DMARC record declares version `DMARC1`.
+
+        The version tag must be the first tag in the record and must read exactly `v=DMARC1`, as in `v=DMARC1; p=reject;`. The check requires that value.
+
+        **Why this matters**
+
+        The version tag is what identifies the record as a DMARC policy at all. Receivers locate the `_dmarc` TXT record and check this tag first; a record whose version tag is missing, misspelled, or not in the first position is discarded without being read further.
+
+        The consequence is total rather than partial. Every other tag in the record, the policy, the reporting addresses, the alignment modes, is ignored, and the domain is treated as having no DMARC record. There is no partial credit for a record that is otherwise correct.
+
+        This fails silently and looks fine. The record resolves, a DNS lookup returns it, and a person reading it sees a policy that appears complete. Only a parser applying the specification rejects it, and parsers do not report back to the domain owner.
+
+        Confirm the tag is exactly `v=DMARC1`, in that case, as the first tag before any other. Lowercase `v=dmarc1`, a leading space, or a policy tag placed first are the common ways this breaks, and each produces a record that no receiver will act on.
+      audit: |
+        Run the `dig TXT _dmarc.<domain>` command and verify that the DMARC version is set to 1.
+
+        Example output:
+
+        ```text
+        _dmarc.lunalectric.com.  300 IN TXT "v=DMARC1; p=reject; pct=100; rua=mailto:dmarc-aggregate@lunalectric.com; ruf=mailto:dmarc-forensic@lunalectric.com; fo=1;"
+        ```
+      remediation:
+        - id: console
+          desc: |
+            The version tag must be the first tag in the record or receivers ignore the policy entirely:
+
+            1. Sign in to the control panel for the provider that hosts the zone and open the DNS records for the domain.
+            2. Edit the `TXT` record named `_dmarc` so it begins with `v=DMARC1`, before any other tag.
+            3. A complete record looks like `v=DMARC1; p=quarantine; rua=mailto:dmarc-aggregate@lunalectric.com;`. If you are setting DMARC up for the first time, start with `p=none` instead and raise it once reports are clean.
+            4. Save the zone.
+        - id: cli
+          desc: |
+            To confirm the version tag leads the record:
+
+            ```bash
+            dig +short TXT _dmarc.lunalectric.com
+            ```
+
+            The returned record must start with `v=DMARC1`.
+        - id: terraform
+          desc: |
+            To publish a correctly versioned record with Terraform:
+
+            ```hcl
+            resource "aws_route53_record" "dmarc" {
+              zone_id = aws_route53_zone.primary.zone_id
+              name    = "_dmarc.lunalectric.com"
+              type    = "TXT"
+              ttl     = 3600
+              records = ["v=DMARC1; p=quarantine; rua=mailto:dmarc-aggregate@lunalectric.com;"]
+            }
+            ```
+    refs:
+      - url: https://www.m3aawg.org/sites/default/files/legacy/m3aawg-email-authentication-recommended-best-practices-09-2020.pdf
+        title: M3AAWG Email Authentication Recommended Best Practices (2020)
+      - url: https://en.wikipedia.org/wiki/DMARC
+        title: DMARC
+  - uid: mondoo-email-security-dmarc-policy
+    title: Ensure DMARC policy is set to quarantine or reject
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/mitre-attack: mitre-attack-t1566
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: dns.dmarc.policy == /quarantine|reject/
+    docs:
+      desc: |
+        This check verifies that the DMARC policy is set to enforce rather than monitor.
+
+        The `p` tag decides what receivers do with mail that fails DMARC evaluation. The check requires `quarantine`, which directs failing mail to the spam folder, or `reject`, which refuses it at the SMTP transaction. It fails on `p=none`.
+
+        **Why this matters**
+
+        `p=none` is monitoring. Receivers evaluate the message, record the result, send you a report, and then deliver the mail exactly as they would have without any DMARC record. Nothing is blocked.
+
+        That is the correct starting point and the wrong finishing point, and a great many domains stop there. The record exists, reports arrive, and a compliance review records DMARC as configured, while every spoofed message claiming to be from the domain is still delivered to the recipient's inbox.
+
+        The difference in outcome is the whole value of the protocol. Under `p=none` a phishing message wearing your domain reaches the target. Under `p=reject` the receiving server refuses it during the SMTP transaction and it is never delivered.
+
+        Move through the stages deliberately: run `p=none` long enough to identify every legitimate sender in the aggregate reports, fix the ones failing alignment, then `p=quarantine`, then `p=reject`. Use the `pct` tag to ramp gradually if the sending estate is large. Skipping the report-reading stage is how legitimate mail gets blocked, which is what causes an enforcement rollout to be reverted.
+      audit: |
+        Run the `dig +short TXT _dmarc.<domain>` command and inspect the `p=` tag in the DMARC record.
+
+        If the policy is set to `p=quarantine` or `p=reject`, the check passes. If the policy is `p=none` or absent, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            The `p=` tag tells receivers what to do with mail that fails authentication. `p=none` only monitors, so it stops nobody from spoofing the domain:
+
+            1. Sign in to the control panel for the provider that hosts the zone and open the DNS records for the domain.
+            2. Edit the `TXT` record named `_dmarc` and set `p=quarantine` (failing mail goes to spam) or `p=reject` (failing mail is blocked outright).
+            3. Roll it out in stages to avoid losing legitimate mail: start at `p=none` with a `rua` address, review the aggregate reports, fix any legitimate sender failing SPF or DKIM alignment, move to `p=quarantine`, then to `p=reject`.
+            4. The optional `pct=` tag applies the policy to a fraction of mail during the transition.
+            5. Save the zone.
+        - id: cli
+          desc: |
+            To confirm the policy is enforcing:
+
+            ```bash
+            dig +short TXT _dmarc.lunalectric.com
+            ```
+
+            The returned record must contain `p=quarantine` or `p=reject`. `p=none` is monitoring only and does not satisfy this check.
+        - id: terraform
+          desc: |
+            To publish an enforcing policy with Terraform:
+
+            ```hcl
+            resource "aws_route53_record" "dmarc" {
+              zone_id = aws_route53_zone.primary.zone_id
+              name    = "_dmarc.lunalectric.com"
+              type    = "TXT"
+              ttl     = 3600
+              records = ["v=DMARC1; p=quarantine; rua=mailto:dmarc-aggregate@lunalectric.com;"]
+            }
+            ```
+    refs:
+      - url: https://www.m3aawg.org/sites/default/files/legacy/m3aawg-email-authentication-recommended-best-practices-09-2020.pdf
+        title: M3AAWG Email Authentication Recommended Best Practices (2020)
+      - url: https://en.wikipedia.org/wiki/DMARC
+        title: DMARC
+  - uid: mondoo-email-security-dmarc-rua
+    title: Ensure DMARC RUA tag
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: dns.dmarc.aggregateReportUris != empty
+    docs:
+      desc: |
+        This check verifies that the DMARC record requests aggregate reports.
+
+        The `rua` tag names the address receivers send daily aggregate reports to, for example `rua=mailto:dmarc-reports@example.com`. Those reports summarize how mail claiming to be from the domain performed against SPF, DKIM, and DMARC alignment. The check requires at least one address.
+
+        **Why this matters**
+
+        Aggregate reports are the only feedback channel a domain owner has. Without them, DMARC is a policy published into silence: you know what you asked receivers to do and nothing about what is actually happening.
+
+        They answer the two questions that matter for the rollout. Which senders are failing authentication, which is how you find the marketing platform, ticketing system, or regional office that legitimately sends as your domain and was never added to SPF or DKIM. And who else is sending as your domain, which is how spoofing becomes visible at all.
+
+        That first question is why the tag is a prerequisite rather than an optional extra. Moving to `p=reject` without having read the reports means enforcing a policy whose effect on your own mail is unknown, and the usual outcome is legitimate mail blocked, an urgent complaint, and the policy reverted to `none` permanently.
+
+        Point `rua` at a mailbox that is processed rather than one that is read. The reports are XML, arrive daily from every receiver, and are only useful through a tool that aggregates them.
+      audit: |
+        Run the `dig +short TXT _dmarc.<domain>` command and inspect the DMARC record for a `rua=mailto:` tag.
+
+        If the record includes a `rua=mailto:` tag pointing to an aggregate report mailbox, the check passes. If the tag is absent, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            Aggregate reports are how you find out who is sending as your domain. Without a `rua` address, DMARC runs blind:
+
+            1. Sign in to the control panel for the provider that hosts the zone and open the DNS records for the domain.
+            2. Edit the `TXT` record named `_dmarc` and add a `rua=` tag holding a `mailto:` URI, for example `rua=mailto:dmarc-aggregate@lunalectric.com`.
+            3. If the reporting mailbox is on a different domain from the one publishing the record, that domain must publish an external reporting authorization record before providers will send reports to it.
+            4. Save the zone.
+        - id: cli
+          desc: |
+            To confirm an aggregate reporting address is published:
+
+            ```bash
+            dig +short TXT _dmarc.lunalectric.com
+            ```
+
+            The returned record must include a `rua=mailto:` tag pointing at your reporting mailbox.
+        - id: terraform
+          desc: |
+            To publish a reporting address with Terraform:
+
+            ```hcl
+            resource "aws_route53_record" "dmarc" {
+              zone_id = aws_route53_zone.primary.zone_id
+              name    = "_dmarc.lunalectric.com"
+              type    = "TXT"
+              ttl     = 3600
+              records = ["v=DMARC1; p=quarantine; rua=mailto:dmarc-aggregate@lunalectric.com;"]
+            }
+            ```
+    refs:
+      - url: https://www.m3aawg.org/sites/default/files/legacy/m3aawg-email-authentication-recommended-best-practices-09-2020.pdf
+        title: M3AAWG Email Authentication Recommended Best Practices (2020)
+      - url: https://en.wikipedia.org/wiki/DMARC
+        title: DMARC
+  - uid: mondoo-email-security-dmarc-ruf
+    title: Ensure DMARC RUF tag
+    impact: 40
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: dns.dmarc.forensicReportUris != empty
+    docs:
+      desc: |
+        This check verifies that the DMARC record requests failure reports.
+
+        The `ruf` tag names the address receivers send per-message forensic reports to when an individual message fails authentication. The check requires at least one address.
+
+        **Why this matters**
+
+        Aggregate reports tell you that messages failed and roughly from where. Failure reports tell you about a specific message, including headers, subject, and often URLs and attachment details, which is what turns a statistic into something investigable.
+
+        That detail is what makes an active phishing campaign against your domain actionable. Knowing that 4,000 messages failed from one address range is useful; seeing the subject line, the spoofed sender, and the payload URL is what lets you warn recipients, get the URL taken down, and recognize the same campaign next time.
+
+        Weigh this against privacy before enabling it. Failure reports can contain content from real messages, including messages from legitimate senders that merely failed alignment, and receiving them means receiving personal data you did not ask for and must then handle under GDPR and comparable regimes. Many organizations deliberately do not request them for that reason.
+
+        Support is also inconsistent. Most large receivers do not send failure reports at all, so the tag yields far less than aggregate reporting. Treat this as a deliberate choice with a documented rationale rather than a setting to switch on because it exists.
+      audit: |
+        Run the `dig +short TXT _dmarc.<domain>` command and inspect the DMARC record for a `ruf=mailto:` tag.
+
+        If the record includes a `ruf=mailto:` tag pointing to a failure report mailbox, the check passes. If the tag is absent, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            Failure reports carry per-message detail about mail that failed authentication:
+
+            1. Sign in to the control panel for the provider that hosts the zone and open the DNS records for the domain.
+            2. Edit the `TXT` record named `_dmarc` and add a `ruf=` tag holding a `mailto:` URI, optionally with `fo=1` to request reports whenever any mechanism fails.
+            3. Failure reports can include full message content, so route them to a restricted security mailbox and confirm this fits your privacy and compliance obligations.
+            4. Save the zone. Many large providers no longer send failure reports, so receiving few or none is normal.
+        - id: cli
+          desc: |
+            To confirm a failure reporting address is published:
+
+            ```bash
+            dig +short TXT _dmarc.lunalectric.com
+            ```
+
+            The returned record must include a `ruf=mailto:` tag pointing at your reporting mailbox.
+        - id: terraform
+          desc: |
+            To publish a failure reporting address with Terraform:
+
+            ```hcl
+            resource "aws_route53_record" "dmarc" {
+              zone_id = aws_route53_zone.primary.zone_id
+              name    = "_dmarc.lunalectric.com"
+              type    = "TXT"
+              ttl     = 3600
+              records = ["v=DMARC1; p=quarantine; rua=mailto:dmarc-aggregate@lunalectric.com; ruf=mailto:dmarc-forensic@lunalectric.com; fo=1;"]
+            }
+            ```
+    refs:
+      - url: https://www.m3aawg.org/sites/default/files/legacy/m3aawg-email-authentication-recommended-best-practices-09-2020.pdf
+        title: M3AAWG Email Authentication Recommended Best Practices (2020)
+  - uid: mondoo-email-security-dkim
+    title: Ensure DKIM is configured
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/mitre-attack: mitre-attack-t1566
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    props:
+      - uid: mondooEmailSecurityDkimSelectors
+        title: Define a list of valid DKIM selectors
+        mql: |
+          [
+            "google",
+            "selector1",
+            "selector2",
+            "k1",
+            "dkim",
+            "mx",
+            "mailjet"
+          ]
+    mql: |
+      props.mondooEmailSecurityDkimSelectors.contains(dns(_+"._domainkey."+domainName.fqdn).params['TXT']['rData'].first == /p=/)
+      props.mondooEmailSecurityDkimSelectors.contains(dns(_+"._domainkey."+domainName.fqdn).params['TXT']['rData'].first == /k=rsa/)
+    docs:
+      desc: |
+        This check verifies that the domain publishes a DKIM public key for at least one of the selectors this policy checks.
+
+        DKIM signs outbound mail with a private key held by the sending service and publishes the matching public key in DNS at `<selector>._domainkey.<domain>`. The check looks up the selectors carried by this policy's property and requires that at least one returns a record containing a `p=` public key tag, as in `google._domainkey.example.com. IN TXT "v=DKIM1; k=rsa; p=MIGfMA0..."`.
+
+        **Why this matters**
+
+        DKIM is the only one of the three email authentication mechanisms that survives forwarding. SPF authenticates the connecting server, so it breaks the moment a mailing list or a forwarding rule relays the message from a different address. The DKIM signature travels with the message and still validates.
+
+        That matters for enforcement. Under DMARC a message passes if either SPF or DKIM aligns, so a domain relying on SPF alone finds that forwarded legitimate mail fails, and the reports fill with failures that are not attacks. This is the single most common reason a DMARC enforcement rollout is abandoned.
+
+        The signature also covers content. It commits to the headers and body, so a message altered in transit fails validation, which SPF cannot detect at all.
+
+        Note that this check can only look up the selectors it has been given. A domain signing with a selector outside that list fails despite having DKIM configured correctly, so adjust the property to match the sending services actually in use.
+      audit: |
+        Run the `dig +short TXT <selector>._domainkey.<domain>` command for each DKIM selector your mail provider uses.
+
+        If the record returns a DKIM key containing `p=` (the public key) and `k=rsa`, the check passes. If no record is returned or the key material is missing, the check fails.
+      remediation:
+        - id: console
+          desc: |
+            DKIM keys are generated by your mail provider, not hand-authored. Enable DKIM in the provider's admin console and it gives you the exact record to publish:
+
+            1. Sign in to your mail provider's admin console (Google Workspace, Microsoft 365, Mailjet, and so on) and generate a DKIM key. Use RSA 2048-bit or stronger.
+            2. Copy the `TXT` record the provider displays. It is published at `<selector>._domainkey.<domain>` and carries `v=DKIM1`, a `k=` key type, and the base64 public key in `p=`. The private key stays with the provider and signs outgoing mail.
+            3. Sign in to the control panel for the provider that hosts the zone and publish that record.
+            4. Return to the mail provider's console and turn on DKIM signing. Publishing the record alone does not sign anything.
+            5. If your provider uses a selector other than the common defaults (`google`, `selector1`, `selector2`, `k1`, `dkim`, `mx`, `mailjet`), add it to the `mondooEmailSecurityDkimSelectors` property so this check queries the right name.
+        - id: cli
+          desc: |
+            To confirm the DKIM public key is published for a selector:
+
+            ```bash
+            dig +short TXT google._domainkey.lunalectric.com
+            ```
+
+            The returned record must contain `k=rsa` and a `p=` tag holding the public key. No output means either the record is missing or the selector differs from the one queried.
+        - id: terraform
+          desc: |
+            To publish the DKIM public key with Terraform:
+
+            ```hcl
+            resource "aws_route53_record" "dkim" {
+              zone_id = aws_route53_zone.primary.zone_id
+              name    = "google._domainkey.lunalectric.com"
+              type    = "TXT"
+              ttl     = 3600
+              records = ["v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA..."]
+            }
+            ```
+
+            The `p=` value comes from the mail provider and is a long base64 string, truncated here. Terraform publishes the public half only; enabling signing remains a console or API action against the mail provider.
+    refs:
+      - url: https://www.m3aawg.org/sites/default/files/legacy/m3aawg-email-authentication-recommended-best-practices-09-2020.pdf
+        title: M3AAWG Email Authentication Recommended Best Practices (2020)
+      - url: https://en.wikipedia.org/wiki/DomainKeys_Identified_Mail
+        title: DomainKeys Identified Mail

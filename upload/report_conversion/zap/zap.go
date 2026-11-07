@@ -1,0 +1,284 @@
+// Copyright Mondoo, Inc. 2024, 2026
+// SPDX-License-Identifier: BUSL-1.1
+
+// Package zap converts an OWASP ZAP XML report into Mondoo FEX findings. Each
+// ZAP alert becomes one FEX finding (category SECURITY); the affected URLs and
+// their request context come from the alert's instances. ZAP is a widely-used
+// open-source DAST scanner.
+package zap
+
+import (
+	"crypto/sha256"
+	"encoding/xml"
+	"fmt"
+	"html"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	rc "go.mondoo.com/cnspec/upload/report_conversion"
+	"go.mondoo.com/mql/providers-sdk/v1/upstream/fex"
+	"google.golang.org/protobuf/types/known/timestamppb"
+)
+
+func init() { rc.Register("zap", Convert) }
+
+type zapReport struct {
+	XMLName xml.Name `xml:"OWASPZAPReport"`
+	// Report-level generation time, e.g. "Wed, 1 Jan 2025 12:00:00".
+	Generated string    `xml:"generated,attr"`
+	Sites     []zapSite `xml:"site"`
+}
+
+type zapSite struct {
+	Name   string     `xml:"name,attr"`
+	Alerts []zapAlert `xml:"alerts>alertitem"`
+}
+
+type zapAlert struct {
+	PluginID   string        `xml:"pluginid"`
+	Name       string        `xml:"name"`
+	RiskCode   string        `xml:"riskcode"`
+	Confidence string        `xml:"confidence"`
+	Desc       string        `xml:"desc"`
+	Solution   string        `xml:"solution"`
+	Reference  string        `xml:"reference"`
+	CWEID      string        `xml:"cweid"`
+	OtherInfo  string        `xml:"otherinfo"`
+	Instances  []zapInstance `xml:"instances>instance"`
+}
+
+type zapInstance struct {
+	URI      string `xml:"uri"`
+	Method   string `xml:"method"`
+	Param    string `xml:"param"`
+	Attack   string `xml:"attack"`
+	Evidence string `xml:"evidence"`
+}
+
+// Convert parses an OWASP ZAP XML report and returns one FEX document per alert.
+func Convert(data []byte) ([]*fex.FindingDocument, error) {
+	var report zapReport
+	if err := xml.Unmarshal(data, &report); err != nil {
+		return nil, fmt.Errorf("parse ZAP XML: %w", err)
+	}
+	if report.XMLName.Local != "OWASPZAPReport" {
+		return nil, fmt.Errorf("parse ZAP XML: not an OWASPZAPReport document")
+	}
+
+	// The report carries a single generation time; use it as the first-seen time
+	// for every finding so re-uploading an old report doesn't reset first-seen to
+	// upload time. Left unset when it can't be parsed (never falls back to now).
+	generated := parseGenerated(report.Generated)
+
+	var docs []*fex.FindingDocument
+	for _, site := range report.Sites {
+		source := &fex.Source{Name: sourceName(site.Name)}
+		for _, a := range site.Alerts {
+			f := toFex(a, site.Name, source)
+			if generated != nil {
+				f.FirstSeenAt = timestamppb.New(*generated)
+			}
+			docs = append(docs, fex.FexToDocument(f))
+		}
+	}
+	return docs, nil
+}
+
+// zapDateLayouts covers ZAP's "generated" attribute, which is emitted with
+// Java's "EEE, d MMM yyyy HH:mm:ss" and may or may not carry a timezone.
+var zapDateLayouts = []string{
+	"Mon, 2 Jan 2006 15:04:05",
+	"Mon, 2 Jan 2006 15:04:05 MST",
+	"Mon, 2 Jan 2006 15:04:05 -0700",
+	"Mon, 2 Jan 2006 15:04:05 MST-07:00",
+}
+
+// parseGenerated parses ZAP's report-level date, returning nil when it is empty
+// or in an unrecognized format (callers then leave FirstSeenAt unset).
+func parseGenerated(s string) *time.Time {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	for _, layout := range zapDateLayouts {
+		if t, err := time.Parse(layout, s); err == nil {
+			return &t
+		}
+	}
+	return nil
+}
+
+func toFex(a zapAlert, siteName string, source *fex.Source) *fex.FindingExchange {
+	// Fold the site into the id: the same plugin can fire on multiple sites in
+	// one report, and a bare plugin id would collide across them (only the
+	// source name would differ). Ref keeps the raw plugin id.
+	seed := a.PluginID
+	if seed == "" {
+		seed = a.Name
+	}
+	id := shortHash(siteName + "\x00" + seed)
+	summary := clean(a.Name)
+	if summary == "" {
+		summary = "ZAP alert"
+	}
+	return &fex.FindingExchange{
+		Id:      id,
+		Ref:     a.PluginID,
+		Summary: summary,
+		Source:  source,
+		Status:  fex.Status_STATUS_AFFECTED,
+		Details: &fex.FindingDetail{
+			Category:    fex.FindingDetail_CATEGORY_SECURITY,
+			Description: description(a),
+			Severity:    severity(a.RiskCode),
+			Confidence:  confidence(a.Confidence),
+			References:  references(a),
+		},
+		Affects:      affects(a),
+		Evidences:    httpEvidence(a),
+		Remediations: remediations(a),
+	}
+}
+
+// affects lists the vulnerable URLs (one Affects per distinct request context).
+func affects(a zapAlert) []*fex.Affects {
+	var out []*fex.Affects
+	seen := map[string]bool{}
+	for _, in := range a.Instances {
+		uri := clean(in.URI)
+		if uri == "" {
+			continue
+		}
+		// Key on uri+method+param so distinct request contexts against the same
+		// URL (e.g. a GET and a POST, or two different parameters) are preserved
+		// rather than collapsed to the first instance.
+		key := uri + "\x00" + clean(in.Method) + "\x00" + clean(in.Param)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, &fex.Affects{Component: &fex.Component{Id: uri}})
+	}
+	return out
+}
+
+// httpEvidence carries the DAST request context (method, param, attack, matched
+// evidence) as first-class HttpRequest evidence, one per distinct request.
+func httpEvidence(a zapAlert) []*fex.Evidence {
+	var out []*fex.Evidence
+	seen := map[string]bool{}
+	for _, in := range a.Instances {
+		uri := clean(in.URI)
+		method, param := clean(in.Method), clean(in.Param)
+		key := uri + "\x00" + method + "\x00" + param
+		if uri == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, &fex.Evidence{Details: &fex.Evidence_HttpRequest{HttpRequest: &fex.HttpRequest{
+			Url:      uri,
+			Method:   method,
+			Param:    param,
+			Attack:   clean(in.Attack),
+			Evidence: clean(in.Evidence),
+		}}})
+	}
+	return out
+}
+
+func references(a zapAlert) []*fex.Reference {
+	var out []*fex.Reference
+	if n, err := strconv.Atoi(strings.TrimSpace(a.CWEID)); err == nil && n > 0 {
+		out = append(out, &fex.Reference{Type: "CWE", Name: fmt.Sprintf("CWE-%d", n)})
+	}
+	for _, url := range splitLines(clean(a.Reference)) {
+		out = append(out, &fex.Reference{Name: "reference", Url: url})
+	}
+	return out
+}
+
+func remediations(a zapAlert) []*fex.Remediation {
+	sol := clean(a.Solution)
+	if sol == "" {
+		return nil
+	}
+	return []*fex.Remediation{{Summary: "Solution", Details: sol}}
+}
+
+func description(a zapAlert) string {
+	parts := make([]string, 0, 2)
+	if d := clean(a.Desc); d != "" {
+		parts = append(parts, d)
+	}
+	if o := clean(a.OtherInfo); o != "" {
+		parts = append(parts, o)
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// severity maps ZAP riskcode (0..3) to a severity rating.
+func severity(riskcode string) *fex.Severity {
+	var rating fex.SeverityRating
+	switch strings.TrimSpace(riskcode) {
+	case "3":
+		rating = fex.SeverityRating_SEVERITY_RATING_HIGH
+	case "2":
+		rating = fex.SeverityRating_SEVERITY_RATING_MEDIUM
+	case "1":
+		rating = fex.SeverityRating_SEVERITY_RATING_LOW
+	case "0":
+		rating = fex.SeverityRating_SEVERITY_RATING_NONE
+	default:
+		return nil
+	}
+	return &fex.Severity{Rating: rating}
+}
+
+// confidence maps ZAP confidence (0..4) to the FEX confidence enum.
+func confidence(c string) fex.Confidence {
+	switch strings.TrimSpace(c) {
+	case "3", "4":
+		return fex.Confidence_CONFIDENCE_HIGH
+	case "2":
+		return fex.Confidence_CONFIDENCE_MEDIUM
+	case "1":
+		return fex.Confidence_CONFIDENCE_LOW
+	default:
+		return fex.Confidence_CONFIDENCE_UNSPECIFIED
+	}
+}
+
+var tagRe = regexp.MustCompile(`<[^>]*>`)
+
+// clean strips the simple HTML ZAP wraps some fields in and unescapes entities.
+func clean(s string) string {
+	s = tagRe.ReplaceAllString(s, "")
+	return strings.TrimSpace(html.UnescapeString(s))
+}
+
+func splitLines(s string) []string {
+	var out []string
+	for line := range strings.SplitSeq(s, "\n") {
+		if l := strings.TrimSpace(line); l != "" {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+func sourceName(name string) string {
+	if name == "" {
+		return "zap"
+	}
+	return name
+}
+
+// shortHash returns a 16-hex-char (64-bit) SHA-256 prefix. It is only used as a
+// fallback finding id for alerts without a pluginid; a collision would merge two
+// such findings, which is acceptable given how rare nameless/idless alerts are.
+func shortHash(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return fmt.Sprintf("%x", h)[:16]
+}

@@ -1,0 +1,25 @@
+policies:
+  - uid: data-queries-mix
+    name: Test data SSH Policy
+    version: 1.0.0
+    tags:
+      mondoo.com/category: compliance
+      mondoo.com/platform: ubuntu:24.04,linux
+    require:
+      - provider: os
+    owner_mrn: ""
+    authors:
+      - name: Mondoo, Inc.
+        email: hello@mondoo.com
+    groups:
+      - title: group 01
+        filters: |
+          asset.family.contains(_ == 'unix')
+        checks:
+          - uid: sshd-sshd-01
+        queries:
+          - uid: sshd-sshd-01
+queries:
+  - uid: sshd-sshd-01
+    title: Asset name is "test"
+    mql: asset.name == "test"

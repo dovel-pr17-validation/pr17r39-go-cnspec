@@ -1,0 +1,1421 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+policies:
+  - uid: mondoo-docker-security
+    name: Mondoo Dockerfile Security
+    version: 1.3.3
+    license: BUSL-1.1
+    tags:
+      mondoo.com/category: security
+      mondoo.com/platform: dockerfile
+      mondoo.com/icon: docker
+    require:
+      - provider: os
+    authors:
+      - name: Mondoo, Inc.
+        email: hello@mondoo.com
+    summary: Secure Dockerfiles against insecure build patterns
+    docs:
+      desc: |
+        The Mondoo Dockerfile Security policy identifies insecure patterns in Dockerfiles that produce vulnerable container images. This policy helps organizations detect and remediate authoring mistakes before images ship to production, reducing the likelihood of containers running as root, exposed management ports, disabled certificate validation, and unnecessary attack surface that enables container escapes and host compromise.
+
+        This policy provides security checks across key Dockerfile authoring areas:
+
+        - Non-root user configuration
+        - Secure package management and pinned dependencies
+        - Certificate and signature validation during builds
+        - Restricted exposed ports and management interfaces
+        - Privilege controls and removal of dangerous capabilities
+        - Avoidance of secrets and credentials in image layers
+
+        Learn more about scanning Dockerfiles in the [cnspec Dockerfile documentation](https://mondoo.com/docs/cnspec/supplychain/dockerfiles).
+
+        Have suggestions for new checks in this policy? Visit our [cnspec repository](https://github.com/mondoohq/cnspec).
+    groups:
+      - title: Network Security
+        filters: |
+          asset.platform == "dockerfile"
+        checks:
+          - uid: mondoo-docker-security-no-management-ports
+          - uid: mondoo-docker-security-port-out-of-range
+      - title: Package Management Security
+        filters: |
+          asset.platform == "dockerfile"
+        checks:
+          - uid: mondoo-docker-security-no-insecure-certificate-validation-apt
+          - uid: mondoo-docker-security-no-insecure-certificate-validation-curl
+          - uid: mondoo-docker-security-no-insecure-certificate-validation-wget
+          - uid: mondoo-docker-security-no-gpg-skip-yum
+          - uid: mondoo-docker-security-no-apt-get-dist-upgrade
+      - title: Privilege & User Security
+        filters: |
+          asset.platform == "dockerfile"
+        checks:
+          - uid: mondoo-docker-security-no-sudo-commands
+          - uid: mondoo-docker-security-non-root-user
+      - title: Volume Security
+        filters: |
+          asset.platform == "dockerfile"
+        checks:
+          - uid: mondoo-docker-security-no-sensitive-volume-mounts
+          - uid: mondoo-docker-security-no-sensitive-bind-mount-sources
+          - uid: mondoo-docker-security-no-workdir-system-dirs
+      - title: Build Security
+        filters: |
+          asset.platform == "dockerfile"
+        checks:
+          - uid: mondoo-docker-security-use-copy-instead-of-add
+          - uid: mondoo-docker-security-no-secrets-in-env
+          - uid: mondoo-docker-security-no-run-security-insecure
+          - uid: mondoo-docker-security-no-run-network-host
+          - uid: mondoo-docker-best-practice-no-latest-tag
+          - uid: mondoo-docker-best-practice-from-tag-specified
+      - title: Provenance & Ownership
+        filters: |
+          asset.platform == "dockerfile"
+        checks:
+          - uid: mondoo-docker-security-image-source-label
+          - uid: mondoo-docker-security-image-authors-label
+queries:
+  - uid: mondoo-docker-security-no-management-ports
+    title: Don't expose management ports
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-20
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-1
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      docker.file.stages.all(expose.all(port != 22))
+      docker.file.stages.all(expose.all(port != 2375))
+      docker.file.stages.all(expose.all(port != 8500))
+      docker.file.stages.all(expose.all(port != 6443))
+    docs:
+      desc: |
+        This check verifies that no `EXPOSE` instruction in the Dockerfile advertises a management port.
+
+        `EXPOSE` records the ports an image intends to serve. It does not publish anything by itself, but `docker run -P` publishes every exposed port to a host port, and orchestrators, service meshes, and compose files read the same metadata to decide what to wire up. The check requires that no build stage expose port 22 for SSH, 2375 for the unencrypted Docker Remote API, 8500 for the Consul HTTP API, or 6443 for the Kubernetes API server.
+
+        **Why this matters**
+
+        Port 2375 is the one that ends worst. The Docker Remote API listens there without TLS and without authentication, so anyone who reaches it can create a container that bind-mounts the host root filesystem and then write to `/etc/shadow` or drop a service unit file. That is root on the node rather than root inside one container.
+
+        Port 8500 hands an attacker the Consul HTTP API. They read the key-value store, which in most deployments holds database passwords and service tokens, then rewrite a service registration so traffic intended for a healthy backend is routed to a host they control.
+
+        Port 6443 matters when the image also carries a kubeconfig or a mounted service account token. Reaching the API server with that credential lets an attacker list secrets across every namespace the token can see and schedule a privileged pod on another node.
+
+        Port 22 turns the container into a login target. Whatever key or password the image baked in becomes a shell, and from that shell the attacker reaches every internal address the container network can route to.
+
+        Expose only the ports the application itself serves. Management access belongs on runtime-managed channels such as an orchestrator exec path, not on a port recorded in the image.
+      audit: |
+        Inspect the Dockerfile to confirm management ports are not exposed:
+
+        1. Open the Dockerfile in a text editor or print it with `cat Dockerfile`.
+        2. Locate every `EXPOSE` instruction: `grep -nE '^EXPOSE' Dockerfile`.
+        3. Confirm none of the exposed ports are 22, 2375, 8500, or 6443.
+
+        If no management ports are exposed, the check passes. If any of these ports appears in an `EXPOSE` instruction, the check fails.
+      remediation:
+        - id: dockerfile
+          desc: |
+            Remove `EXPOSE` instructions for management ports (22 for SSH, 2375 for the Docker Remote API, 8500 for the Consul HTTP API, 6443 for the Kubernetes API). Expose only the application ports the container needs:
+
+            ```dockerfile
+            # Instead of:
+            EXPOSE 22
+            EXPOSE 8080
+
+            # Use:
+            EXPOSE 8080
+            ```
+
+            Provide management access through secured, runtime-managed channels rather than ports baked into the image.
+    refs:
+      - url: https://docs.docker.com/reference/dockerfile/#expose
+        title: Dockerfile Reference - EXPOSE
+      - url: https://docs.docker.com/build/building/best-practices/
+        title: Dockerfile Best Practices
+  - uid: mondoo-docker-security-no-insecure-certificate-validation-apt
+    title: Don't disable certificate validation in APT
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: |
+      docker.file.stages.all(run.all(commands.where(binary == /^(apt-get|apt)$/).none(flags.contains("--allow-insecure-repositories"))))
+      docker.file.stages.all(run.all(commands.where(binary == "sudo" && subcommand == /^(apt-get|apt)$/).none(flags.contains("--allow-insecure-repositories"))))
+    docs:
+      desc: |
+        This check verifies that no `RUN` instruction disables APT's repository signature verification.
+
+        APT refuses to install from a repository whose release metadata is not signed by a key it trusts. The `--allow-insecure-repositories` option removes that refusal and downgrades it to a warning, so an index that is unsigned or that cannot be verified is accepted and the install that follows proceeds from it. The check requires that no `apt-get` or `apt` command in a `RUN` instruction of any build stage pass this option. The same text passed to another command, such as a pattern given to `grep`, does not change what APT accepts and is not flagged.
+
+        **Why this matters**
+
+        Repository signing is the only thing tying a package to its publisher. Without it, an attacker who can answer for the repository host, whether through DNS poisoning on the build network, a compromised mirror, or a typo-squatted hostname in the Dockerfile, serves an index of their choosing and APT installs whatever it names. The payload lands as an ordinary package with a maintainer script, which runs as root during the build and can write anywhere in the image.
+
+        That code then ships. Every container started from the image runs it, in every environment the image reaches, and the compromise is invisible to a scanner comparing installed package versions against a vulnerability database, because the attacker chose a version string that looks ordinary.
+
+        The bypass also hides its own cause. A build that needs this option is a build whose repository key was never imported, so the error it suppresses is the one worth reading.
+
+        The fix is to make verification succeed rather than to skip it. Import the publisher's signing key into a keyring, pin it to the repository so only that key can authorize packages from that source, then remove the option. Dropping the option on its own breaks the install against an unsigned repository, which is exactly why it tends to be added back.
+      audit: |
+        Inspect the Dockerfile to confirm APT does not skip repository validation:
+
+        1. Open the Dockerfile in a text editor or print it with `cat Dockerfile`.
+        2. Search every `RUN` instruction for the insecure option: `grep -n -- '--allow-insecure-repositories' Dockerfile`.
+        3. Confirm no `RUN` instruction passes `--allow-insecure-repositories` to APT.
+
+        If the option is absent, the check passes. If any `RUN` instruction uses it, the check fails.
+      remediation:
+        - id: dockerfile
+          desc: |
+            The proper fix is to make APT trust the repository, then remove the bypass. Removing `--allow-insecure-repositories` on its own breaks installs from an unsigned or keyless repository, because APT then refuses packages it cannot verify. Import the repository's GPG signing key so verification succeeds, then drop the flag.
+
+            Fetch the publisher's key, store it in `/etc/apt/keyrings`, and pin it to the repository with `signed-by` so only that key can authorize packages from that source:
+
+            ```dockerfile
+            # Instead of:
+            RUN apt-get update --allow-insecure-repositories && apt-get install -y package
+
+            # Use:
+            RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg && \
+                install -m 0755 -d /etc/apt/keyrings && \
+                curl -fsSL https://repo.example.com/gpg | gpg --dearmor -o /etc/apt/keyrings/example.gpg && \
+                echo "deb [signed-by=/etc/apt/keyrings/example.gpg] https://repo.example.com/apt stable main" \
+                  > /etc/apt/sources.list.d/example.list && \
+                apt-get update && apt-get install -y --no-install-recommends package && \
+                rm -rf /var/lib/apt/lists/*
+            ```
+
+            With the key imported, APT validates package signatures and the insecure flag is no longer needed. The `rm -rf /var/lib/apt/lists/*` step clears the package index cache so it does not persist in the image layer.
+    refs:
+      - url: https://docs.docker.com/build/building/best-practices/
+        title: Dockerfile Best Practices
+      - url: https://docs.docker.com/build/building/best-practices/#run
+        title: Dockerfile Best Practices - RUN
+  - uid: mondoo-docker-security-no-insecure-certificate-validation-curl
+    title: Don't disable certificate validation in curl
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: |
+      docker.file.stages.all(run.all(commands.where(binary == "curl").none(flags.contains("--insecure") || flags.any(_ == /^-[a-zA-Z]*k[a-zA-Z]*$/))))
+    docs:
+      desc: |
+        This check verifies that no `curl` invocation in a `RUN` instruction disables TLS certificate validation.
+
+        `curl` validates the server certificate against its trust store by default and aborts the transfer when validation fails. The `--insecure` option, and its short form `-k`, turn that abort into silent acceptance of any certificate, including one the attacker signed themselves. The check reads every `RUN` instruction, finds the `curl` commands, and requires that neither form is present. The short form counts when it is bundled into an option cluster such as `-fsSLk`, which is how it most often reaches a Dockerfile, because it reads as part of a familiar download idiom rather than as a decision.
+
+        **Why this matters**
+
+        Almost every Dockerfile that calls `curl` is downloading something it then executes: a binary, an installer script piped to a shell, a release tarball unpacked into the image. Certificate validation is what makes the response come from the host named in the URL rather than from whoever is on the path.
+
+        With validation off, anyone who can answer for that hostname on the build network serves their own payload. On a shared CI runner or a build reached through an intercepting proxy, that is a realistic position to hold. The substituted binary is baked into a layer and runs with whatever privileges the container is later given.
+
+        The failure is silent in both directions. `curl` exits zero, the build succeeds, and the resulting layer looks identical to a clean one. Nothing in the image records that the download was unverified.
+
+        Remove the option and fix the underlying trust problem instead. If the endpoint presents a certificate from an internal authority, install that authority's certificate into the image so validation succeeds on its own.
+      audit: |
+        Inspect the Dockerfile to confirm `curl` validates certificates:
+
+        1. Open the Dockerfile in a text editor or print it with `cat Dockerfile`.
+        2. Locate every `RUN` instruction containing `curl`: `grep -nE 'RUN.*curl' Dockerfile`.
+        3. Confirm none of the matched instructions pass `--insecure` or `-k`, including `-k` bundled into a short-option cluster such as `-fsSLk`.
+
+        If no `curl` command disables certificate validation, the check passes. If any uses `--insecure` or `-k`, the check fails.
+      remediation:
+        - id: dockerfile
+          desc: |
+            Remove the `--insecure` and `-k` options from `curl` commands so certificate validation stays enabled:
+
+            ```dockerfile
+            # Instead of:
+            RUN curl -k -o app.tar.gz https://example.com/app.tar.gz
+
+            # Use:
+            RUN curl -fsSL -o app.tar.gz https://example.com/app.tar.gz
+            ```
+    refs:
+      - url: https://docs.docker.com/build/building/best-practices/
+        title: Dockerfile Best Practices
+      - url: https://docs.docker.com/build/building/best-practices/#run
+        title: Dockerfile Best Practices - RUN
+  - uid: mondoo-docker-security-no-insecure-certificate-validation-wget
+    title: Don't disable certificate validation in Wget
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: |
+      docker.file.stages.all(run.all(commands.where(binary == "wget").none(flags.contains("--no-check-certificate"))))
+      docker.file.stages.all(run.all(commands.where(binary == "sudo" && subcommand == "wget").none(flags.contains("--no-check-certificate"))))
+    docs:
+      desc: |
+        This check verifies that no `wget` invocation in a `RUN` instruction disables TLS certificate validation.
+
+        `wget` verifies the server certificate against the system trust store and refuses the transfer when verification fails. The `--no-check-certificate` option removes that refusal and accepts any certificate, whether expired, self-signed, or issued for a different host. The check requires that no `wget` command in a `RUN` instruction of any build stage pass this option. The same text passed to another command, such as a pattern given to `grep`, does not change how `wget` connects and is not flagged.
+
+        **Why this matters**
+
+        The `wget` calls in a Dockerfile fetch the things the image is built out of: language runtimes, release archives, install scripts, static binaries. With certificate verification disabled, the only remaining guarantee is that something answered the connection, not that the thing answering is the publisher named in the URL.
+
+        An attacker positioned between the builder and that host, on a shared runner, behind a poisoned resolver, or on an intercepting proxy, answers with their own archive. It is unpacked into the image and, in the common install-script case, executed as root during the build. The result is a working image that passes its tests and carries an implant in a layer nobody rereads.
+
+        The option is usually added to get past a real error: an expired certificate on an internal mirror, or a private certificate authority the base image does not trust. Suppressing the error leaves that root cause in place, and every later build inherits both the broken trust configuration and the bypass.
+
+        Remove the option so verification runs again. If the download target uses an internal certificate authority, add that authority's certificate to the image's trust store before the fetch. If the certificate is genuinely expired, renewing it is the fix, because a build that succeeds against an expired certificate is a build that cannot tell a lapsed certificate from an attacker's.
+      audit: |
+        Inspect the Dockerfile to confirm `wget` validates certificates:
+
+        1. Open the Dockerfile in a text editor or print it with `cat Dockerfile`.
+        2. Search every `RUN` instruction for the insecure option: `grep -n -- '--no-check-certificate' Dockerfile`.
+        3. Confirm no `RUN` instruction passes `--no-check-certificate` to `wget`.
+
+        If no `wget` command passes the option, the check passes. If any does, the check fails.
+      remediation:
+        - id: dockerfile
+          desc: |
+            Remove the `--no-check-certificate` option from `wget` commands so certificate validation stays enabled:
+
+            ```dockerfile
+            # Instead of:
+            RUN wget --no-check-certificate -O app.tar.gz https://example.com/app.tar.gz
+
+            # Use:
+            RUN wget -O app.tar.gz https://example.com/app.tar.gz
+            ```
+    refs:
+      - url: https://docs.docker.com/build/building/best-practices/
+        title: Dockerfile Best Practices
+      - url: https://docs.docker.com/build/building/best-practices/#run
+        title: Dockerfile Best Practices - RUN
+  - uid: mondoo-docker-security-no-sudo-commands
+    title: Don't run commands using sudo
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-2
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-5
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-7-2-1
+      compliance/soc2-2017: soc2-control-cc6-3-1
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: |
+      docker.file.stages.all(run.all(commands.none(binary == "sudo")))
+    docs:
+      desc: |
+        This check verifies that no `RUN` instruction invokes `sudo`.
+
+        Build steps in a Dockerfile already run as root unless an earlier `USER` instruction changed that, so `sudo` is not what grants a step its privileges. The check requires that no `RUN` instruction in any build stage call `sudo`.
+
+        **Why this matters**
+
+        The reason to care is what `sudo` leaves in the image rather than what it does during the build. For it to work at all, the package has to be installed, and it ships a setuid root binary alongside a policy file. Once a container from that image is running as a non-root user, that binary is the shortest path back to root inside the container.
+
+        An attacker who reaches code execution as the application user, through a deserialization bug, a template injection, or an uploaded file, looks for exactly this. A permissive rule left in the sudoers policy, a passwordless entry inherited from a base image, or a `sudo` release with a known local privilege escalation turns a limited foothold into root in the container. From root in the container, a writable Docker socket, a relaxed seccomp profile, or a retained kernel capability becomes reachable in a way it was not before.
+
+        There is a build-time cost too. A step that needs `sudo` assumes an interactive shell and a configured sudoers policy, so the same Dockerfile behaves differently on a base image that does not ship it, and the build fails in a way that reads as a missing command rather than as a design problem.
+
+        Run privileged steps while the build is still root, then drop to a non-root account with `USER` for the stages that follow. Nothing in a build needs `sudo` to reach root.
+      audit: |
+        Inspect the Dockerfile to confirm `sudo` is not used:
+
+        1. Open the Dockerfile in a text editor or print it with `cat Dockerfile`.
+        2. Search every `RUN` instruction for `sudo`: `grep -nE 'RUN.*\bsudo\b' Dockerfile`.
+        3. Confirm no `RUN` instruction invokes `sudo`.
+
+        If `sudo` is absent, the check passes. If any `RUN` instruction uses it, the check fails.
+      remediation:
+        - id: dockerfile
+          desc: |
+            Remove `sudo` from `RUN` instructions. If a step needs elevated permissions, run it while the build is still root and switch to a non-root user afterward with the `USER` instruction:
+
+            ```dockerfile
+            # Instead of:
+            RUN sudo apt-get install -y package
+
+            # Use:
+            RUN apt-get update && apt-get install -y --no-install-recommends package && \
+                rm -rf /var/lib/apt/lists/*
+            USER appuser
+            ```
+    refs:
+      - url: https://docs.docker.com/build/building/best-practices/#user
+        title: Dockerfile Best Practices - USER Instruction
+      - url: https://docs.docker.com/build/building/best-practices/
+        title: Dockerfile Best Practices
+  - uid: mondoo-docker-security-no-gpg-skip-yum
+    title: Don't skip GPG validation in YUM/DNF/zypper
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-12
+      compliance/nist-csf-2: nist-csf-2-pr-ps-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a08
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      docker.file.stages.all(run.all(commands.where(binary == /^(yum|dnf|dnf5|microdnf|tdnf|zypper)$/).none(flags.contains("--nogpgcheck") || flags.contains("--no-gpg-checks"))))
+      docker.file.stages.all(run.all(commands.where(binary == "sudo" && subcommand == /^(yum|dnf|dnf5|microdnf|tdnf|zypper)$/).none(flags.contains("--nogpgcheck") || flags.contains("--no-gpg-checks"))))
+    docs:
+      desc: |
+        This check verifies that no `RUN` instruction disables GPG signature verification for RPM package installs.
+
+        YUM, DNF, and zypper verify each package against a signing key imported into the RPM keyring before installing it. The `--nogpgcheck` option for YUM and DNF, and `--no-gpg-checks` for zypper, skip that verification. The check requires that no package manager command in a `RUN` instruction of any build stage pass either option. The same text passed to another command, such as a pattern given to `grep`, does not change how packages are installed and is not flagged.
+
+        **Why this matters**
+
+        Signature verification is what binds an RPM to the organization that built it. It survives an untrusted transport, a mirror the publisher does not control, and a caching proxy in between, because the check runs over the package contents rather than over the connection.
+
+        Turning it off returns the decision to whoever served the file. An attacker who controls a mirror, poisons the build network's resolver, or answers for a repository host publishes a package that installs cleanly. RPM scriptlets run as root during the build, so the package does not even need to contain a malicious binary; the install itself is enough to add a user, drop a key, or rewrite a service file inside the image.
+
+        The compromise then travels with the image. Package version reporting still looks correct, because the attacker chose the version string, so a vulnerability scan of the finished image finds nothing to report.
+
+        The correct fix is to make verification pass. Import the publisher's key into the RPM keyring, then install without the bypass. Removing the option on its own breaks the build against an unsigned or keyless repository, which is exactly why the bypass tends to reappear. If a repository genuinely publishes no signatures, that is a fact about the repository worth escalating rather than working around inside a Dockerfile.
+      audit: |
+        Inspect the Dockerfile to confirm GPG validation is not bypassed:
+
+        1. Open the Dockerfile in a text editor or print it with `cat Dockerfile`.
+        2. Search every `RUN` instruction for the bypass options: `grep -nE -- '--nogpgcheck|--no-gpg-checks' Dockerfile`.
+        3. Confirm no `RUN` instruction passes either option to YUM, DNF, or zypper.
+
+        If no YUM, DNF, or zypper command passes either option, the check passes. If any does, the check fails.
+      remediation:
+        - id: dockerfile
+          desc: |
+            The proper fix is to import the repository's GPG signing key so signature verification succeeds, then remove the bypass flag. Dropping `--nogpgcheck` or `--no-gpg-checks` on its own breaks installs from an unsigned or keyless repository, because the package manager then refuses packages whose signatures it cannot verify against a trusted key.
+
+            For YUM and DNF, import the publisher's key with `rpm --import`, then install without the bypass:
+
+            ```dockerfile
+            # Instead of:
+            RUN dnf install -y --nogpgcheck package
+
+            # Use:
+            RUN rpm --import https://repo.example.com/RPM-GPG-KEY-example && \
+                dnf install -y package && \
+                dnf clean all && rm -rf /var/cache/dnf
+            ```
+
+            For zypper, import the key the same way, then install without `--no-gpg-checks`:
+
+            ```dockerfile
+            # Instead of:
+            RUN zypper --no-gpg-checks install -y package
+
+            # Use:
+            RUN rpm --import https://repo.example.com/RPM-GPG-KEY-example && \
+                zypper install -y package && \
+                zypper clean --all
+            ```
+
+            With the key imported, signature verification passes and the bypass flag is no longer needed. The `dnf clean all` / `zypper clean --all` and `rm -rf /var/cache/dnf` steps clear the package caches so they do not persist in the image layer.
+    refs:
+      - url: https://docs.docker.com/build/building/best-practices/
+        title: Dockerfile Best Practices
+      - url: https://docs.docker.com/build/building/best-practices/#run
+        title: Dockerfile Best Practices - RUN
+  - uid: mondoo-docker-security-non-root-user
+    title: Don't run containers as root user
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-2
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-5
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-7-2-1
+      compliance/soc2-2017: soc2-control-cc6-3-1
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: |
+      docker.file.finalStage.runsAsRoot == false
+    docs:
+      desc: |
+        This check verifies that the final build stage of the Dockerfile switches to a non-root user.
+
+        The `USER` instruction sets the account that later build steps and, more importantly, the container's entrypoint run as. Docker defaults to root when no stage sets it. The check reads the final stage and requires a `USER` instruction naming something other than `root` or UID `0`. A final stage that omits `USER` entirely fails, and so does one that switches back to root after an earlier stage dropped privileges.
+
+        **Why this matters**
+
+        Root in a container is not root on the host, but the gap is thinner than it looks. Root in the container holds the default capability set, which includes the ability to change ownership, become any user the image defines, and override file permission checks outright, so an attacker with code execution can read and rewrite any file in the image regardless of how it is protected.
+
+        That is what turns a single application bug into a persistent foothold. An attacker who lands as an unprivileged user can only modify what that user owns. As root they rewrite the entrypoint, patch a binary in place, and install whatever they want to survive a restart.
+
+        The blast radius grows with anything the container is given. A host path mounted into the container is written with root's identity, so a bind-mounted configuration directory becomes host-writable. A mounted Docker socket becomes full control of the node. A kernel vulnerability that needs a capability an unprivileged user lacks becomes reachable.
+
+        Orchestrators enforce this as well. A Kubernetes pod configured to require a non-root user refuses to start an image whose user resolves to UID 0, so an image without a `USER` instruction is rejected at admission rather than caught in review.
+
+        Create a dedicated account in the image, give it ownership of the paths the application writes at runtime, and place the `USER` instruction after the steps that need root. A numeric UID is preferable where a platform must confirm the user is non-root without resolving names.
+      audit: |
+        Inspect the Dockerfile to confirm the final stage runs as a non-root user:
+
+        1. Open the Dockerfile in a text editor or print it with `cat Dockerfile`.
+        2. Locate every `USER` instruction: `grep -nE '^USER' Dockerfile`.
+        3. Confirm the final build stage declares a `USER` instruction and that it does not specify `root` or `0`.
+
+        If the final stage sets a non-root `USER`, the check passes. If the final stage omits `USER` or sets it to `root` or `0`, the check fails.
+      remediation:
+        - id: dockerfile
+          desc: |
+            Add a `USER` instruction that specifies a non-root user in the final stage of the Dockerfile. Create the user first and make sure it has the permissions needed for the processes in that stage.
+
+            On Debian or Ubuntu based images:
+
+            ```dockerfile
+            RUN groupadd -r appgroup && useradd -r -g appgroup appuser
+            USER appuser
+            ```
+
+            On Alpine based images, which do not ship `groupadd` or `useradd`:
+
+            ```dockerfile
+            RUN addgroup -S appgroup && adduser -S -G appgroup appuser
+            USER appuser
+            ```
+
+            Prefer a numeric UID when the runtime platform must verify the user is non-root without resolving names, for example under Kubernetes `runAsNonRoot`:
+
+            ```dockerfile
+            USER 10001:10001
+            ```
+
+            After the `USER` switch, the process can no longer write to files and directories that earlier steps created as root. Anything the application needs to write at runtime, such as application directories, cache paths, log directories, or a writable temp area, must be owned by the new user. Place the `USER` instruction after those steps and grant ownership with `chown` so the switch does not break the running container:
+
+            ```dockerfile
+            RUN groupadd -r appgroup && useradd -r -g appgroup appuser && \
+                mkdir -p /app/data && chown -R appuser:appgroup /app
+            WORKDIR /app
+            USER appuser
+            ```
+
+            For files brought in with `COPY`, set ownership at copy time with `COPY --chown=appuser:appgroup` rather than running a separate `chown`, which avoids duplicating the file data into an extra image layer.
+    refs:
+      - url: https://docs.docker.com/build/building/best-practices/#user
+        title: Dockerfile Best Practices - USER Instruction
+      - url: https://docs.docker.com/reference/dockerfile/#user
+        title: Dockerfile Reference - USER
+  - uid: mondoo-docker-security-use-copy-instead-of-add
+    title: Use COPY instead of ADD in Dockerfiles
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      docker.file.stages.all(add == empty)
+    docs:
+      desc: |
+        This check verifies that no build stage in the Dockerfile uses the `ADD` instruction.
+
+        `COPY` moves files from the build context or an earlier stage into the image and does nothing else. `ADD` does that too, but it also fetches remote URLs, clones git repositories, and silently unpacks local tar archives into the destination. The check requires that no stage contain an `ADD` instruction.
+
+        **Why this matters**
+
+        The automatic extraction is the part that surprises people. Any local file whose contents look like a tar archive is unpacked rather than copied, and the archive itself decides where its members land. A crafted archive with entries that traverse upward writes outside the destination directory, so adding an artifact that arrived from a build system or an outside contributor can rewrite paths the Dockerfile never mentions.
+
+        The remote fetch is the other half. Pointing `ADD` at an HTTPS URL downloads over the network at build time with no integrity check unless a checksum is supplied, and the result is baked into a layer. If the host is taken over, or the release asset is replaced in place, the next build pulls the substituted content and nothing in the Dockerfile changes to signal it.
+
+        Both behaviors are invisible at review. `ADD` and `COPY` read almost identically in a diff, so a reviewer scanning for a network fetch or an extraction step does not see one.
+
+        Replace `ADD` with `COPY` for anything that comes from the build context. When a remote artifact really is needed, download it in a `RUN` step and verify its checksum against a value committed to the repository, so a substituted file fails the build. When a local archive must be unpacked, copy it and extract it explicitly, so the extraction is a line a reviewer can see.
+      audit: |
+        Inspect the Dockerfile to confirm `ADD` is not used:
+
+        1. Open the Dockerfile in a text editor or print it with `cat Dockerfile`.
+        2. Search for `ADD` instructions: `grep -nE '^ADD' Dockerfile`.
+        3. Confirm no stage uses `ADD` for tasks that `COPY` could perform.
+
+        If no `ADD` instruction is present, the check passes. If any stage uses `ADD`, the check fails.
+      remediation:
+        - id: dockerfile
+          desc: |
+            Replace `ADD` instructions with `COPY` for file copying tasks:
+
+            ```dockerfile
+            # Instead of:
+            ADD app/ /opt/app/
+
+            # Use:
+            COPY app/ /opt/app/
+            ```
+
+            For remote downloads, fetch the file explicitly in a `RUN` step and verify its checksum:
+
+            ```dockerfile
+            RUN curl -fsSL -o /tmp/app.tar.gz https://example.com/app.tar.gz && \
+                echo "expected-sha256-digest  /tmp/app.tar.gz" | sha256sum -c -
+            ```
+
+            For local archives that must be extracted, copy the archive and extract it explicitly:
+
+            ```dockerfile
+            COPY app.tar.gz /tmp/
+            RUN tar -xzf /tmp/app.tar.gz -C /opt/app && rm /tmp/app.tar.gz
+            ```
+    refs:
+      - url: https://docs.docker.com/build/building/best-practices/#add-or-copy
+        title: Dockerfile Best Practices - ADD or COPY
+      - url: https://docs.docker.com/reference/dockerfile/#copy
+        title: Dockerfile Reference - COPY
+  - uid: mondoo-docker-best-practice-no-latest-tag
+    title: Don't build containers from latest tags
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a03
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      docker.file.stages.all(from.tag != "latest")
+    docs:
+      desc: |
+        This check verifies that no `FROM` instruction in the Dockerfile builds on a base image tagged `latest`.
+
+        A tag is a mutable pointer to an image digest. `latest` is the tag most projects move most often, and it carries no promise about which release it points at; it is the default name applied when a publisher pushes without specifying one. The check requires every `FROM` instruction in every build stage to name something other than `latest`.
+
+        **Why this matters**
+
+        Because the tag is mutable, the image a build produces is decided by whoever last pushed to the upstream repository rather than by the Dockerfile. An attacker who obtains a push credential for that repository, or who takes over an abandoned namespace on a public registry, repoints `latest` and every downstream build consumes their image on its next run. Nothing in the Dockerfile changes, so there is no diff, no review, and no signal in the pipeline.
+
+        The same mutability breaks incident response. When a base image is found to be compromised, the question is which of your images were built from the affected digest. With a moving tag there is no way to answer that from source; the record exists only in whatever the registry retained about each build.
+
+        The everyday cost is a broken build with no apparent cause. `latest` moves to a new major release, the runtime or system library the application links against changes underneath it, and the failure appears in a pipeline whose last commit touched something unrelated.
+
+        Name an explicit version tag so the base image is a reviewable line in the Dockerfile. Pin by digest where reproducibility must survive a retagged release, and let a dependency update tool raise the pin as a pull request a person approves.
+      audit: |
+        Inspect the Dockerfile to confirm base images do not use the `latest` tag:
+
+        1. Open the Dockerfile in a text editor or print it with `cat Dockerfile`.
+        2. Locate every `FROM` instruction: `grep -nE '^FROM' Dockerfile`.
+        3. Confirm no image reference ends with `:latest`.
+
+        If no `FROM` instruction uses the `latest` tag, the check passes. If any does, the check fails.
+      remediation:
+        - id: dockerfile
+          desc: |
+            Replace the `latest` tag with an explicit version tag so builds are consistent and predictable:
+
+            ```dockerfile
+            # Instead of:
+            FROM python:latest
+
+            # Use:
+            FROM python:3.12-slim
+            ```
+    refs:
+      - url: https://docs.docker.com/build/building/best-practices/
+        title: Dockerfile Best Practices
+      - url: https://docs.docker.com/reference/dockerfile/#from
+        title: Dockerfile Reference - FROM
+  - uid: mondoo-docker-best-practice-from-tag-specified
+    title: Ensure FROM base images specify a version tag
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a03
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      docker.file.stages.all(from.tag != empty || from.digest != empty || from.image == "scratch" || from.image.downcase.in(file.stages.map(from.name.downcase)))
+    docs:
+      desc: |
+        This check verifies that every `FROM` instruction in the Dockerfile names an explicit tag or digest.
+
+        An image reference with no tag is not an error. The registry client fills in `:latest` and resolves that, so a bare image name and the same name with the `latest` tag build identically while only one of them says so. The check requires each `FROM` instruction to carry a tag or a digest. The reserved `scratch` base is exempt, because it is an empty filesystem with nothing published to tag. So is a `FROM` that names an earlier build stage of the same Dockerfile, written as `FROM <image> AS <name>`: Docker resolves that name to the stage, not to a registry image, and a stage takes no tag.
+
+        **Why this matters**
+
+        The omission is harder to catch than the explicit case. A companion check in this policy flags `FROM image:latest`, which a reviewer also spots by eye. A bare image name reads like a deliberate choice and gets waved through, while resolving to exactly the same mutable pointer.
+
+        That pointer is controlled by whoever can push to the upstream repository. Someone who obtains a publisher's credential, or who registers an abandoned name on a public registry, changes what the default tag resolves to, and the next build of an untagged `FROM` consumes it. The Dockerfile is unchanged, so nothing in review or in the pipeline marks the substitution.
+
+        Reproducibility goes with it. Rebuilding a release from its commit produces whatever the registry serves that day, so a bug that reproduces in production may not reproduce in a rebuild, and a bill of materials describes one build rather than the source it came from.
+
+        Add the version tag the image is actually tested against. For builds that must be reproducible over time, pin the digest as well, so the tag documents intent and the digest fixes the content. Automated dependency updates keep the pin current and turn each base image change into a reviewable commit.
+      audit: |
+        Inspect the Dockerfile to confirm every base image specifies a tag:
+
+        1. Open the Dockerfile in a text editor or print it with `cat Dockerfile`.
+        2. Locate every `FROM` instruction: `grep -nE '^FROM' Dockerfile`.
+        3. Confirm each image reference includes an explicit tag or digest, unless it is `scratch` or the name of an earlier stage declared with `AS <name>`.
+
+        If every `FROM` instruction specifies a tag or digest, the check passes. If any omits both, the check fails.
+      remediation:
+        - id: dockerfile
+          desc: |
+            Add an explicit version tag to every `FROM` instruction:
+
+            ```dockerfile
+            # Instead of:
+            FROM python
+
+            # Use:
+            FROM python:3.12-slim
+            ```
+
+            For maximum reproducibility, consider pinning by digest:
+
+            ```dockerfile
+            FROM python:3.12-slim@sha256:abc123...
+            ```
+    refs:
+      - url: https://docs.docker.com/build/building/best-practices/
+        title: Dockerfile Best Practices
+      - url: https://docs.docker.com/reference/dockerfile/#from
+        title: Dockerfile Reference - FROM
+  - uid: mondoo-docker-security-no-secrets-in-env
+    title: Don't store secrets in Dockerfile ENV instructions
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-2-iv-access-control-encryption-and-decryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-1
+      compliance/nist-csf-2: nist-csf-2-pr-ds-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-28
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-3-5-1
+      compliance/soc2-2017: soc2-control-cc6-1-10
+      compliance/vda-isa-5: vda-isa-5-5-1-1
+    mql: |
+      docker.file.stages.all(env.none(name == /(?i)(password|passwd|secret|token|private[_.\-]key|access[_.\-]key|api[_.\-]key|apikey|credential)/))
+    docs:
+      desc: |
+        This check verifies that no `ENV` instruction declares a variable whose name indicates it holds a secret.
+
+        `ENV` writes a name and value into the image configuration, where it becomes a default environment variable for every container started from that image. The check reads every `ENV` instruction in every build stage and fails any whose variable name suggests a credential, matching names that contain password, passwd, secret, token, private key, access key, api key, or credential in any capitalization.
+
+        **Why this matters**
+
+        The value does not stay in the container. It is stored in the image configuration blob, so `docker inspect` prints it, `docker history` prints the instruction that set it, and anyone who can pull the image reads both without ever starting it. Pulling is usually far easier than getting code execution: a registry credential lifted from a CI job, a leaked pull secret from a Kubernetes namespace, or a registry that turned out to allow anonymous reads are each enough.
+
+        Deleting the value later does not help. Image layers are immutable and additive, so a subsequent `ENV` that clears the variable, or a `RUN` that unsets it, only adds a layer on top. The original value is still in the earlier layer and is recovered by exporting the image and reading it.
+
+        Inside a running container the exposure widens again. Environment variables are inherited by every child process, so they appear in the process filesystem to anything that can read it, in crash dumps, in exception traces that many frameworks render with the full environment attached, and in debug endpoints that print configuration.
+
+        Inject credentials at run time from the orchestrator's secret store, and for values needed only during the build, use a build secret mount so nothing is written into a layer.
+      audit: |
+        Inspect the Dockerfile to confirm `ENV` instructions do not declare secrets:
+
+        1. Open the Dockerfile in a text editor or print it with `cat Dockerfile`.
+        2. Locate every `ENV` instruction: `grep -nE '^ENV' Dockerfile`.
+        3. Confirm no variable name suggests a secret, such as `password`, `secret`, `token`, `api_key`, `access_key`, or `credential`.
+
+        If no `ENV` instruction declares a secret-like variable, the check passes. If any does, the check fails.
+      remediation:
+        - id: dockerfile
+          desc: |
+            Remove secrets from `ENV` instructions and inject them at runtime instead:
+
+            ```dockerfile
+            # Instead of:
+            ENV API_KEY=sk-1234567890
+            ENV DATABASE_PASSWORD=changeme123
+
+            # Inject at runtime:
+            # docker run -e API_KEY="$API_KEY" myimage
+            # docker run --env-file .env myimage
+            ```
+
+            For build-time secrets, use Docker BuildKit secret mounts so the value is never persisted in image layers. Point the consuming tool at the mounted file rather than printing the value, so the secret does not leak into build logs:
+
+            ```dockerfile
+            # syntax=docker/dockerfile:1
+            RUN --mount=type=secret,id=netrc,target=/root/.netrc \
+                curl -fsSL --netrc -o app.tar.gz https://internal.example.com/app.tar.gz
+            ```
+
+            Pass the secret at build time:
+
+            ```bash
+            docker build --secret id=netrc,src="$HOME/.netrc" .
+            ```
+    refs:
+      - url: https://docs.docker.com/build/building/best-practices/#run---mounttypesecret
+        title: Dockerfile Best Practices - Secret Mounts
+      - url: https://docs.docker.com/reference/dockerfile/#run---mounttypesecret
+        title: Dockerfile Reference - RUN --mount=type=secret
+  - uid: mondoo-docker-security-no-sensitive-volume-mounts
+    title: Don't mount sensitive host directories as volumes
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-3
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-7-2-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: |
+      docker.file.stages.all(volumes.none(path == /^\/(etc|proc|sys|dev|boot|root)(\/|$)/ || path == "/"))
+    docs:
+      desc: |
+        This check verifies that no `VOLUME` instruction in the Dockerfile declares a sensitive system directory as a mount point.
+
+        `VOLUME` marks a path inside the image as a mount point. At runtime the container engine either creates an anonymous volume there or binds whatever the operator supplies, and the declaration in the image is what makes that path a candidate in the first place. The check requires that no build stage declare `/`, `/etc`, `/proc`, `/sys`, `/dev`, `/boot`, or `/root`, or any path beneath them.
+
+        **Why this matters**
+
+        The declaration is an instruction to whoever runs the image. Operators and compose files bind host paths to declared mount points because that is what the image says it needs, so a declared `/etc` is how a host `/etc` ends up inside a container.
+
+        Once it is there, the container reads the host's `/etc/shadow` and any credential file the host keeps alongside it, and if the mount is writable it appends a root account or drops an authorized key. A `/root` mount reaches the host administrator's SSH keys and shell history directly.
+
+        `/proc` and `/sys` bound from the host are the classic container escape surface. A writable cgroup filesystem lets an attacker register a release agent that the kernel then executes on the host, and `/proc` exposes the host process table, kernel command line, and tunables that a sandboxed container is not meant to see.
+
+        A `/dev` mount reaches raw block devices, so an attacker reads or rewrites the host filesystem underneath the operating system's own view of it, and `/boot` reaches the kernel and initramfs the host loads at next start.
+
+        Declare only the directories the application stores its own data in. If a container genuinely needs host information, mount the specific path read-only at run time rather than advertising it in the image.
+      audit: |
+        Inspect the Dockerfile to confirm no sensitive directories are declared as volumes:
+
+        1. Open the Dockerfile in a text editor or print it with `cat Dockerfile`.
+        2. Locate every `VOLUME` instruction: `grep -nE '^VOLUME' Dockerfile`.
+        3. Confirm none reference `/`, `/etc`, `/proc`, `/sys`, `/dev`, `/boot`, or `/root`, or any subpath beneath them such as `/etc/ssl` or `/root/.ssh`.
+
+        If only application data directories are declared as volumes, the check passes. If any sensitive directory is declared, the check fails.
+      remediation:
+        - id: dockerfile
+          desc: |
+            Remove `VOLUME` instructions that reference sensitive directories and declare only application data directories:
+
+            ```dockerfile
+            # Instead of:
+            VOLUME /etc
+            VOLUME /proc
+            VOLUME /
+
+            # Use:
+            VOLUME /app/data
+            VOLUME /var/lib/myapp
+            ```
+
+            If the application needs host system information, use read-only bind mounts at runtime instead of declaring volumes in the Dockerfile.
+    refs:
+      - url: https://docs.docker.com/reference/dockerfile/#volume
+        title: Dockerfile Reference - VOLUME
+      - url: https://docs.docker.com/build/building/best-practices/
+        title: Dockerfile Best Practices
+  - uid: mondoo-docker-security-port-out-of-range
+    title: Ensure exposed ports are within valid range
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-2
+      compliance/owasp-top-10-2025: false
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      docker.file.stages.all(expose.all(port > 0 && port <= 65535))
+    docs:
+      desc: |
+        This check verifies that every port number declared in an `EXPOSE` instruction falls inside the valid TCP and UDP port range.
+
+        `EXPOSE` takes a port number and an optional protocol. A port number is a 16-bit value, so the only legal values are 1 through 65535. The check reads every `EXPOSE` instruction in every build stage and requires each port to fall in that range. A value of 0, or anything above 65535, fails.
+
+        **Why this matters**
+
+        An out-of-range port is almost always a typo or a copied line that was never adjusted, and the failure it produces is quiet. The image builds, the container starts, and the process reports healthy, but nothing is listening where the deployment expects it. The first signal is usually a load balancer marking the backend down or a client timing out, long after the change shipped.
+
+        Tooling that consumes image metadata compounds the problem. Compose files, orchestrator manifests, and service meshes read the exposed port list to generate service definitions and network policy. A port they cannot parse tends to be dropped rather than rejected, so the generated policy silently covers fewer ports than the author believed, and a rule meant to constrain traffic to one port ends up constraining nothing.
+
+        Publishing with `docker run -P` has the same shape. The runtime maps each valid exposed port to a host port and skips the rest, so an operator reading the port mapping sees a shorter list than the Dockerfile appears to declare and has no error to explain the difference.
+
+        Correct the port number to the one the application actually binds. If the instruction was copied from another image, confirm the application's listener rather than assuming the value transferred.
+      audit: |
+        Inspect the Dockerfile to confirm exposed ports are within the valid range:
+
+        1. Open the Dockerfile in a text editor or print it with `cat Dockerfile`.
+        2. Locate every `EXPOSE` instruction: `grep -nE '^EXPOSE' Dockerfile`.
+        3. Confirm each port number is between 1 and 65535.
+
+        If every exposed port is within range, the check passes. If any port is 0 or greater than 65535, the check fails.
+      remediation:
+        - id: dockerfile
+          desc: |
+            Correct `EXPOSE` instructions so every port number is between 1 and 65535:
+
+            ```dockerfile
+            # Instead of:
+            EXPOSE 99999
+
+            # Use:
+            EXPOSE 8080
+            EXPOSE 443/tcp
+            ```
+    refs:
+      - url: https://docs.docker.com/reference/dockerfile/#expose
+        title: Dockerfile Reference - EXPOSE
+  - uid: mondoo-docker-security-no-apt-get-dist-upgrade
+    title: Don't use 'apt-get dist-upgrade' in Dockerfiles
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a03
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      docker.file.stages.all(run.all(commands.where(binary == "apt-get" || binary == "apt").none(subcommand == "dist-upgrade" || subcommand == "full-upgrade")))
+    docs:
+      desc: |
+        This check verifies that no `RUN` instruction performs a distribution upgrade with APT.
+
+        `apt-get upgrade` installs newer versions of packages that are already present and never removes anything. `dist-upgrade` is allowed to resolve conflicts by removing packages, pulling in new dependencies, and changing which package satisfies a dependency at all. The check requires that no `RUN` instruction call `apt-get dist-upgrade`, `apt dist-upgrade`, `apt full-upgrade`, or `apt-get full-upgrade` in any build stage.
+
+        **Why this matters**
+
+        The set of packages a distribution upgrade installs is decided by the repository index at the moment the build runs, not by anything written in the Dockerfile. Two builds of the same commit a week apart produce different images, and neither one records what changed. When a container starts misbehaving, there is no diff to read and no way to reconstruct the earlier image.
+
+        That undermines the audit trail an image is supposed to have. A bill of materials generated from the image describes one particular build; it does not describe the Dockerfile, so the next build invalidates it. If a package pulled in by the upgrade turns out to be backdoored, there is no record of which images received it and which were built before the change.
+
+        The removal behavior is the sharper edge. A dependency conflict can remove a package the application needs, and the build still succeeds, because removal is a normal outcome for the command. The failure surfaces at runtime, in whichever environment happens to start the image first.
+
+        Install the specific packages the image needs and pin their versions. If the goal is to pick up security updates, rebuild against a newer base image tag, where the change is a visible line in the Dockerfile and reviewable in a diff.
+      audit: |
+        Inspect the Dockerfile to confirm `apt-get dist-upgrade` is not used:
+
+        1. Open the Dockerfile in a text editor or print it with `cat Dockerfile`.
+        2. Search every `RUN` instruction for the command: `grep -nE 'RUN.*(dist|full)-upgrade' Dockerfile`.
+        3. Confirm no `RUN` instruction calls `apt-get dist-upgrade`, `apt dist-upgrade`, or `apt full-upgrade`.
+
+        If none of these commands is present, the check passes. If any `RUN` instruction uses one, the check fails.
+      remediation:
+        - id: dockerfile
+          desc: |
+            Replace `apt-get dist-upgrade` with targeted `apt-get install` commands that specify pinned package versions:
+
+            ```dockerfile
+            # Instead of:
+            RUN apt-get update && apt-get dist-upgrade -y
+
+            # Use:
+            RUN apt-get update && apt-get install -y --no-install-recommends \
+                package1=1.2.3 \
+                package2=4.5.6 \
+              && rm -rf /var/lib/apt/lists/*
+            ```
+    refs:
+      - url: https://docs.docker.com/build/building/best-practices/#apt-get
+        title: Dockerfile Best Practices - apt-get
+  - uid: mondoo-docker-security-image-source-label
+    title: Set org.opencontainers.image.source to the build repo URL
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: false
+      compliance/dora: false
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-5-9
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-id-am-2
+      compliance/nist-csf-2: nist-csf-2-id-am-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a03
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-1-1
+      compliance/vda-isa-5: false
+    mql: |
+      docker.file.finalStage.oci.source != empty
+    docs:
+      desc: |
+        This check verifies that the final build stage sets the `org.opencontainers.image.source` label to the URL of the repository that produced the image.
+
+        A label writes arbitrary key-value metadata into the image configuration, and the OCI image specification reserves a set of annotation keys with agreed meanings. `org.opencontainers.image.source` is the one that records the source code repository. The check reads the final stage and requires the label to be present and non-empty.
+
+        **Why this matters**
+
+        The question this answers comes up under time pressure. A vulnerable package is announced, a scanner flags a digest running in production, and the first thing anyone needs is the repository to change and rebuild. Without the label, that mapping lives in tribal knowledge or a wiki page, and the image name is often no help: repository names drift from image names, one repository builds several images, and images inherited from a team that reorganized have no obvious owner at all.
+
+        The cost is measured in the wrong units. Time spent identifying which repository built a digest is time the vulnerable image keeps running, and the search is unreliable enough that a guess sometimes produces a rebuild of the wrong thing.
+
+        The label also makes automation possible. Vulnerability tooling that reads image metadata can open a pull request against the right repository without a separate service catalog to maintain, and a catalog maintained by hand drifts out of date exactly when it is needed.
+
+        Set the label in the final stage, since only that stage's metadata survives into the published image. Sourcing the value from a build argument that CI populates keeps it correct automatically, so a repository that is renamed or moved does not leave stale metadata behind in the next build.
+      audit: |
+        Inspect the Dockerfile to confirm the source label is set:
+
+        1. Open the Dockerfile in a text editor or print it with `cat Dockerfile`.
+        2. Search the final build stage for the label: `grep -nE 'org.opencontainers.image.source' Dockerfile`.
+        3. Confirm the final stage sets a non-empty `org.opencontainers.image.source` value.
+
+        If the final stage sets the source label, the check passes. If the label is missing or empty, the check fails.
+      remediation:
+        - id: dockerfile
+          desc: |
+            Add a `LABEL` instruction setting `org.opencontainers.image.source` in the final stage of your Dockerfile:
+
+            ```dockerfile
+            LABEL org.opencontainers.image.source="https://github.com/your-org/your-repo"
+            ```
+
+            For automation, source the value from a build argument so the label always matches the building repository:
+
+            ```dockerfile
+            ARG SOURCE_URL
+            LABEL org.opencontainers.image.source="${SOURCE_URL}"
+            ```
+
+            Then set the build argument from CI, for example with GitHub Actions:
+
+            ```yaml
+            - uses: docker/build-push-action@v6
+              with:
+                build-args: |
+                  SOURCE_URL=https://github.com/${{ github.repository }}
+            ```
+    refs:
+      - url: https://github.com/opencontainers/image-spec/blob/main/annotations.md
+        title: OCI Image Annotations
+      - url: https://docs.docker.com/reference/dockerfile/#label
+        title: Dockerfile Reference - LABEL
+  - uid: mondoo-docker-security-image-authors-label
+    title: Set org.opencontainers.image.authors to the responsible team
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: false
+      compliance/dora: false
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-5-9
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-id-am-2
+      compliance/nist-csf-2: nist-csf-2-id-am-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-1
+      compliance/owasp-top-10-2025: false
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-1-1
+      compliance/vda-isa-5: false
+    mql: |
+      docker.file.finalStage.oci.authors != empty
+    docs:
+      desc: |
+        This check verifies that the final build stage sets the `org.opencontainers.image.authors` label to a contact for the team responsible for the image.
+
+        `org.opencontainers.image.authors` is one of the annotation keys reserved by the OCI image specification, and it holds contact details for the people accountable for the image. The check reads the final stage and requires the label to be present and non-empty. A shared team address is what makes it durable; an individual address stops resolving the moment that person changes roles.
+
+        **Why this matters**
+
+        A missing owner is what stalls remediation. A scanner reports a vulnerable digest, the finding lands in a queue, and nobody can route it because the image name does not identify a team. Findings that cannot be routed are the ones that sit unaddressed for months, and the ones that get reassigned several times before reaching someone who can act.
+
+        Incident response has the same shape on a shorter clock. A container is misbehaving in the middle of the night and the responder needs whoever owns it. Reading the contact out of image metadata takes one command; finding it through a service catalog takes a working catalog, and catalogs maintained by hand are stale in exactly the corners where ownership is unclear.
+
+        Requiring the label also forces the ownership conversation at build time rather than after an incident. An image nobody will put a contact address on is an image nobody owns, and that is worth knowing before it is running in production.
+
+        Pair the label with the repository source label so a single inspection of the image yields both the code and the team. Use a mailing list or shared inbox rather than a personal address, and populate it from a build argument so an ownership change updates the metadata on the next build.
+      audit: |
+        Inspect the Dockerfile to confirm the authors label is set:
+
+        1. Open the Dockerfile in a text editor or print it with `cat Dockerfile`.
+        2. Search the final build stage for the label: `grep -nE 'org.opencontainers.image.authors' Dockerfile`.
+        3. Confirm the final stage sets a non-empty `org.opencontainers.image.authors` value, preferably a team contact.
+
+        If the final stage sets the authors label, the check passes. If the label is missing or empty, the check fails.
+      remediation:
+        - id: dockerfile
+          desc: |
+            Add a `LABEL` instruction setting `org.opencontainers.image.authors` in the final stage of your Dockerfile. Prefer team-owned contacts such as mailing lists or shared inboxes over individual addresses so the contact stays valid as people change roles:
+
+            ```dockerfile
+            LABEL org.opencontainers.image.authors="platform-team@example.com"
+            ```
+
+            Pair the label with `org.opencontainers.image.source` so responders can reach both the code and the team in a single `docker inspect`:
+
+            ```dockerfile
+            LABEL org.opencontainers.image.source="https://github.com/example/myapp" \
+                  org.opencontainers.image.authors="platform-team@example.com"
+            ```
+    refs:
+      - url: https://github.com/opencontainers/image-spec/blob/main/annotations.md
+        title: OCI Image Annotations
+      - url: https://docs.docker.com/reference/dockerfile/#label
+        title: Dockerfile Reference - LABEL
+  - uid: mondoo-docker-security-no-workdir-system-dirs
+    title: Don't set WORKDIR to system directories
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      docker.file.stages.all(workdir.none(path == /^\/(proc|sys|dev|sbin|boot)(\/|$)/ || path == "/"))
+    docs:
+      desc: |
+        This check verifies that no `WORKDIR` instruction in the Dockerfile points at the filesystem root or a system directory.
+
+        `WORKDIR` sets the directory that every subsequent `RUN`, `CMD`, `ENTRYPOINT`, `COPY`, and `ADD` in that stage resolves relative paths against, and it persists until the next `WORKDIR`. The check requires that no stage set it to `/` or to a path under `/proc`, `/sys`, `/dev`, `/sbin`, or `/boot`.
+
+        **Why this matters**
+
+        Whatever the working directory is becomes the default landing place for anything a build step writes without an explicit path. A recursive copy of the build context with the working directory set to `/` unpacks the repository over the root filesystem, replacing whatever names happen to collide. A tarball extracted with relative paths does the same. The build succeeds; the image is quietly broken, or quietly modified in ways nobody reviews, because the diff a reader sees is a one-line change.
+
+        `/sbin` is the sharper case. Dropping files there puts accidental executables into a directory that runs with privilege, and a name collision with an existing system binary replaces it outright.
+
+        `/proc` and `/sys` are kernel interfaces, not directories. Writes to them set kernel and process tunables rather than creating files, so a build step that expects to write a temporary file instead changes runtime behavior or fails for reasons that have nothing to do with the file it meant to create. `/boot` and `/dev` have the same problem with different consequences: one holds what the system loads at start, the other holds device nodes.
+
+        Set the working directory to a path the application owns, and create it explicitly so a typo produces a new empty directory rather than a silent write into a system location.
+      audit: |
+        Inspect the Dockerfile to confirm WORKDIR is not a system directory:
+
+        1. Open the Dockerfile in a text editor or print it with `cat Dockerfile`.
+        2. Locate every WORKDIR instruction: `grep -nE '^WORKDIR' Dockerfile`.
+        3. Confirm no path is `/` or begins with `/proc`, `/sys`, `/dev`, `/sbin`, or `/boot`.
+
+        If every WORKDIR uses an application-specific directory, the check passes. If any uses a system path, the check fails.
+      remediation:
+        - id: dockerfile
+          desc: |
+            Set WORKDIR to an application-specific directory rather than a system path:
+
+            ```dockerfile
+            # Instead of:
+            WORKDIR /
+            WORKDIR /proc
+            WORKDIR /boot/efi
+
+            # Use:
+            WORKDIR /app
+            WORKDIR /opt/myservice
+            ```
+    refs:
+      - url: https://docs.docker.com/reference/dockerfile/#workdir
+        title: Dockerfile Reference - WORKDIR
+  - uid: mondoo-docker-security-no-run-security-insecure
+    title: Don't use --security=insecure with RUN instructions
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      docker.file.stages.all(run.none(security == "insecure"))
+    docs:
+      desc: |
+        This check verifies that no `RUN` instruction requests BuildKit's insecure security mode.
+
+        BuildKit executes each `RUN` step in a sandbox with a seccomp profile and, on hosts that support it, AppArmor confinement. The `--security=insecure` flag on a `RUN` instruction removes both, giving the step the full capability set of the BuildKit daemon, raw device access, and unrestricted system calls. The check requires that no `RUN` instruction in any build stage set it.
+
+        **Why this matters**
+
+        A `RUN` step almost never runs code the author wrote. It runs package managers, install scripts fetched over the network, and compiler toolchains pulled from a language ecosystem, all of which execute arbitrary code from third parties. The sandbox is what keeps that code inside the build.
+
+        Without it, that code holds the daemon's privileges on the build machine. It reads the build host's filesystem, including the credentials the runner uses to push images and the cache directories of every other build on that runner. It attaches to processes belonging to concurrent builds and reads their memory, which is where build secrets live while they are in use. On a shared runner, one project's compromised dependency reaches every other project built there.
+
+        The escalation is quiet. BuildKit emits no distinct record when the flag is used, and the resulting image looks like any other, so a reviewer working from scan results rather than from the Dockerfile has nothing to notice. Using `RUN --security=insecure` also requires the builder to be started with the matching entitlement, which means somebody relaxed the build environment as well, and that relaxation stays in place for every later build.
+
+        Remove the flag. If a step genuinely needs privileged operations, run it in a controlled job outside the image build and copy the resulting artifact in.
+      audit: |
+        Inspect the Dockerfile to confirm no `RUN` instruction requests the insecure security mode:
+
+        1. Open the Dockerfile in a text editor or print it with `cat Dockerfile`.
+        2. Search every `RUN` instruction for the flag: `grep -nE 'RUN.*--security=insecure' Dockerfile`.
+        3. Confirm no match is returned.
+
+        If the search produces no results, the check passes. If any `RUN` instruction sets `--security=insecure`, the check fails.
+      remediation:
+        - id: dockerfile
+          desc: |
+            Remove `--security=insecure` from every `RUN` instruction. If a build step genuinely needs elevated capabilities, isolate it in a separate stage and document the requirement in code review:
+
+            ```dockerfile
+            # Instead of:
+            RUN --security=insecure ./build.sh
+
+            # Use:
+            RUN ./build.sh
+            ```
+
+            If the step truly requires privileged operations, run it outside the image build (for example, in a controlled CI job that produces an artifact) and `COPY` the artifact into the image.
+    refs:
+      - url: https://docs.docker.com/reference/dockerfile/#run---security
+        title: Dockerfile Reference - RUN --security
+      - url: https://docs.docker.com/build/buildkit/#security-modes
+        title: BuildKit security modes
+  - uid: mondoo-docker-security-no-run-network-host
+    title: Don't use --network=host with RUN instructions
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      docker.file.stages.all(run.none(network == "host"))
+    docs:
+      desc: |
+        This check verifies that no `RUN` instruction joins the build host's network namespace.
+
+        BuildKit runs each `RUN` step in its own network namespace with outbound access through the builder. The `--network=host` flag places the step directly in the host's namespace instead, so it shares the host's loopback interface, routes, and link-local addresses. The check requires that no `RUN` instruction in any build stage set it.
+
+        **Why this matters**
+
+        The addresses this reaches are the ones nothing else can. Cloud builders serve instance credentials from the link-local metadata endpoint at `169.254.169.254`, and a step in the host namespace requests them with an ordinary HTTP call. Those credentials belong to the build machine's role, which in most pipelines can push to the image registry and read the artifact store, so a malicious install script in a `RUN` step trades a build-time foothold for durable access to the software supply chain.
+
+        Loopback is the second target. Agents, sidecars, local databases, and unauthenticated admin endpoints bound to the loopback address are unreachable from a sandboxed build precisely because they assume anything on loopback is trusted. Host networking removes that assumption for every third-party script the build executes.
+
+        There is a correctness cost as well. A build that resolves a hostname or reaches a service through the host's network produces a different image on a developer laptop, on a CI runner, and on an isolated builder, and the Dockerfile records nothing about the dependency. The build that worked yesterday fails on a runner in another subnet with an error about a package rather than about networking.
+
+        Let BuildKit use its own network. When a build needs a private mirror, configure it as a build argument or stage the dependency in an earlier stage rather than removing the isolation.
+      audit: |
+        Inspect the Dockerfile to confirm no `RUN` instruction joins the host network:
+
+        1. Open the Dockerfile in a text editor or print it with `cat Dockerfile`.
+        2. Search every `RUN` instruction for the flag: `grep -nE 'RUN.*--network=host' Dockerfile`.
+        3. Confirm no match is returned.
+
+        If the search produces no results, the check passes. If any `RUN` instruction sets `--network=host`, the check fails.
+      remediation:
+        - id: dockerfile
+          desc: |
+            Remove `--network=host` from every `RUN` instruction and let BuildKit use the default isolated network. When a build genuinely needs a private network endpoint, expose it through a build secret or `--mount=type=bind` instead of joining the host network:
+
+            ```dockerfile
+            # Instead of:
+            RUN --network=host ./fetch-internal-deps.sh
+
+            # Use:
+            RUN ./fetch-internal-deps.sh
+            ```
+
+            For builds that must reach a private mirror, configure the mirror as a build argument or pre-stage the dependencies in an earlier stage rather than relaxing network isolation.
+    refs:
+      - url: https://docs.docker.com/reference/dockerfile/#run---network
+        title: Dockerfile Reference - RUN --network
+      - url: https://docs.docker.com/build/buildkit/#network-modes
+        title: BuildKit network modes
+  - uid: mondoo-docker-security-no-sensitive-bind-mount-sources
+    title: Don't bind-mount sensitive source paths into RUN instructions
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-3
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-7-2-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: |
+      docker.file.stages.all(run.all(mounts.where(from == empty).where(type == "bind" || type == empty).none(source == /^\/(etc|proc|sys|dev|boot|root|home|tmp|var|run)?(\/|$)/)))
+    docs:
+      desc: |
+        This check verifies that no `RUN` instruction bind-mounts a sensitive system path out of the build context.
+
+        BuildKit lets a `RUN` instruction mount data into the step. A bind mount resolves its `source` inside the build context, or inside the stage or image named by `from`, never on the build host. The check inspects mounts of `type=bind`, and mounts that omit the type because BuildKit treats those as bind mounts, that do not set `from=`, and requires the source not to be `/` or a path under `/etc`, `/proc`, `/sys`, `/dev`, `/boot`, `/root`, `/home`, `/tmp`, `/var`, or `/run`. Sub-paths fail too, so `/etc/shadow`, `/root/.ssh`, and `/var/run/docker.sock` are all violations. Cache mounts written as `--mount=type=cache` are not affected.
+
+        **Why this matters**
+
+        A source like this resolves only if a copy of those files was placed in the build context, and everything in the context is uploaded to the builder and readable by every step of the build. An SSH key or a shadow file that reaches the context reaches every `RUN` instruction in the Dockerfile, including the ones that execute third-party install scripts, so a single compromised dependency reads the credential and sends it out over the same connection it uses to fetch packages.
+
+        The context also tends to be the repository. Files copied there to satisfy a mount get committed, and then the credential is in the git history of every clone.
+
+        When the files are not in the context, the mount resolves to an empty directory and the build reads nothing. That is worse than an error, because the step appears to succeed while operating on data that is not there, and a reviewer reading the Dockerfile believes the build inspects host state it never sees.
+
+        Mount only the specific build inputs the step needs, stage them in an earlier stage and reference it with `from`, and pass credentials through a secret mount instead of placing them in the context.
+      audit: |
+        Inspect the Dockerfile to confirm no `RUN` instruction bind-mounts a sensitive source path from the build context:
+
+        1. Open the Dockerfile in a text editor or print it with `cat Dockerfile`.
+        2. Search every `RUN` instruction for mounts: `grep -nE 'RUN.*--mount=' Dockerfile`.
+        3. For each `type=bind` mount, or mount that omits `type=`, that does not set `from=`, confirm the `source=` value is not `/` and does not point at `/etc`, `/proc`, `/sys`, `/dev`, `/boot`, `/root`, `/home`, `/tmp`, `/var`, or `/run`. Sub-paths beneath those directories also fail the check, so `source=/etc/shadow`, `source=/root/.ssh`, and `source=/var/run/docker.sock` are all violations. Mounts that set `from=` resolve inside that stage or image and are not flagged.
+        4. For any violation, inspect the build context. If it contains the corresponding sensitive files, remove them from the context; if it does not, the mount resolves to a missing path and the instruction should be rewritten to mount the intended build input.
+
+        If no context-sourced bind mount references a sensitive path, the check passes. If any does, the check fails.
+      remediation:
+        - id: dockerfile
+          desc: |
+            Remove `RUN --mount=type=bind` mounts whose `source` points at paths such as `/etc`, `/root`, `/home`, or `/var/run/docker.sock`. A bind mount in a `RUN` instruction resolves `source` inside the build context or the stage or image named by `from`, never on the build host, so these paths only resolve if the sensitive files were first copied into the build context. Keeping system files or credentials in the build context exposes them to every build step and to anyone who can read the context.
+
+            Mount only the specific build inputs you need, or stage them in an earlier build stage:
+
+            ```dockerfile
+            # Instead of:
+            RUN --mount=type=bind,source=/etc,target=/host-etc ./build.sh
+
+            # Use:
+            COPY ./build-config /etc/build-config
+            RUN ./build.sh
+
+            # Or stage the input in an earlier stage:
+            FROM alpine:3.20 AS deps
+            COPY ./deps /deps
+
+            FROM alpine:3.20
+            RUN --mount=type=bind,from=deps,source=/deps,target=/deps ./build.sh
+            ```
+
+            For credentials such as tokens or `.netrc` files, use `--mount=type=secret` instead of placing them in the build context. If the build needs Docker-in-Docker behavior, run it in a dedicated CI job rather than trying to reach a Docker socket from a build step.
+    refs:
+      - url: https://docs.docker.com/reference/dockerfile/#run---mounttypebind
+        title: Dockerfile Reference - RUN --mount=type=bind
+      - url: https://docs.docker.com/build/building/best-practices/
+        title: Dockerfile Best Practices

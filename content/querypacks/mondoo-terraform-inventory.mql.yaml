@@ -1,0 +1,62 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+
+packs:
+  - uid: mondoo-asset-inventory-terraform
+    name: Terraform Asset Inventory Pack
+    version: 1.0.0
+    license: BUSL-1.1
+    require:
+      - provider: terraform
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    tags:
+      mondoo.com/platform: terraform
+      mondoo.com/category: inventory
+      mondoo.com/icon: terraform
+    summary: Inventory Terraform HCL, plans, and state files
+    docs:
+      desc: |
+        Inventories Terraform HCL, plan, and state files, cataloging the infrastructure resources they manage.
+
+        Enable this query pack in [Mondoo Platform](https://mondoo.com/platform) to automatically inventory Terraform in your repositories, or scan a directory of Terraform files manually with cnspec:
+
+        ```bash
+        cnspec scan terraform . -f mondoo-terraform-inventory.mql.yaml
+        ```
+    groups:
+      - title: Terraform State Asset inventory
+        filters: asset.platform == "terraform-state"
+        queries:
+          - uid: mondoo-asset-inventory-terraform-state-version
+          - uid: mondoo-asset-inventory-terraform-state-resources
+queries:
+  - uid: mondoo-asset-inventory-terraform-state-version
+    title: Terraform State Terraform Version
+    docs:
+      desc: Terraform version that wrote the state file.
+    mql: terraform.state.terraformVersion
+  - uid: mondoo-asset-inventory-terraform-state-resources
+    title: Terraform State resources
+    docs:
+      desc: Resources recorded in state, grouped by cloud provider.
+    variants:
+      - uid: mondoo-asset-inventory-terraform-state-aws-resources
+      - uid: mondoo-asset-inventory-terraform-state-gcp-resources
+      - uid: mondoo-asset-inventory-terraform-state-azure-resources
+  - uid: mondoo-asset-inventory-terraform-state-aws-resources
+    filters: asset.platform == "terraform-state" && terraform.state.resources.any( type == /^aws_/ )
+    docs:
+      desc: AWS resources in state with type, ARN, and owner ID.
+    mql: terraform.state.resources { type providerName values['arn']  values['owner_id'] }
+  - uid: mondoo-asset-inventory-terraform-state-gcp-resources
+    filters: asset.platform == "terraform-state" && terraform.state.resources.any( type == /^google_/ )
+    docs:
+      desc: Google Cloud resources in state with type, project, and ID.
+    mql: terraform.state.resources { type providerName values['project'] values['id'] }
+  - uid: mondoo-asset-inventory-terraform-state-azure-resources
+    filters: asset.platform == "terraform-state" && terraform.state.resources.any( type == /^azurerm_/ )
+    docs:
+      desc: Azure resources in state with type, provider, and ID.
+    mql: terraform.state.resources { type providerName values['id'] }

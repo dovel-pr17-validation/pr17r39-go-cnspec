@@ -1,0 +1,40 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+
+packs:
+  - uid: mondoo-okta-incident-response
+    name: Okta Incident Response Pack
+    version: 1.1.1
+    license: BUSL-1.1
+    require:
+      - provider: okta
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    tags:
+      mondoo.com/platform: okta-org,saas
+      mondoo.com/category: security
+      mondoo.com/icon: okta
+    summary: Gather Okta configuration evidence for incident response
+    docs:
+      desc: |
+        Collects Okta configuration evidence for incident investigation: the org's user accounts and integrated applications.
+
+        Enable this query pack in [Mondoo Platform](https://mondoo.com/platform) to automatically gather this evidence from your Okta org, or scan it manually with cnspec. Manual scans need an [Okta API token](https://developer.okta.com/docs/guides/create-an-api-token/main/#create-the-token):
+
+        ```bash
+        export OKTA_TOKEN=<your api token>
+        cnspec scan okta --organization <your_domain>.okta.com --token $OKTA_TOKEN -f mondoo-okta-incident-response.mql.yaml
+        ```
+    filters: asset.platform == "okta" || asset.platform == "okta-org"
+    queries:
+      - uid: mondoo-okta-incident-response-users
+        title: Users
+        docs:
+          desc: All Okta user accounts and their status.
+        mql: okta.users
+      - uid: mondoo-okta-incident-response-team-id
+        title: Installed applications
+        docs:
+          desc: Applications integrated with Okta, including OAuth apps.
+        mql: okta.applications

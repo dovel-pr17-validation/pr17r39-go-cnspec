@@ -1,0 +1,280 @@
+// Copyright Mondoo, Inc. 2024, 2026
+// SPDX-License-Identifier: BUSL-1.1
+
+package reporter
+
+import (
+	"bytes"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.mondoo.com/cnspec/internal/reportfixture"
+	"go.mondoo.com/cnspec/policy"
+	"go.mondoo.com/mql"
+	"go.mondoo.com/mql/cli/printer"
+	"go.mondoo.com/mql/cli/theme/colors"
+	"go.mondoo.com/mql/llx"
+	"go.mondoo.com/mql/mqlc"
+	"go.mondoo.com/mql/providers-sdk/v1/inventory"
+	"go.mondoo.com/mql/providers-sdk/v1/testutils"
+	"go.mondoo.com/mql/providers-sdk/v1/upstream/mvd"
+	"go.mondoo.com/mql/utils/iox"
+)
+
+func TestCompactReporter(t *testing.T) {
+	yr, err := reportfixture.UbuntuScan()
+	require.NoError(t, err)
+
+	buf := bytes.Buffer{}
+	writer := iox.IOWriter{Writer: &buf}
+
+	r := &Reporter{
+		Conf:    defaultPrintConfig(),
+		Printer: &printer.DefaultPrinter,
+		Colors:  &colors.DefaultColorTheme,
+	}
+	rr := &defaultReporter{
+		Reporter: r,
+		output:   &writer,
+		data:     yr,
+	}
+	rr.print()
+
+	strData := buf.String()
+	assert.Contains(t, strData, "! Error:          Set")
+	assert.Contains(t, strData, "✓ Ensure ")
+	assert.Contains(t, strData, "✕ CRITICAL (100): Ensure")
+}
+
+// TestCompactReporterNoChecksSpacing guards against the regression in
+// https://github.com/mondoohq/mql/issues/6390: an asset with no checks left a
+// double blank line between the asset header and the first printed section.
+// Each non-empty body section must be separated from the header (and from the
+// previous section) by exactly one blank line.
+func TestCompactReporterNoChecksSpacing(t *testing.T) {
+	assetMrn := "//assets.api.mondoo.app/spaces/test/assets/no-checks"
+	riskMrn := "//policy.api.mondoo.app/risks/example"
+
+	data := &policy.ReportCollection{
+		Assets: map[string]*inventory.Asset{
+			assetMrn: {
+				Mrn:      assetMrn,
+				Name:     "pdx-fortigate-01",
+				Platform: &inventory.Platform{Name: "fortios", Title: "FortiOS"},
+			},
+		},
+		Reports: map[string]*policy.Report{
+			assetMrn: {
+				ScoringMrn: assetMrn,
+				Score:      &policy.Score{},
+				Scores:     map[string]*policy.Score{},
+				Data:       map[string]*llx.Result{},
+				// A risk factor is present but not detected, so the risks
+				// section prints its "no downgrading risks detected" line.
+				Risks: &policy.ScoredRiskFactors{
+					Items: []*policy.ScoredRiskFactor{{Mrn: riskMrn, IsDetected: false}},
+				},
+			},
+		},
+		// No CHECK reporting jobs => no checks are printed for this asset.
+		ResolvedPolicies: map[string]*policy.ResolvedPolicy{
+			assetMrn: {
+				ExecutionJob: &policy.ExecutionJob{Queries: map[string]*policy.ExecutionQuery{}},
+				CollectorJob: &policy.CollectorJob{
+					ReportingJobs:    map[string]*policy.ReportingJob{},
+					ReportingQueries: map[string]*policy.StringArray{},
+				},
+			},
+		},
+		VulnReports: map[string]*mvd.VulnReport{
+			assetMrn: {Stats: &mvd.ReportStats{Advisories: &mvd.ReportStatsAdvisories{Total: 0}}},
+		},
+		Bundle: &policy.Bundle{
+			Policies: []*policy.Policy{{
+				Mrn:         "//policy.api.mondoo.app/policies/example",
+				RiskFactors: []*policy.RiskFactor{{Mrn: riskMrn, Title: "Example risk"}},
+			}},
+		},
+	}
+
+	buf := bytes.Buffer{}
+	writer := iox.IOWriter{Writer: &buf}
+	rr := &defaultReporter{
+		Reporter: &Reporter{
+			Conf:    defaultPrintConfig(),
+			Printer: &printer.DefaultPrinter,
+			Colors:  &colors.DefaultColorTheme,
+		},
+		output: &writer,
+		data:   data,
+	}
+	rr.print()
+
+	lines := strings.Split(buf.String(), NewLineCharacter)
+
+	// Locate the first section that follows the asset header. With no checks,
+	// the risks section is the first body section.
+	risksIdx := -1
+	for i, l := range lines {
+		if strings.Contains(l, "Risks / Preventive Controls:") {
+			risksIdx = i
+			break
+		}
+	}
+	require.GreaterOrEqual(t, risksIdx, 2, "expected a Risks section preceded by the asset header")
+
+	// Exactly one blank line separates the header underline from the section:
+	// the line right before "Risks" is blank, the one before that is not.
+	assert.Equal(t, "", lines[risksIdx-1], "expected a single blank line before the Risks section")
+	assert.NotEqual(t, "", lines[risksIdx-2], "expected exactly one blank line (no double gap) after the asset header")
+
+	// And there should be a single blank line between sections too.
+	vulnsIdx := -1
+	for i, l := range lines {
+		if strings.Contains(l, "Vulnerabilities:") {
+			vulnsIdx = i
+			break
+		}
+	}
+	require.Greater(t, vulnsIdx, risksIdx, "expected a Vulnerabilities section after Risks")
+	assert.Equal(t, "", lines[vulnsIdx-1], "expected a blank line before the Vulnerabilities section")
+	assert.NotEqual(t, "", lines[vulnsIdx-2], "expected exactly one blank line between Risks and Vulnerabilities")
+}
+
+func TestVulnReporter(t *testing.T) {
+	vex := sampleVEX()
+	target := "index.docker.io/library/ubuntu@669e010b58ba"
+
+	t.Run("format=summary", func(t *testing.T) {
+		buf := bytes.Buffer{}
+		// the summary format intentionally suppresses the vulnerability listing
+		conf := defaultPrintConfig().setFormat(FormatSummary)
+		r := NewReporter(conf, false)
+		r.out = &buf
+		require.NoError(t, r.PrintVulns(vex, target))
+		assert.Empty(t, buf.String())
+	})
+
+	t.Run("format=compact", func(t *testing.T) {
+		buf := bytes.Buffer{}
+		conf := defaultPrintConfig().setFormat(FormatCompact)
+		r := NewReporter(conf, false)
+		r.out = &buf
+		require.NoError(t, r.PrintVulns(vex, target))
+		out := buf.String()
+		// the compact table shows the severity breakdown and lists advisories,
+		// most severe first, without the detailed remediation column
+		assert.Contains(t, out, "Vulnerabilities: 3")
+		assert.Contains(t, out, "CVE-2022-0001")
+		assert.Contains(t, out, "lodash")
+		assert.NotContains(t, out, "REMEDIATION")
+	})
+
+	t.Run("format=full", func(t *testing.T) {
+		buf := bytes.Buffer{}
+		conf := defaultPrintConfig().setFormat(FormatFull)
+		r := NewReporter(conf, false)
+		r.out = &buf
+		require.NoError(t, r.PrintVulns(vex, target))
+		out := buf.String()
+		assert.Contains(t, out, "CVE-2022-0001")
+		assert.Contains(t, out, "REMEDIATION")
+		assert.Contains(t, out, "Upgrade lodash to 4.17.21")
+	})
+
+	t.Run("format=yaml", func(t *testing.T) {
+		buf := bytes.Buffer{}
+		conf := defaultPrintConfig().setFormat(FormatYAMLv1)
+		r := NewReporter(conf, false)
+		r.out = &buf
+		require.NoError(t, r.PrintVulns(vex, target))
+		out := buf.String()
+		assert.Contains(t, out, "advisory: CVE-2022-0001")
+		assert.Contains(t, out, "package: lodash")
+		assert.Contains(t, out, "severity: CRITICAL")
+		assert.Contains(t, out, "fixed: 4.17.21")
+	})
+}
+
+// TestCompactReporterQuerypackData covers data queries from query packs
+// (DATA_ONLY policies): the compact output prints them only when the user
+// asks for data, the same as data queries from scored policies.
+func TestCompactReporterQuerypackData(t *testing.T) {
+	coreSchema := testutils.MustLoadSchema(testutils.SchemaProvider{Provider: "core"})
+	codeBundle, err := mqlc.Compile("asset.name", nil, mqlc.NewConfig(coreSchema, mql.DefaultFeatures))
+	require.NoError(t, err)
+	entrypoint := codeBundle.CodeV2.Blocks[0].Entrypoints[0]
+	checksum := codeBundle.CodeV2.Checksums[entrypoint]
+
+	assetMrn := "//assets.api.mondoo.app/spaces/test/assets/querypack"
+	packMrn := "//policy.api.mondoo.app/policies/example-querypack"
+	codeID := codeBundle.CodeV2.Id
+
+	data := &policy.ReportCollection{
+		Assets: map[string]*inventory.Asset{
+			assetMrn: {
+				Mrn:      assetMrn,
+				Name:     "querypack-asset",
+				Platform: &inventory.Platform{Name: "alpine", Title: "Alpine Linux"},
+			},
+		},
+		Reports: map[string]*policy.Report{
+			assetMrn: {
+				ScoringMrn: assetMrn,
+				Score:      &policy.Score{},
+				Scores:     map[string]*policy.Score{},
+				Data: map[string]*llx.Result{
+					checksum: llx.StringData("querypack-marker").Result(),
+				},
+			},
+		},
+		ResolvedPolicies: map[string]*policy.ResolvedPolicy{
+			assetMrn: {
+				ExecutionJob: &policy.ExecutionJob{Queries: map[string]*policy.ExecutionQuery{
+					codeID: {Query: "asset.name", Code: codeBundle},
+				}},
+				CollectorJob: &policy.CollectorJob{
+					ReportingJobs: map[string]*policy.ReportingJob{
+						"pack": {
+							Uuid: "pack", QrId: packMrn, Type: policy.ReportingJob_POLICY,
+							ScoringSystem: policy.ScoringSystem_DATA_ONLY,
+							ChildJobs:     map[string]*policy.Impact{"query": nil},
+						},
+						"query": {Uuid: "query", QrId: codeID, Type: policy.ReportingJob_EXECUTION_QUERY},
+					},
+					ReportingQueries: map[string]*policy.StringArray{},
+				},
+			},
+		},
+		Bundle: &policy.Bundle{
+			Policies: []*policy.Policy{{Mrn: packMrn, ScoringSystem: policy.ScoringSystem_DATA_ONLY}},
+		},
+	}
+
+	render := func(conf *PrintConfig) string {
+		buf := bytes.Buffer{}
+		rr := &defaultReporter{
+			Reporter: &Reporter{Conf: conf, Printer: &printer.DefaultPrinter, Colors: &colors.DefaultColorTheme},
+			output:   &iox.IOWriter{Writer: &buf},
+			data:     data,
+		}
+		require.NoError(t, rr.print())
+		return buf.String()
+	}
+
+	t.Run("default hides querypack data", func(t *testing.T) {
+		out := render(defaultPrintConfig())
+		assert.NotContains(t, out, "Data queries:")
+		assert.NotContains(t, out, "querypack-marker")
+	})
+
+	t.Run("data option prints querypack data", func(t *testing.T) {
+		conf, err := ParseConfig("compact,data")
+		require.NoError(t, err)
+		out := render(conf)
+		assert.Contains(t, out, "Data queries:")
+		assert.Contains(t, out, "querypack-marker")
+	})
+}

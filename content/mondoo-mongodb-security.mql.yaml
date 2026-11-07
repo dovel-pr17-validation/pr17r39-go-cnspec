@@ -1,0 +1,340 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+policies:
+  - uid: mondoo-mongodb-security
+    name: Mondoo MongoDB Security
+    version: 1.0.0
+    license: BUSL-1.1
+    tags:
+      mondoo.com/category: security
+      mondoo.com/platform: mongo,database
+      mondoo.com/icon: mongodb-atlas
+    require:
+      - provider: mongo
+    authors:
+      - name: Mondoo, Inc.
+        email: hello@mondoo.com
+    summary: Harden MongoDB authentication, access control, transport encryption, and server surface area
+    docs:
+      desc: |
+        The Mondoo MongoDB Security policy connects to a running MongoDB server and reads its security configuration directly from the server, so the checks reflect the settings the server is actually enforcing rather than a file on disk.
+
+        This policy provides security checks across four areas:
+        - Authentication of client connections
+        - Role-based access control
+        - Transport encryption with TLS
+        - Server-side JavaScript surface area
+
+        Learn more about scanning databases in the [cnspec documentation](https://mondoo.com/docs/cnspec).
+    groups:
+      - title: Authentication
+        filters: asset.platform == "mongo"
+        checks:
+          - uid: mondoo-mongodb-security-authentication-enabled
+      - title: Access Control
+        filters: asset.platform == "mongo"
+        checks:
+          - uid: mondoo-mongodb-security-authorization-enabled
+      - title: Transport Encryption
+        filters: asset.platform == "mongo"
+        checks:
+          - uid: mondoo-mongodb-security-require-tls
+      - title: Surface Area
+        filters: asset.platform == "mongo"
+        checks:
+          - uid: mondoo-mongodb-security-server-side-javascript-disabled
+    scoring_system: highest impact
+queries:
+  - uid: mondoo-mongodb-security-authentication-enabled
+    filters: asset.platform == "mongo"
+    title: Ensure MongoDB requires client authentication
+    impact: 90
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-02
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-1
+    mql: |
+      mongo.instance.authenticationEnabled == true
+    docs:
+      desc: |
+        This check verifies that clients must prove who they are before the server will run a command for them.
+
+        Access control is turned on with `security.authorization: enabled` in `mongod.conf`, or with `--auth` on the command line, and the `mongod` service has to be restarted for it to take effect. Create an administrative user while access is still open, before enabling it, or the restart leaves nobody able to log in.
+
+        **Why this matters**
+
+        Until it is on, reaching the port is the whole attack. There is no credential to steal or guess: a client connects and issues commands with full authority, which means reading every collection in every database, writing to them, and dropping them.
+
+        This is not hypothetical exposure. Automated campaigns scan for MongoDB deployments that answer without credentials, and the pattern that follows is well established: enumerate the databases, copy what is worth copying, drop the collections, and leave a document demanding payment for their return. Deployments have been found and emptied within hours of first becoming reachable, and the operators frequently learn of it from the ransom note rather than from any alert.
+
+        The path in is usually not the public internet but the network the deployment already sits on. A compromised application container, a build agent, or a developer laptop on the same segment is enough, and an unauthenticated server draws no distinction between it and the application that is supposed to connect.
+
+        Every other access control depends on this one. Roles, privileges, and per-database grants describe what an identity may do, and none of it is enforced while there is no identity. Turning it on is the point at which the rest of the security configuration starts to mean anything.
+      audit: |-
+        ### Audit via mongosh
+
+        1. Connect with `mongosh` and read the server's command-line and configuration options:
+
+           ```javascript
+           db.adminCommand({ getCmdLineOpts: 1 })
+           ```
+
+        2. Inspect the returned `security.authorization` value (or the `--auth` flag under `argv`).
+
+        On servers where `mongosh` access is restricted, inspect the `security.authorization` setting in `mongod.conf` instead.
+
+        If authorization is `enabled`, the check passes. If it is `disabled` or absent, the check fails.
+      remediation:
+        - id: config
+          desc: |-
+            To require authentication in the server configuration:
+
+            1. Connect while access control is still open and create an administrative user first, so you are not locked out:
+
+               ```javascript
+               use admin
+               db.createUser({
+                 user: "admin",
+                 pwd: passwordPrompt(),
+                 roles: [ { role: "userAdminAnyDatabase", db: "admin" } ]
+               })
+               ```
+            2. In `mongod.conf`, enable authorization:
+
+               ```yaml
+               security:
+                 authorization: enabled
+               ```
+            3. Restart the `mongod` service so the new setting takes effect.
+        - id: cli
+          desc: |-
+            To create the initial administrative user before enabling authentication, connect with `mongosh` and run:
+
+            ```javascript
+            use admin
+            db.createUser({
+              user: "admin",
+              pwd: passwordPrompt(),
+              roles: [ { role: "userAdminAnyDatabase", db: "admin" } ]
+            })
+            ```
+
+            Then enable `security.authorization` in `mongod.conf` and restart `mongod` so authentication is enforced.
+    refs:
+      - url: https://www.mongodb.com/docs/manual/core/authentication/
+        title: MongoDB Authentication
+  - uid: mondoo-mongodb-security-authorization-enabled
+    filters: asset.platform == "mongo"
+    title: Ensure MongoDB enforces role-based access control
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-05
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-3
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-5
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-1
+      compliance/soc2-2017: soc2-control-cc6-3-1
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: |
+      mongo.instance.authorizationEnabled == true
+    docs:
+      desc: |
+        This check verifies that the privileges attached to a user's roles are what bound what that user can do.
+
+        Role-based access control is activated by the same authorization setting in the `security` section of `mongod.conf`, and it applies once the `mongod` service is restarted. With it active, each user gets only the built-in or custom roles granted to them, scoped to the databases named in the grant.
+
+        **Why this matters**
+
+        Without enforcement, every user that connects holds the same authority as every other one, so the roles recorded against them are documentation rather than a control. The account an application uses to read one collection can read all of them, write to any of them, and drop a database.
+
+        That turns any credential leak into a full compromise. Application credentials are the ones that leak, because they live in environment variables, container images, configuration repositories, and the logs of a deployment tool. When the credential is bounded by a role, an attacker who takes it gets exactly the collection that application reads. When it is not, the same leak hands over the entire deployment, including the collections holding the data the application was never meant to see.
+
+        Scoped roles also contain a compromised application. An injection flaw or a deserialization bug in one service lets an attacker issue commands as that service; whether that ends at one collection or at the whole cluster is decided here.
+
+        Grant each user the narrowest built-in role that covers its work, scoped to the specific database, and give administrative roles only to accounts used for administration. A deployment where every user holds a cluster-wide role is enforcing nothing in practice even with the setting active.
+      audit: |-
+        ### Audit via mongosh
+
+        1. Connect with `mongosh` and read the server's configuration options:
+
+           ```javascript
+           db.adminCommand({ getCmdLineOpts: 1 })
+           ```
+
+        2. Inspect the returned `security.authorization` value and confirm role-based access control is active.
+
+        On servers where `mongosh` access is restricted, inspect the `security.authorization` setting in `mongod.conf` instead.
+
+        If authorization is `enabled`, the check passes. If it is `disabled` or absent, the check fails.
+      remediation:
+        - id: config
+          desc: |-
+            To enforce role-based access control in the server configuration:
+
+            1. In `mongod.conf`, enable authorization:
+
+               ```yaml
+               security:
+                 authorization: enabled
+               ```
+            2. Restart the `mongod` service so the new setting takes effect.
+            3. Grant least-privilege built-in or custom roles to each user:
+
+               ```javascript
+               use admin
+               db.grantRolesToUser("appuser", [ { role: "readWrite", db: "app_data" } ])
+               ```
+    refs:
+      - url: https://www.mongodb.com/docs/manual/core/authorization/
+        title: MongoDB Role-Based Access Control
+  - uid: mondoo-mongodb-security-require-tls
+    filters: asset.platform == "mongo"
+    title: Ensure MongoDB requires TLS for client connections
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ekm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-2-iv-encryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ac-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-8-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      mongo.instance.tlsMode == "requireTLS"
+    docs:
+      desc: |
+        This check verifies that the server refuses any connection that is not encrypted.
+
+        The TLS posture is set with `net.tls.mode` in `mongod.conf` and needs a certificate and key file the `mongod` user can read. This check requires `requireTLS`. The permissive modes `allowTLS` and `preferTLS` still accept plaintext connections, and a disabled setting accepts nothing else. Restart the `mongod` service after changing it.
+
+        **Why this matters**
+
+        The permissive modes are the trap. They report that TLS is configured, they show encrypted sessions when a client asks for one, and they quietly accept every client that does not. Clients do not ask constantly: a connection string that omits the option, a driver upgraded across a release where the default changed, a retry path that falls back when a handshake fails. Each of those sessions carries its authentication exchange, its commands, and its result documents in the clear, and neither end reports anything wrong.
+
+        An attacker on the path exploits that deliberately. They disrupt the handshake until the client retries without encryption, the server accepts because the mode permits it, and they read the credential out of the authentication exchange and the documents out of the responses. They then connect as that user themselves from wherever they like.
+
+        The same applies between cluster members. Replication and shard traffic carries the same documents, so a permissive mode leaves the internal network exposed even when application clients happen to be well behaved.
+
+        Verify certificates and client configuration before switching, because the strict mode rejects every client that cannot negotiate, and a partial rollout takes the application down rather than protecting it.
+      audit: |-
+        ### Audit via mongosh
+
+        1. Connect with `mongosh` and read the server's TLS configuration:
+
+           ```javascript
+           db.adminCommand({ getCmdLineOpts: 1 })
+           ```
+
+        2. Inspect the returned `net.tls.mode` value.
+
+        On servers where `mongosh` access is restricted, inspect the `net.tls.mode` setting in `mongod.conf` instead.
+
+        If the mode is `requireTLS`, the check passes. If it is `allowTLS`, `preferTLS`, or `disabled`, the check fails.
+      remediation:
+        - id: config
+          desc: |-
+            To require TLS in the server configuration:
+
+            1. Provide a combined certificate and private key file readable only by the `mongod` user.
+            2. In `mongod.conf`, set the TLS mode and certificate:
+
+               ```yaml
+               net:
+                 tls:
+                   mode: requireTLS
+                   certificateKeyFile: /etc/ssl/mongodb.pem
+               ```
+            3. Restart the `mongod` service so the new setting takes effect.
+    refs:
+      - url: https://www.mongodb.com/docs/manual/core/security-transport-encryption/
+        title: MongoDB TLS/SSL
+  - uid: mondoo-mongodb-security-server-side-javascript-disabled
+    filters: asset.platform == "mongo"
+    title: Ensure MongoDB disables server-side JavaScript
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-308-a-5-ii-b-protection
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-2-2-4
+      compliance/soc2-2017: soc2-control-cc6-3-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      mongo.instance.javascriptEnabled == false
+    docs:
+      desc: |
+        This check verifies that the server will not execute JavaScript submitted with a query.
+
+        Server-side execution is controlled by `security.javascriptEnabled` in `mongod.conf`. It is on by default, so the check fails when the setting is absent as well as when it is explicitly true. Restart the `mongod` service after disabling it.
+
+        **Why this matters**
+
+        While it is on, several operators accept code rather than data. The `$where` operator takes a JavaScript expression evaluated per document, `$function` runs a supplied function body inside an aggregation pipeline, and `mapReduce` executes both of its stages as JavaScript. In each case the code runs inside the database process.
+
+        That gives query injection somewhere to go. An application that builds a filter from user input and passes it through without validation lets an attacker replace a comparison with an expression of their choosing. Instead of returning the one document the application intended, the expression walks the collection, tests characters of a field one at a time, and leaks the contents through the true and false answers it produces. The same expression can be written to loop, which stalls the query thread and takes the deployment down.
+
+        Turning the feature off closes the whole class at once. The operators are refused outright, so an injected expression is an error rather than an execution, and the application's own queries are unaffected because they never used them.
+
+        Confirm before disabling that nothing in the workload depends on those operators. Most applications never touch them, and aggregation stages cover almost everything the older map-reduce pipelines were written for.
+      audit: |-
+        ### Audit via mongosh
+
+        1. Connect with `mongosh` and read the server's security configuration:
+
+           ```javascript
+           db.adminCommand({ getCmdLineOpts: 1 })
+           ```
+
+        2. Inspect the returned `security.javascriptEnabled` value.
+
+        On servers where `mongosh` access is restricted, inspect the `security.javascriptEnabled` setting in `mongod.conf` instead.
+
+        If server-side JavaScript is `false`, the check passes. If it is `true` or absent (enabled by default), the check fails.
+      remediation:
+        - id: config
+          desc: |-
+            To disable server-side JavaScript in the server configuration:
+
+            1. In `mongod.conf`, disable JavaScript execution:
+
+               ```yaml
+               security:
+                 javascriptEnabled: false
+               ```
+            2. Restart the `mongod` service so the new setting takes effect.
+    refs:
+      - url: https://www.mongodb.com/docs/manual/reference/configuration-options/#mongodb-setting-security.javascriptEnabled
+        title: MongoDB security.javascriptEnabled

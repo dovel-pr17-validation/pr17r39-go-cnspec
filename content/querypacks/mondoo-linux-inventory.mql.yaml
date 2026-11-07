@@ -1,0 +1,377 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+
+packs:
+  - uid: mondoo-linux-inventory
+    name: Linux Inventory Pack
+    version: 1.13.0
+    license: BUSL-1.1
+    require:
+      - provider: os
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    tags:
+      mondoo.com/platform: linux
+      mondoo.com/category: best-practices
+      mondoo.com/icon: linux
+    summary: Inventory Linux host OS, packages, and configuration
+    docs:
+      desc: |
+        Inventories a Linux host: OS and platform details, users and groups, kernel and modules, packages and services, network and firewall configuration, the websites its web servers serve, hardware and SMBIOS, and disk encryption.
+
+        Enable this query pack in [Mondoo Platform](https://mondoo.com/platform) to automatically inventory your Linux hosts, or scan a host manually with cnspec:
+
+        ```bash
+        cnspec scan local -f mondoo-linux-inventory.mql.yaml
+        ```
+    groups:
+      - uid: mondoo-linux-inventory-system-group
+        title: System
+        filters: asset.family.contains("linux")
+        queries:
+          - uid: mondoo-linux-asset-info
+            title: Asset information
+            docs:
+              desc: Asset kind, platform, name, architecture, and version.
+            mql: asset { kind title platform name arch runtime version }
+          - uid: mondoo-linux-hostname
+            title: Hostname
+            docs:
+              desc: Returns the host's configured hostname.
+            mql: os.hostname
+          - uid: mondoo-linux-platform
+            title: Platform
+            docs:
+              desc: The Linux distribution identifier, such as ubuntu or debian.
+            mql: asset.platform
+          - uid: mondoo-linux-uptime
+            title: Operating system uptime
+            docs:
+              desc: Returns the time elapsed since the last boot.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: os.uptime
+          - uid: mondoo-linux-timezone
+            title: System timezone
+            docs:
+              desc: Returns the system's configured timezone.
+            mql: os.date.timezone
+          - uid: mondoo-linux-cloud-instance
+            title: Cloud instance metadata
+            docs:
+              desc: |
+                Cloud instance identity from the metadata service.
+
+                Covers public and private IPs and hostnames plus the raw metadata carrying account or subscription, region, and instance type. Runs only on hosts that detect as a cloud instance; other hosts skip it.
+            filters: cloud.provider != "Unknown"
+            mql: cloud { provider instance { publicHostname privateHostname publicIpv4 { ip } privateIpv4 { ip } metadata } }
+      - uid: mondoo-linux-inventory-identity-group
+        title: Identity & Access
+        filters: asset.family.contains("linux")
+        queries:
+          - uid: mondoo-linux-users
+            title: Regular users with shell access
+            docs:
+              desc: Regular user accounts with a login shell, and their SSH keys.
+            mql: users.where(system == false && hasLoginShell) { name sid uid gid shell authorizedkeys.list sshkeys home group }
+          - uid: mondoo-linux-groups-wheel
+            title: Members of the wheel group
+            docs:
+              desc: Members of the wheel group, which usually grants sudo.
+            mql: groups.where(name == "wheel") { members }
+          - uid: mondoo-linux-logged-in-users
+            title: Logged-in users
+            docs:
+              desc: Lists currently logged-in users, from the output of w.
+            mql: command('w -h').stdout
+      - uid: mondoo-linux-inventory-kernel-group
+        title: Kernel
+        filters: asset.family.contains("linux")
+        queries:
+          - uid: mondoo-linux-installed-kernel
+            title: Installed kernels
+            docs:
+              desc: Lists all installed kernel packages and versions.
+            filters: asset.family.contains("linux") && mondoo.capabilities.contains("run-command") || asset.family.contains("linux") && file("/proc/version").exists
+            mql: kernel.installed
+          - uid: mondoo-linux-kernel-info
+            title: Running kernel versions
+            docs:
+              desc: Returns details about the currently running kernel.
+            filters: asset.family.contains("linux") && mondoo.capabilities.contains("run-command") || asset.family.contains("linux") && file("/proc/version").exists
+            mql: kernel.info
+          - uid: mondoo-linux-kernel-modules
+            title: Kernel modules
+            docs:
+              desc: Lists kernel modules and whether each is currently loaded.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: kernel.modules { name loaded }
+          - uid: mondoo-linux-kernel-parameters
+            title: Kernel parameters
+            docs:
+              desc: Returns runtime kernel parameters (sysctl values).
+            filters: asset.family.contains("linux") && mondoo.capabilities.contains("run-command") || asset.family.contains("linux") && file("/proc/sys/kernel/ostype").exists
+            mql: kernel.parameters
+      - uid: mondoo-linux-inventory-processes-services-group
+        title: Processes & Services
+        filters: asset.family.contains("linux")
+        queries:
+          - uid: mondoo-linux-processes
+            title: Running processes
+            docs:
+              desc: Lists running processes with their PID, command, and flags.
+            filters: asset.family.contains("linux") && mondoo.capabilities.contains("run-command") || asset.family.contains("linux") && file("/proc/1/status").exists
+            mql: processes { pid command flags }
+          - uid: mondoo-linux-running-services
+            title: Running services
+            docs:
+              desc: Running services with enabled, masked, and type status.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: services.where(running == true) { name running enabled masked type }
+          - uid: mondoo-linux-systemd-timers
+            title: systemd timers
+            docs:
+              desc: systemd timers with their schedule and activated unit.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: systemd.timers { name enabled running onCalendar activates }
+          - uid: mondoo-linux-systemd-sockets
+            title: systemd sockets
+            docs:
+              desc: systemd sockets with listen addresses and activated unit.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: systemd.sockets { name enabled running listenAddresses activates }
+      - uid: mondoo-linux-inventory-packages-group
+        title: Packages & Containers
+        filters: asset.family.contains("linux")
+        queries:
+          - uid: mondoo-linux-installed-packages
+            title: Installed packages
+            docs:
+              desc: Installed packages with version, architecture, and purl.
+            mql: packages { name version arch installed epoch origin purl }
+          - uid: mondoo-linux-docker-containers
+            title: Docker containers
+            docs:
+              desc: |
+                Docker containers with image, state, and port bindings.
+
+                Covers only the system Docker daemon at /var/run/docker.sock. Rootless Docker and Podman sockets are not inspected.
+            filters: asset.family.contains("linux") && file("/var/run/docker.sock").exists
+            mql: docker.containers { id image imageid command names state status labels hostConfig }
+      - uid: mondoo-linux-inventory-network-group
+        title: Network
+        filters: asset.family.contains("linux")
+        queries:
+          - uid: mondoo-linux-listening-ports
+            title: Listening ports
+            docs:
+              desc: Listening ports with protocol, address, and process.
+            filters: asset.family.contains("linux") && mondoo.capabilities.contains("run-command") || asset.family.contains("linux") && file("/proc/net/tcp").exists
+            mql: ports.listening { user state port address protocol process remoteAddress remotePort }
+          - uid: mondoo-linux-websites
+            title: Websites
+            docs:
+              desc: |
+                Sites the web servers serve, per name and listener.
+
+                Read from the nginx and Apache httpd configuration, so a site is listed whether or not its server runs, and `process` is null when nothing listens on the port. `certificates` holds the certificate each site presents, without the intermediates of its chain file.
+            mql: websites { name address port tls sources isDefault documentRoot proxyTarget file.path process { pid executable } certificates { fingerprints serial subject.commonName issuer.commonName sanExtension.dnsNames notAfter } }
+          - uid: mondoo-linux-all-connections
+            title: All network connections
+            docs:
+              desc: All retained network connections and their processes.
+            filters: asset.family.contains("linux") && mondoo.capabilities.contains("run-command") || asset.family.contains("linux") && file("/proc/net/tcp").exists
+            mql: ports { user state port address protocol process remoteAddress remotePort }
+          - uid: mondoo-linux-active-connections
+            title: Active network connections
+            docs:
+              desc: Network connections that are not closed, with processes.
+            filters: asset.family.contains("linux") && mondoo.capabilities.contains("run-command") || asset.family.contains("linux") && file("/proc/net/tcp").exists
+            mql: ports.where(state != "close") { user state port address protocol process remoteAddress remotePort }
+          - uid: mondoo-linux-interface-configuration
+            title: Network interface configuration
+            docs:
+              desc: Interface MAC, vendor, MTU, flags, and assigned IPs.
+            mql: network.interfaces { name mac vendor mtu flags active virtual ips { ip cidr subnet broadcast gateway } }
+          - uid: mondoo-linux-etc-hosts
+            title: Static host entries
+            docs:
+              desc: Static hostname to IP mappings from /etc/hosts.
+            mql: |
+              if (file("/etc/hosts").exists) { file("/etc/hosts").content }
+          - uid: mondoo-linux-resolv-conf
+            title: DNS resolver configuration
+            docs:
+              desc: Nameservers and search domains from /etc/resolv.conf.
+            mql: |
+              if (file("/etc/resolv.conf").exists) { file("/etc/resolv.conf").content }
+          - uid: mondoo-linux-systemd-resolved
+            title: systemd-resolved DNS configuration
+            docs:
+              desc: systemd-resolved resolvers, fallbacks, and domains.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: systemd.resolved { active dns currentDnsServer fallbackDns domains }
+          - uid: mondoo-linux-network-neighbors
+            title: ARP/NDP neighbor cache
+            docs:
+              desc: ARP and NDP neighbor cache entries with IP and MAC.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: network.neighbors { ip mac interface state }
+          - uid: mondoo-sshd-interface-configuration
+            title: sshd configuration
+            docs:
+              desc: Returns the SSH server (sshd) configuration parameters.
+            filters: asset.family.contains("linux") && package('openssh-server').installed || asset.family.contains("linux") && package('openssh').installed
+            mql: sshd.config.params
+      - uid: mondoo-linux-inventory-firewall-group
+        title: Firewall
+        filters: asset.family.contains("linux")
+        queries:
+          - uid: mondoo-linux-iptables-input
+            title: iptables INPUT chain (filter table)
+            docs:
+              desc: |
+                Rules in the filter table INPUT chain.
+
+                Requires root. Returns empty on hosts using nftables natively or where access is denied.
+            filters: |
+              mondoo.capabilities.contains("run-command") &&
+              command("command -v iptables").exitcode == 0
+            mql: iptables.input { lineNumber chain target protocol source destination dport dportRange dports in out packets bytes }
+          - uid: mondoo-linux-iptables-output
+            title: iptables OUTPUT chain (filter table)
+            docs:
+              desc: |
+                Rules in the filter table OUTPUT chain.
+
+                Requires root. Returns empty on hosts using nftables natively or where access is denied.
+            filters: |
+              mondoo.capabilities.contains("run-command") &&
+              command("command -v iptables").exitcode == 0
+            mql: iptables.output { lineNumber chain target protocol source destination dport dportRange dports in out packets bytes }
+          - uid: mondoo-linux-nftables-ruleset
+            title: nftables ruleset
+            docs:
+              desc: |
+                nftables chains with their hook, policy, and rules.
+
+                Complements the iptables queries on nftables-native distributions where the legacy iptables binary is absent. Requires root. Returns empty on hosts that do not use nftables or where access is denied.
+            filters: |
+              mondoo.capabilities.contains("run-command") &&
+              command("command -v nft").exitcode == 0
+            mql: nftables.chains { family table name type hook policy isBaseChain rules { handle expr comment } }
+      - uid: mondoo-linux-inventory-storage-group
+        title: Storage & Filesystems
+        filters: asset.family.contains("linux")
+        queries:
+          - uid: mondoo-linux-mounts
+            title: Mounted devices
+            docs:
+              desc: Mounted filesystems with type, options, and space used.
+            filters: asset.family.contains("linux") && mondoo.capabilities.contains("run-command") || asset.family.contains("linux") && file("/proc/mounts").exists
+            mql: mount.list { path fstype device options size used available }
+          - uid: mondoo-linux-root-volume
+            title: Root volume size and filesystem type
+            docs:
+              desc: Returns the root volume's size and filesystem type.
+            mql: mount.point("/") { size fstype }
+      - uid: mondoo-linux-inventory-hardware-group
+        title: Hardware & Firmware
+        filters: asset.family.contains("linux")
+        queries:
+          - uid: mondoo-linux-system-manufacturer
+            title: System manufacturer
+            docs:
+              desc: Returns the motherboard manufacturer reported by SMBIOS.
+            mql: machine.baseboard.manufacturer
+          - uid: mondoo-linux-system-product-name
+            title: System product name
+            docs:
+              desc: Returns the motherboard product name reported by SMBIOS.
+            mql: machine.baseboard.product
+          - uid: mondoo-linux-cpu-type
+            title: CPU type
+            docs:
+              desc: Returns the CPU model name.
+            filters: asset.family.contains("linux") && file("/proc/cpuinfo").exists
+            mql: machine.cpu.model
+          - uid: mondoo-linux-physical-memory
+            title: Physical memory size
+            docs:
+              desc: Physical memory visible to the kernel, in bytes.
+            filters: mondoo.capabilities.contains("run-command")
+            mql: memory.total
+          - uid: mondoo-linux-smbios-baseboard
+            title: SMBIOS baseboard (or module) information
+            docs:
+              desc: SMBIOS baseboard manufacturer, version, serial, and product.
+            mql: machine.baseboard { manufacturer version serial assetTag product }
+          - uid: mondoo-linux-smbios-bios
+            title: SMBIOS BIOS information
+            docs:
+              desc: Returns the SMBIOS BIOS vendor, version, and release date.
+            mql: machine.bios { vendor version releaseDate }
+          - uid: mondoo-linux-smbios-system
+            title: SMBIOS System information
+            docs:
+              desc: SMBIOS system SKU, serial, version, UUID, and manufacturer.
+            mql: machine.system { sku serial family version product uuid manufacturer }
+          - uid: mondoo-linux-smbios-chassis
+            title: SMBIOS Chassis information
+            docs:
+              desc: SMBIOS chassis manufacturer, serial, and asset tag.
+            mql: machine.chassis { manufacturer serial version assetTag }
+      - uid: mondoo-linux-inventory-security-group
+        title: Security & Encryption
+        filters: asset.family.contains("linux")
+        queries:
+          - uid: mondoo-linux-edr-agents
+            title: Endpoint security agents
+            docs:
+              desc: Recognized EDR and antivirus agents with health state.
+            mql: edr.products { id name vendor category version running enabled healthy detectedBy }
+          - uid: mondoo-linux-workstation-security-permissions-on-bootloader-config-metadata
+            title: Bootloader configuration metadata
+            docs:
+              desc: Path and permissions of GRUB bootloader config files.
+            filters: |
+              asset.family.contains('linux') &&
+              packages.where(name == /xorg|xserver|wayland/i).any(installed)
+            mql: |
+              if (file("/boot/grub/grub.cfg").exists) {file("/boot/grub/grub.cfg") {dirname basename permissions}}
+              if (file("/boot/grub2/grub.cfg").exists) {file("/boot/grub2/grub.cfg") {dirname basename permissions}}
+              if (file("/boot/grub/user.cfg").exists) {file("/boot/grub/user.cfg") {dirname basename permissions}}
+              if (file("/boot/grub2/user.cfg").exists) {file("/boot/grub2/user.cfg") {dirname basename permissions}}
+          - uid: mondoo-linux-workstation-security-secure-boot-is-enabled-metadata
+            title: Secure Boot status
+            docs:
+              desc: UEFI Secure Boot presence, enabled state, and setup mode.
+            filters: |
+              asset.family.contains('linux') &&
+              packages.where(name == /xorg|xserver|wayland/i).any(installed)
+            mql: |
+              machine.secureboot { efi enabled setupMode }
+          - uid: mondoo-linux-workstation-security-aes-encryption-algo-metadata
+            title: Disk encryption cipher suite
+            docs:
+              desc: LUKS encryption parameters for encrypted volumes.
+            filters: |
+              asset.family.contains('linux') &&
+              packages.where(name == /xorg|xserver|wayland/i).any(installed)
+            mql: |
+              luks.volumes { name uuid version cipher { spec keySize } keyslots.where(state == "active" || state == "ENABLED") { index kdf } }
+          - uid: mondoo-linux-workstation-security-disk-encryption-metadata
+            title: Disk encryption metadata
+            docs:
+              desc: Block devices with type, label, UUID, filesystem, mounts, and whether dm-crypt encrypts them.
+            filters: |
+              asset.family.contains('linux') &&
+              packages.where(name == /xorg|xserver|wayland/i).any(installed)
+            mql: |
+              lsblk { name type label uuid fstype mountpoints encrypted }
+          - uid: mondoo-linux-selinux-status
+            title: SELinux status
+            docs:
+              desc: SELinux install state, enforcement mode, and policy type.
+            filters: asset.family.contains("redhat") || asset.platform == "amazonlinux"
+            mql: selinux { installed mode configMode policyType }

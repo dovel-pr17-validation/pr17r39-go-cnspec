@@ -1,0 +1,542 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+policies:
+  - uid: mondoo-windows-workstation-security
+    name: Mondoo Microsoft Windows Workstation Security
+    version: 0.4.3
+    license: BUSL-1.1
+    tags:
+      mondoo.com/category: security
+      mondoo.com/platform: windows:10,windows:11
+      mondoo.com/icon: windows
+    require:
+      - provider: os
+    authors:
+      - name: Mondoo, Inc.
+        email: hello@mondoo.com
+    summary: Secure Windows workstation access, updates, and configs
+    docs:
+      desc: |
+        The Mondoo Microsoft Windows Workstation Security policy identifies critical misconfigurations on Windows workstations that could leave end-user devices vulnerable to malware, unauthorized access, and data theft. Workstations are a frequent first foothold for attackers, with phishing, malicious downloads, and physical access threats all targeting the endpoint. Workstation hardening directly limits what an attacker can do once they get in.
+
+        This policy provides security checks across key Windows workstation areas:
+
+        - Secure Boot configuration
+        - BitLocker disk encryption
+        - Antivirus and Microsoft Defender presence
+        - Automatic updates and patch posture
+        - Windows Firewall configuration
+        - User Account Control (UAC) and screen lock policies
+
+        This policy supports Windows 10 and Windows 11.
+
+        Learn more about scanning Windows in the [cnspec Windows documentation](https://mondoo.com/docs/cnspec/os/windows).
+
+        Have suggestions for new checks in this policy? Visit our [cnspec repository](https://github.com/mondoohq/cnspec).
+    groups:
+      - title: Secure Boot
+        filters: |
+          asset.platform.contains("windows")
+          windows.computerInfo['OsProductType'] == 1
+        checks:
+          - uid: mondoo-windows-workstation-security-antivirus-installed
+          - uid: mondoo-windows-workstation-security-automatic-update-is-enabled
+          - uid: mondoo-windows-workstation-security-bitlocker-enabled
+          - uid: mondoo-windows-workstation-security-secure-boot-is-enabled
+    scoring_system: highest impact
+queries:
+  - uid: mondoo-windows-workstation-security-bitlocker-enabled
+    title: Ensure BitLocker Encryption is Enabled
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-2-iv-access-control-encryption-and-decryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-1
+      compliance/nist-csf-2: nist-csf-2-pr-ds-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-28
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-3-5-1
+      compliance/soc2-2017: soc2-control-cc6-1-10
+      compliance/vda-isa-5: vda-isa-5-5-1-1
+    mql: windows.bitlocker.volumes.all( protectionStatus["text"] == "Protected" )
+    docs:
+      desc: |
+        This check verifies that every BitLocker volume on the workstation reports protection as on.
+
+        BitLocker encrypts a volume at the block level, holding the volume key sealed to the device rather than to a password the user types. On a machine with a TPM, the key is released only when the measured boot state matches, so the disk unlocks on that machine with unmodified boot components and nowhere else. The check reads the protection status of each volume and requires all of them to be protected, not the operating system drive alone.
+
+        **Why this matters**
+
+        The threat here is possession of the hardware. A workstation that is stolen, lost, sent out for repair, or disposed of without the drive being wiped ends up in someone's hands with unlimited time. Windows account passwords have no bearing on it: the attacker removes the drive, attaches it to another machine, and reads the filesystem directly, or boots the device from a USB installer and gets the same result without opening the case.
+
+        What that yields on a work device is not just files. It is saved browser credentials and session cookies, cached domain credentials, VPN and certificate material, mailbox data cached by the mail client, and any documents kept locally. A single unencrypted laptop is therefore a route into the environment as that employee, not merely a lost asset.
+
+        Requiring every volume matters because the data does not stay on one. A second fixed drive used for projects or as a data disk is encrypted separately, and an operating system drive protected while the data drive is not leaves exactly the material an attacker wants in the clear.
+
+        Two conditions before enabling it. Escrow the recovery key to Entra ID, Active Directory, or a Microsoft account first, because without it a TPM fault or a firmware update makes the data unrecoverable. And note that BitLocker is unavailable on Home editions, so a fleet containing them needs an edition change rather than a configuration one.
+      audit: |
+        ### Audit via Settings
+
+        1. Open **Settings** and go to **Privacy & security** > **Device encryption**, or open **Control Panel** > **System and Security** > **BitLocker Drive Encryption**.
+        2. Review the protection status listed for each drive.
+
+        The workstation passes when every volume reports BitLocker as on. It fails if any volume reports BitLocker as off.
+
+        ### Audit via PowerShell
+
+        1. Open an elevated PowerShell session.
+        2. Display the encryption status of all volumes:
+
+           ```powershell
+           Get-BitLockerVolume
+           ```
+
+        The workstation passes when every volume reports a `ProtectionStatus` of `On`. It fails if any volume reports `Off`.
+      remediation:
+        - id: gui
+          desc: |
+            **Using the Windows interface**
+
+            Turn on device encryption:
+
+            1. Sign in to Windows with an administrator account.
+            2. On Windows 11, select **Start** > **Settings** > **Privacy & security** > **Device encryption**. On Windows 10, select **Start** > **Settings** > **Update & Security** > **Device encryption**.
+            3. If device encryption is turned off, select **Turn on**.
+
+            If Device encryption is not available, use standard BitLocker encryption:
+
+            1. Sign in to your Windows device with an administrator account.
+            2. In the search box on the taskbar, type **Manage BitLocker** and select it from the list of results.
+            3. Select **Turn on BitLocker** and follow the instructions. When prompted, save the recovery key to your Microsoft account, to Active Directory, or to a file stored off the device. Do not skip this step; without the recovery key the data is unrecoverable after a TPM or hardware fault.
+            4. Repeat for every fixed data drive shown in the BitLocker control panel, or turn on auto-unlock for data drives.
+
+            Note: BitLocker is not available on Windows 10/11 Home edition.
+        - id: powershell
+          desc: |
+            **Using PowerShell**
+
+            Warning: Always add and back up a recovery password before enabling BitLocker. Without an escrowed recovery key, a TPM fault, firmware update, or hardware change makes the data permanently unrecoverable.
+
+            Add a recovery password protector, escrow it, and enable BitLocker on the operating system drive:
+
+            ```powershell
+            Add-BitLockerKeyProtector -MountPoint "C:" -RecoveryPasswordProtector
+            $rp = (Get-BitLockerVolume -MountPoint "C:").KeyProtector | Where-Object KeyProtectorType -eq "RecoveryPassword"
+            Backup-BitLockerKeyProtector -MountPoint "C:" -KeyProtectorId $rp[0].KeyProtectorId
+            Enable-BitLocker -MountPoint "C:" -EncryptionMethod XtsAes256 -UsedSpaceOnly -TpmProtector
+            ```
+
+            `Backup-BitLockerKeyProtector` escrows to Active Directory. On Microsoft Entra joined devices, use `BackupToAAD-BitLockerKeyProtector` instead. On standalone devices, record the `RecoveryPassword` value from `$rp` and store it off the device.
+
+            If your device does not have a TPM, use a password protector instead:
+
+            ```powershell
+            $pw = Read-Host -AsSecureString -Prompt "BitLocker password"
+            Enable-BitLocker -MountPoint "C:" -EncryptionMethod XtsAes256 -UsedSpaceOnly -PasswordProtector -Password $pw
+            ```
+
+            This check requires every volume to be protected. Encrypt each remaining fixed data drive and let it unlock automatically once the operating system drive is protected:
+
+            ```powershell
+            Enable-BitLocker -MountPoint "D:" -EncryptionMethod XtsAes256 -UsedSpaceOnly -RecoveryPasswordProtector
+            Enable-BitLockerAutoUnlock -MountPoint "D:"
+            ```
+
+            To check the current BitLocker status:
+
+            ```powershell
+            Get-BitLockerVolume
+            ```
+        - id: ansible
+          desc: |
+            **Using Ansible**
+
+            No BitLocker module exists in the ansible.windows or community.windows collections, so run the BitLocker cmdlets through `win_powershell`:
+
+            ```yaml
+            ---
+            - name: Enable BitLocker on the operating system drive
+              hosts: all
+
+              tasks:
+                - name: Enable BitLocker with a TPM protector and an escrowed recovery password
+                  ansible.windows.win_powershell:
+                    script: |
+                      $vol = Get-BitLockerVolume -MountPoint "C:"
+                      if ($vol.ProtectionStatus -eq "On") {
+                        $Ansible.Changed = $false
+                      } else {
+                        Add-BitLockerKeyProtector -MountPoint "C:" -RecoveryPasswordProtector | Out-Null
+                        $rp = (Get-BitLockerVolume -MountPoint "C:").KeyProtector |
+                          Where-Object KeyProtectorType -eq "RecoveryPassword"
+                        Backup-BitLockerKeyProtector -MountPoint "C:" -KeyProtectorId $rp[0].KeyProtectorId
+                        Enable-BitLocker -MountPoint "C:" -EncryptionMethod XtsAes256 -UsedSpaceOnly -TpmProtector
+                        $Ansible.Changed = $true
+                      }
+            ```
+    refs:
+      - url: https://support.microsoft.com/en-us/windows/security/encryption/device-encryption-in-windows
+        title: Device Encryption in Windows
+  - uid: mondoo-windows-workstation-security-secure-boot-is-enabled
+    title: Ensure Secure Boot is enabled
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ccc-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-9
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a08
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      machine.secureboot.enabled == true
+    docs:
+      desc: |
+        This check verifies that Secure Boot is active on the workstation.
+
+        Secure Boot is the UEFI mechanism that checks a signature on each component in the boot path before running it, refusing anything not signed by a key in the platform's database. The check reads the current state, which System Information reports as Secure Boot State and `Confirm-SecureBootUEFI` returns from PowerShell. Enabling it requires firmware access; it cannot be turned on from inside Windows.
+
+        **Why this matters**
+
+        Code that runs before Windows starts sits above everything Windows can do about it. A bootkit installed in the boot path loads before the kernel, before Microsoft Defender, and before any endpoint agent, which puts it in a position to patch the kernel as it loads, hide its own files and processes from every tool that asks the kernel for them, and survive a reinstall of Windows because the reinstall never touches where it lives. Signature verification is what makes that placement impossible.
+
+        For a workstation, the way in is usually the machine itself. Devices are left unattended in hotels, in checked luggage, and at desks, and with Secure Boot off a few minutes with a USB drive is enough to write a modified boot loader. The device then starts and behaves exactly as it did before.
+
+        Secure Boot is also what gives BitLocker's TPM protector its meaning. The TPM releases the volume key based on measurements of the boot sequence, and a sequence willing to run unsigned components gives those measurements nothing dependable to attest to.
+
+        Check the firmware mode before changing anything. A device installed in legacy BIOS mode on an MBR disk cannot boot with Secure Boot on, and needs the disk converted to GPT and the firmware switched to UEFI first. Suspend BitLocker before the firmware change so it does not trigger a recovery prompt at the next start.
+      audit: |
+        ### Audit via System Information
+
+        1. Press **Windows + R**, type `msinfo32`, and press **Enter**.
+        2. In **System Summary**, locate the **Secure Boot State** value.
+
+        The workstation passes when Secure Boot State reports **On**. It fails if the value reports **Off** or **Unsupported**.
+
+        ### Audit via PowerShell
+
+        1. Open an elevated PowerShell session.
+        2. Query the Secure Boot status:
+
+           ```powershell
+           Confirm-SecureBootUEFI
+           ```
+
+        The workstation passes when the command returns `True`. It fails if the command returns `False` or reports that the platform does not support Secure Boot.
+      remediation:
+        - id: gui
+          desc: |
+            **Using the UEFI firmware interface**
+
+            Warning: If Windows was installed in legacy BIOS mode on an MBR disk, switching the firmware to UEFI with Secure Boot leaves the system unable to boot. Before changing firmware settings, press **Windows + R**, run `msinfo32`, and confirm **BIOS Mode** reports **UEFI**. If it reports **Legacy**, first convert the system disk from an elevated command prompt:
+
+            ```powershell
+            mbr2gpt /validate /allowFullOS
+            mbr2gpt /convert /allowFullOS
+            ```
+
+            To enable Secure Boot, access the UEFI firmware settings on your computer. The steps vary by manufacturer, but generally:
+
+            1. Restart your computer and enter the UEFI firmware settings. This is usually done by pressing a specific key during startup, commonly F2, F10, DEL, or ESC.
+            2. Disable any **Legacy Boot** or **CSM** compatibility option if it is enabled.
+            3. Look for the **Secure Boot** option, usually under the **Boot** or **Security** tab.
+            4. Change the Secure Boot setting to **Enabled**.
+            5. Save the changes and exit the UEFI settings.
+    refs:
+      - url: https://media.defense.gov/2020/Sep/15/2002497594/-1/-1/0/CTR-UEFI-Secure-Boot-Customization-UOO168873-20.PDF
+        title: UEFI Secure Boot Customization
+  - uid: mondoo-windows-workstation-security-automatic-update-is-enabled
+    title: Ensure Automatic Windows Update is enabled
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-12
+      compliance/nist-csf-2: nist-csf-2-pr-ps-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a03
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: soc2-control-cc7-1-1
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      registrykey.property(path: 'HKEY_LOCAL_MACHINE\Software\Policies\Microsoft\Windows\WindowsUpdate\AU', name: 'AUOptions') {
+        data >= 4
+      }
+      registrykey.property(path: 'HKEY_LOCAL_MACHINE\Software\Policies\Microsoft\Windows\WindowsUpdate\AU', name: 'ScheduledInstallDay') {
+        data == 0
+      }
+    docs:
+      desc: |
+        This check verifies that the workstation downloads and installs Windows updates automatically, every day, without waiting for someone to click.
+
+        The setting lives in Group Policy under Computer Configuration, Administrative Templates, Windows Components, Windows Update, as Configure Automatic Updates. Choosing `4`, auto download and schedule the install, and setting the scheduled install day to `0`, every day, writes `AUOptions` and `ScheduledInstallDay` into the Windows Update policy key, which is what the check reads. Options `2` and `3` leave installation waiting on the user and do not satisfy this.
+
+        **Why this matters**
+
+        The interval that matters is the one between a patch being published and it being installed. Microsoft's monthly release is public, and so is the vulnerability detail accompanying it, so working exploits for the more attractive bugs appear within days. Every device still unpatched during that period is exploitable by anyone who read the same bulletin.
+
+        Leaving the decision with the user reliably lengthens that interval. The prompt to restart arrives during work, gets deferred, gets deferred again, and on a laptop that is suspended rather than shut down it can be deferred indefinitely. The device shows as managed and compliant in every inventory, because the policy is present. What is absent is the restart that makes the patch effective.
+
+        The failure is also uneven across the fleet, which is what makes it hard to see. Most devices update, a minority do not, and the ones that do not are not identifiable from a policy report. An attacker needs one of them.
+
+        Automatic installation is not a substitute for reporting. Pair the policy with update compliance reporting, so that devices failing to install repeatedly, usually for lack of disk space or because they are never restarted, become visible rather than staying silently behind.
+      audit: |
+        ### Audit via Settings
+
+        1. Open **Settings** and go to **Update & Security** > **Windows Update** > **Advanced options**.
+        2. Confirm that updates are configured to install automatically and that no pause is in effect.
+
+        The workstation passes when automatic updates are enabled. It fails if updates are paused or set to notify only.
+
+        ### Audit via PowerShell
+
+        1. Open an elevated PowerShell session.
+        2. Read the configured automatic-update policy values:
+
+           ```powershell
+           Get-ItemProperty -Path 'HKLM:\Software\Policies\Microsoft\Windows\WindowsUpdate\AU' -Name AUOptions, ScheduledInstallDay
+           ```
+
+        The workstation passes when `AUOptions` is `4` or greater and `ScheduledInstallDay` is `0`. It fails if either value is missing or set differently.
+      remediation:
+        - id: gui
+          desc: |
+            **Using Group Policy**
+
+            1. Press **Windows + R**, run `gpedit.msc` to open the Local Group Policy Editor.
+            2. Go to **Computer Configuration** > **Administrative Templates** > **Windows Components** > **Windows Update** > **Manage end user experience**. On older Windows 10 releases the settings sit directly under **Windows Update**.
+            3. Open **Configure Automatic Updates**, select **Enabled**, and choose **4 - Auto download and schedule the install**. Options 2 and 3 leave installation dependent on the user and do not satisfy this requirement. Option 5 is not available on Windows 10 or later, and option 7 applies only to Windows Server.
+            4. In the same dialog, set **Scheduled install day** to **0 - Every day**.
+            5. Select **Apply** > **OK**.
+
+            Critical operating system updates and service packs then download and install every day at a scheduled time. The install time is configurable through the **Scheduled install time** setting in the same policy.
+        - id: powershell
+          desc: |
+            **Using PowerShell**
+
+            Create the policy key and set both values as DWORDs in an elevated PowerShell session:
+
+            ```powershell
+            $keypath = "HKLM:\Software\Policies\Microsoft\Windows\WindowsUpdate\AU"
+            New-Item -Path $keypath -Force | Out-Null
+            Set-ItemProperty -Path $keypath -Name "AUOptions" -Value 4 -Type DWord
+            Set-ItemProperty -Path $keypath -Name "ScheduledInstallDay" -Value 0 -Type DWord
+            ```
+        - id: ansible
+          desc: |
+            **Using Ansible**
+
+            Configure automatic Windows updates using the following Ansible playbook:
+
+            ```yaml
+            ---
+            - name: Enable Automatic Windows Update
+              hosts: all
+
+              tasks:
+                - name: Ensure WindowsUpdate AU registry key exists
+                  ansible.windows.win_regedit:
+                    path: HKLM:\Software\Policies\Microsoft\Windows\WindowsUpdate\AU
+                    state: present
+
+                - name: Set AUOptions to 4 (auto download and schedule)
+                  ansible.windows.win_regedit:
+                    path: HKLM:\Software\Policies\Microsoft\Windows\WindowsUpdate\AU
+                    name: AUOptions
+                    data: 4
+                    type: dword
+
+                - name: Set ScheduledInstallDay to 0 (every day)
+                  ansible.windows.win_regedit:
+                    path: HKLM:\Software\Policies\Microsoft\Windows\WindowsUpdate\AU
+                    name: ScheduledInstallDay
+                    data: 0
+                    type: dword
+            ```
+    refs:
+      - url: https://learn.microsoft.com/en-us/windows/deployment/update/waas-wu-settings
+        title: Manage additional Windows Update settings
+      - url: https://learn.microsoft.com/de-de/security-updates/windowsupdateservices/18127499
+        title: Configure Automatic Updates in a Non–Active Directory Environment
+  - uid: mondoo-windows-workstation-security-antivirus-installed
+    title: Ensure AntiVirus is installed, enabled and up-to-date
+    impact: 100
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-7
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-de-cm-4
+      compliance/nist-csf-2: nist-csf-2-de-cm-09
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: soc2-control-cc6-8-4
+      compliance/vda-isa-5: vda-isa-5-5-2-1
+    mql: |
+      windows.security.products.any(
+        type == "antivirus" &&
+        productState == "ON" &&
+        signatureState == "UP-TO-DATE" &&
+        time.now - timestamp < 25 * time.hour
+      )
+    docs:
+      desc: |
+        This check verifies that an antivirus product is installed, actively protecting the device, and running on signatures no more than 25 hours old.
+
+        Windows keeps a central register of security products. The check reads it for a product of type antivirus whose state is on and whose signature state is up to date, with a signature timestamp inside the last 25 hours. The window sits just past a day so that a device updating once daily is not flagged for ordinary variation in when the update lands. Microsoft Defender satisfies this on its own, and a third-party product registers the same way.
+
+        **Why this matters**
+
+        Three things have to be true at once, and a device can fail on any one of them while appearing fine from the outside. A product that is installed but not scanning inspects nothing. A product scanning with definitions from three weeks ago inspects everything and recognizes only what was known three weeks ago.
+
+        The stale-signature case is the common one, and it is the reason for the time bound rather than a plain installed-or-not test. Commodity malware is repacked continuously, and detection for a given campaign frequently ships within hours of its first appearance. A device whose definitions stopped updating, because it has been off the network, because a proxy is blocking the update endpoint, or because the update service failed without saying so, executes the current campaign's payload without objection while its console still reports protection as on.
+
+        Real-time protection being off is the more deliberate failure. It is the setting an attacker turns off first after reaching a device, and it is also what a user disables to make a blocked download run. Either way the product stays installed and keeps reporting itself as present.
+
+        Monitor all three properties rather than presence alone, and turn on Tamper Protection so the settings cannot be changed from the device by a script or by whatever has just landed on it.
+      audit: |
+        ### Audit via Windows Security
+
+        1. Open **Windows Security** and select **Virus & threat protection**.
+        2. Confirm that real-time protection is on and review the **Protection updates** date.
+
+        The workstation passes when an antivirus product is enabled and its definitions are current. It fails if protection is off or the definitions are out of date.
+
+        ### Audit via PowerShell
+
+        1. Open an elevated PowerShell session.
+        2. Display the antivirus product status:
+
+           ```powershell
+           Get-MpComputerStatus | Select-Object AMServiceEnabled, RealTimeProtectionEnabled, AntivirusSignatureLastUpdated
+           ```
+
+        The workstation passes when the antivirus service and real-time protection are enabled and the signatures were updated within the last 25 hours. It fails if protection is disabled or the signatures are older than 25 hours.
+      remediation:
+        - id: gui
+          desc: |
+            **Using the Windows interface**
+
+            If a third-party antivirus product is installed, enable its real-time protection and update its definitions using that product's console. The steps below enable Microsoft Defender Antivirus. Active malware protection is what blocks threats as files are accessed, so the goal is to confirm real-time protection is on and signatures are current.
+
+            The Windows Security path is the supported route on modern Windows because it works whether or not Tamper Protection is enabled.
+
+            1. Open **Windows Security** and select **Virus & threat protection**.
+            2. Under **Virus & threat protection settings**, select **Manage settings**.
+            3. Turn **Real-time protection** on.
+            4. Return to **Virus & threat protection**, open **Protection updates**, and select **Check for updates** so the signatures are current.
+
+            **Using Group Policy (Tamper Protection must be off)**
+
+            Tamper Protection blocks changes to Microsoft Defender settings made through Group Policy, PowerShell, or the registry. The steps in this section and the PowerShell commands below only take effect when Tamper Protection is turned off. If Tamper Protection is on, use the Windows Security steps above instead.
+
+            1. Select the Start menu.
+            2. In the search bar, type Group Policy. Then select Edit Group Policy from the listed results. The Local Group Policy Editor opens.
+            3. Select Computer Configuration > Administrative Templates > Windows Components > Microsoft Defender Antivirus.
+            4. Scroll to the bottom of the list and select Turn off Microsoft Defender Antivirus.
+            5. Select Disabled or Not configured. The names suggest that you are turning Microsoft Defender Antivirus off, but selecting Disabled or Not configured keeps it turned on.
+            6. Select Apply > OK.
+            7. Open Windows Security > Virus & threat protection > Protection updates and select Check for updates so the signatures are current.
+
+            With Tamper Protection off, you can also run these commands one at a time in an elevated PowerShell session:
+
+            ```powershell
+            Set-MpPreference -DisableRealtimeMonitoring $false
+            Set-MpPreference -DisableIOAVProtection $false
+            New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender" -Name "Real-Time Protection" -Force
+            New-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" -Name "DisableBehaviorMonitoring" -Value 0 -PropertyType DWORD -Force
+            New-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" -Name "DisableOnAccessProtection" -Value 0 -PropertyType DWORD -Force
+            New-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" -Name "DisableScanOnRealtimeEnable" -Value 0 -PropertyType DWORD -Force
+            New-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender" -Name "DisableAntiSpyware" -Value 0 -PropertyType DWORD -Force
+            Start-Service WinDefend
+            Start-Service WdNisSvc
+            Update-MpSignature
+            ```
+        - id: ansible
+          desc: |
+            **Using Ansible**
+
+            Enable Microsoft Defender Antivirus using the following Ansible playbook:
+
+            ```yaml
+            ---
+            - name: Enable Microsoft Defender Antivirus
+              hosts: all
+
+              tasks:
+                - name: Ensure Real-Time Protection registry key exists
+                  ansible.windows.win_regedit:
+                    path: HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection
+                    state: present
+
+                - name: Disable DisableBehaviorMonitoring
+                  ansible.windows.win_regedit:
+                    path: HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection
+                    name: DisableBehaviorMonitoring
+                    data: 0
+                    type: dword
+
+                - name: Disable DisableOnAccessProtection
+                  ansible.windows.win_regedit:
+                    path: HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection
+                    name: DisableOnAccessProtection
+                    data: 0
+                    type: dword
+
+                - name: Disable DisableScanOnRealtimeEnable
+                  ansible.windows.win_regedit:
+                    path: HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection
+                    name: DisableScanOnRealtimeEnable
+                    data: 0
+                    type: dword
+
+                - name: Disable DisableAntiSpyware
+                  ansible.windows.win_regedit:
+                    path: HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender
+                    name: DisableAntiSpyware
+                    data: 0
+                    type: dword
+
+                - name: Enable real-time monitoring via PowerShell
+                  ansible.windows.win_powershell:
+                    script: |
+                      Set-MpPreference -DisableRealtimeMonitoring $false
+                      Set-MpPreference -DisableIOAVProtection $false
+
+                - name: Start Windows Defender services
+                  ansible.windows.win_service:
+                    name: "{{ item }}"
+                    state: started
+                  loop:
+                    - WinDefend
+                    - WdNisSvc
+
+                - name: Update Defender signatures
+                  ansible.windows.win_powershell:
+                    script: |
+                      Update-MpSignature
+            ```
+    refs:
+      - url: https://learn.microsoft.com/en-us/mem/intune/user-help/turn-on-defender-windows
+        title: Turn on Microsoft Defender Antivirus to access company resources

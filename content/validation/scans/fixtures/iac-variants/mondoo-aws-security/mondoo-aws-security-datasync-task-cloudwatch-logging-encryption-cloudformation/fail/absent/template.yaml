@@ -1,0 +1,8 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Resources:
+  MyTask:
+    Type: AWS::DataSync::Task
+    Properties:
+      Name: my-task
+      SourceLocationArn: arn:aws:datasync:us-east-1:123456789012:location/loc-0a1b2c3d4e5f60718
+      DestinationLocationArn: arn:aws:datasync:us-east-1:123456789012:location/loc-1b2c3d4e5f6071829

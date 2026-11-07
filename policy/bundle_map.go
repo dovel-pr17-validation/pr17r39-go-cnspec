@@ -1,0 +1,369 @@
+// Copyright Mondoo, Inc. 2024, 2026
+// SPDX-License-Identifier: BUSL-1.1
+
+package policy
+
+import (
+	"context"
+	"maps"
+	"strings"
+
+	"github.com/cockroachdb/errors"
+	"github.com/hashicorp/go-version"
+	"go.mondoo.com/mql/llx"
+	"go.mondoo.com/mql/mqlc"
+	"go.mondoo.com/mql/mrn"
+	"go.mondoo.com/mql/utils/sortx"
+)
+
+// PolicyBundleMap is a PolicyBundle with easier access to policies and queries
+type PolicyBundleMap struct {
+	OwnerMrn    string                     `json:"owner_mrn,omitempty"`
+	Policies    map[string]*Policy         `json:"policies,omitempty"`
+	Frameworks  map[string]*Framework      `json:"frameworks,omitempty"`
+	Queries     map[string]*Mquery         `json:"queries,omitempty"`
+	Props       map[string]*Property       `json:"props,omitempty"`
+	Code        map[string]*llx.CodeBundle `json:"code,omitempty"`
+	RiskFactors map[string]*RiskFactor     `json:"risk_factors,omitempty"`
+	Library     Library                    `json:"library,omitempty"`
+
+	// libraryHits remembers MRNs the Library confirmed so repeated existence
+	// checks stay cheap. It is deliberately NOT the Policies/Queries maps: a
+	// nil value in those reads as "present" to every `v, ok := m[k]` in the
+	// codebase while dereferencing to a panic, which silently defeated guards
+	// like resolved_policy_builder's `if !ok { log.Warn(); continue }`.
+	libraryHits map[string]struct{}
+}
+
+// NewPolicyBundleMap creates a new empty initialized map
+// dataLake (optional) connects an additional data layer which may provide queries/policies
+func NewPolicyBundleMap(ownerMrn string) *PolicyBundleMap {
+	return &PolicyBundleMap{
+		OwnerMrn:    ownerMrn,
+		Policies:    make(map[string]*Policy),
+		Frameworks:  make(map[string]*Framework),
+		Queries:     make(map[string]*Mquery),
+		Props:       make(map[string]*Property),
+		Code:        make(map[string]*llx.CodeBundle),
+		RiskFactors: make(map[string]*RiskFactor),
+	}
+}
+
+// SelectPolicies selects the policies by name from the list given.
+// If a given name does not exist in the map, an error will be thrown.
+// The final map will only have the given policies selected. This call does not
+// remove queries (at this time).
+func (b *PolicyBundleMap) SelectPolicies(names []string) error {
+	if len(names) == 0 {
+		return nil
+	}
+
+	filters := map[string]struct{}{}
+	var missing []string
+
+	for i := range names {
+		name := names[i]
+		if _, ok := b.Policies[name]; !ok {
+			missing = append(missing, name)
+			continue
+		}
+		filters[name] = struct{}{}
+	}
+
+	if len(missing) != 0 {
+		return errors.New("failed to find the following policies: " + strings.Join(missing, ", "))
+	}
+
+	for name := range b.Policies {
+		if _, ok := filters[name]; !ok {
+			delete(b.Policies, name)
+		}
+	}
+
+	return nil
+}
+
+// ToList converts the map to a regular bundle
+func (p *PolicyBundleMap) ToList() *Bundle {
+	res := Bundle{
+		OwnerMrn: p.OwnerMrn,
+	}
+	var ids []string
+
+	// policies
+	ids = sortx.Keys(p.Policies)
+	res.Policies = make([]*Policy, len(ids))
+	for i := range ids {
+		res.Policies[i] = p.Policies[ids[i]]
+	}
+
+	// frameworks
+	ids = sortx.Keys(p.Frameworks)
+	res.Frameworks = make([]*Framework, len(ids))
+	for i := range ids {
+		res.Frameworks[i] = p.Frameworks[ids[i]]
+	}
+
+	// queries
+	ids = sortx.Keys(p.Queries)
+	res.Queries = make([]*Mquery, len(ids))
+	for i := range ids {
+		res.Queries[i] = p.Queries[ids[i]]
+	}
+
+	// props
+	ids = sortx.Keys(p.Props)
+	res.Props = make([]*Property, len(ids))
+	for i := range ids {
+		res.Props[i] = p.Props[ids[i]]
+	}
+
+	return &res
+}
+
+// PoliciesSortedByDependency sorts policies by their dependencies
+// note: the MRN field must be set and dependencies in groups must be specified by MRN
+func (p *PolicyBundleMap) PoliciesSortedByDependency() ([]*Policy, error) {
+	indexer := map[string]struct{}{}
+	var res []*Policy
+
+	for i := range p.Policies {
+		policy := p.Policies[i]
+
+		if _, ok := indexer[policy.Mrn]; ok {
+			continue
+		}
+
+		depRes, err := sortPolicies(policy, p, indexer)
+		if err != nil {
+			return nil, err
+		}
+
+		res = append(res, depRes...)
+	}
+
+	return res, nil
+}
+
+func sortPolicies(p *Policy, bundle *PolicyBundleMap, indexer map[string]struct{}) ([]*Policy, error) {
+	var res []*Policy
+	indexer[p.Mrn] = struct{}{}
+
+	for i := range p.Groups {
+		group := p.Groups[i]
+		for i := range group.Policies {
+			policy := group.Policies[i]
+
+			// we only do very cursory sanity checking
+			if policy.Mrn == "" {
+				return nil, errors.New("failed to sort policies: dependency MRN is empty")
+			}
+
+			if _, ok := indexer[policy.Mrn]; ok {
+				continue
+			}
+
+			dep, ok := bundle.Policies[policy.Mrn]
+			if !ok {
+				// ignore, since we are only looking to sort the policies of the map
+				continue
+			}
+
+			depRes, err := sortPolicies(dep, bundle, indexer)
+			if err != nil {
+				return nil, err
+			}
+
+			res = append(res, depRes...)
+		}
+	}
+
+	res = append(res, p)
+	return res, nil
+}
+
+// ValidatePolicy against the given bundle
+func (p *PolicyBundleMap) ValidatePolicy(ctx context.Context, policy *Policy, conf mqlc.CompilerConfig) error {
+	if !mrn.IsValid(policy.Mrn) {
+		return errors.New("policy MRN is not valid: " + policy.Mrn)
+	}
+
+	for i := range policy.Groups {
+		if err := p.validateGroup(ctx, policy.Groups[i], policy.Mrn, conf); err != nil {
+			return err
+		}
+	}
+
+	// semver checks are a bit optional
+	if policy.Version != "" {
+		_, err := version.NewSemver(policy.Version)
+		if err != nil {
+			return errors.New("policy '" + policy.Mrn + "' version '" + policy.Version + "' is not a valid semver version")
+		}
+	}
+
+	return nil
+}
+
+func (p *PolicyBundleMap) validateGroup(ctx context.Context, group *PolicyGroup, policyMrn string, conf mqlc.CompilerConfig) error {
+	if group == nil {
+		return errors.New("spec cannot be nil")
+	}
+
+	if group.Filters != nil {
+		// since asset filters are run beforehand and don't make it into the report
+		// we don't store their code bundles separately
+		for _, query := range group.Filters.Items {
+			_, err := query.RefreshAsFilter(policyMrn, conf)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	for i := range group.Checks {
+		check := group.Checks[i]
+
+		exist, err := p.queryExists(ctx, check.Mrn)
+		if err != nil {
+			return err
+		}
+
+		// Same reasoning as the policy refs below: without a Library we cannot
+		// know whether a check owned by another policy exists, so we must not
+		// claim it does not.
+		if check.Action == Action_MODIFY && !exist && p.Library != nil {
+			return errors.New("check does not exist, but policy is trying to modify it: " + check.Mrn)
+		}
+	}
+
+	for i := range group.Queries {
+		query := group.Queries[i]
+
+		exist, err := p.queryExists(ctx, query.Mrn)
+		if err != nil {
+			return err
+		}
+
+		if query.Action == Action_MODIFY && !exist && p.Library != nil {
+			return errors.New("query does not exist, but policy is trying to modify it: " + query.Mrn)
+		}
+	}
+
+	for i := range group.Policies {
+		policy := group.Policies[i]
+
+		exist, err := p.policyExists(ctx, policy.Mrn)
+		if err != nil {
+			return err
+		}
+
+		// policies can only be modified, not fully embedded. so they must exist
+		if !exist {
+			// ...but only the Library can say whether a policy outside this
+			// bundle exists, and there is no Library when linting or when
+			// compiling a self-contained local bundle. Failing here made every
+			// bundle that imports a policy it does not carry - which is what an
+			// overlay is - fail `cnspec policy lint` with
+			// "policy does not exist, but policy is trying to modify it"
+			// (mondoohq/server#20175). Nothing to ask means nothing to assert.
+			if p.Library == nil {
+				continue
+			}
+			return errors.New("policy does not exist, but policy is trying to modify it: " + policy.Mrn)
+		}
+	}
+
+	return nil
+}
+
+// markLibraryHit records that the Library confirmed this MRN.
+func (p *PolicyBundleMap) markLibraryHit(mrn string) {
+	if p.libraryHits == nil {
+		p.libraryHits = map[string]struct{}{}
+	}
+	p.libraryHits[mrn] = struct{}{}
+}
+
+func (p *PolicyBundleMap) queryExists(ctx context.Context, mrn string) (bool, error) {
+	if _, ok := p.Queries[mrn]; ok {
+		return true, nil
+	}
+	if _, ok := p.libraryHits[mrn]; ok {
+		return true, nil
+	}
+
+	if p.Library != nil {
+		x, err := p.Library.QueryExists(ctx, mrn)
+		if x {
+			// we mark it off for caching purposes
+			p.markLibraryHit(mrn)
+		}
+
+		return x, err
+	}
+
+	return false, nil
+}
+
+func (p *PolicyBundleMap) policyExists(ctx context.Context, mrn string) (bool, error) {
+	if _, ok := p.Policies[mrn]; ok {
+		return true, nil
+	}
+	if _, ok := p.libraryHits[mrn]; ok {
+		return true, nil
+	}
+
+	if p.Library != nil {
+		x, err := p.Library.PolicyExists(ctx, mrn)
+		if x {
+			// we mark it off for caching purposes
+			p.markLibraryHit(mrn)
+		}
+
+		return x, err
+	}
+
+	return false, nil
+}
+
+// QueryMap extracts all the queries from the policy bundle map
+func (bundle *PolicyBundleMap) QueryMap() map[string]*Mquery {
+	res := make(map[string]*Mquery, len(bundle.Queries))
+	for _, v := range bundle.Queries {
+		if v.CodeId != "" {
+			res[v.CodeId] = v
+		} else {
+			res[v.Mrn] = v
+		}
+	}
+	return res
+}
+
+// ControlsMap extracts all the controls from frameworks in this bundle map
+func (bundle *PolicyBundleMap) ControlsMap() map[string]*Control {
+	res := map[string]*Control{}
+	for _, framework := range bundle.Frameworks {
+		for i := range framework.Groups {
+			group := framework.Groups[i]
+			for j := range group.Controls {
+				ctl := group.Controls[j]
+				res[ctl.Mrn] = ctl
+			}
+		}
+	}
+	return res
+}
+
+func (bundle *PolicyBundleMap) Add(policy *Policy, queries map[string]*Mquery) *PolicyBundleMap {
+	var id string
+	if policy.Mrn != "" {
+		id = policy.Mrn
+	} else {
+		id = policy.Uid
+	}
+
+	bundle.Policies[id] = policy
+	maps.Copy(bundle.Queries, queries)
+	return bundle
+}

@@ -1,0 +1,924 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+policies:
+  - uid: mondoo-bigip-security
+    name: Mondoo F5 BIG-IP Security
+    version: 1.0.5
+    license: BUSL-1.1
+    tags:
+      mondoo.com/category: security
+      mondoo.com/platform: bigip,networkdevice
+      mondoo.com/icon: f5
+    require:
+      - provider: bigip
+    authors:
+      - name: Mondoo, Inc.
+        email: hello@mondoo.com
+    summary: Secure F5 BIG-IP device configurations
+    docs:
+      desc: |
+        The Mondoo F5 BIG-IP Security policy identifies critical misconfigurations on F5 BIG-IP application delivery controllers that could leave your application traffic vulnerable to interception, downgrade, or unauthorized access. This policy helps organizations detect and remediate hardening gaps before they can be exploited, reducing the likelihood of TLS downgrade attacks, certificate compromise, and unauthorized administrative access.
+
+        This policy provides security checks across key BIG-IP areas, uncovering misconfigurations that could weaken application delivery security:
+
+        - **SSL/TLS certificates**: Validity, expiration, and cryptographic strength
+        - **SSL/TLS profiles**: Client and server profiles, cipher suites, and authentication
+        - **Network security**: VLAN source checking, route domain isolation, and SNMP access restrictions
+
+        Learn more about scanning F5 BIG-IP in the [cnspec F5 BIG-IP documentation](https://mondoo.com/docs/cnspec/network/bigip).
+
+        Have suggestions for new checks in this policy? Visit our [cnspec repository](https://github.com/mondoohq/cnspec).
+
+    groups:
+      - title: SSL/TLS Certificates
+        filters: asset.platform == "bigip"
+        checks:
+          - uid: mondoo-bigip-security-certificates-not-expired
+          - uid: mondoo-bigip-security-certificates-strong-key-size
+          - uid: mondoo-bigip-security-keys-strong-key-size
+      - title: SSL/TLS Profiles
+        filters: asset.platform == "bigip"
+        checks:
+          - uid: mondoo-bigip-security-client-ssl-secure-ciphers
+          - uid: mondoo-bigip-security-server-ssl-secure-ciphers
+          - uid: mondoo-bigip-security-server-ssl-authenticate-backend
+      - title: Network Security
+        filters: asset.platform == "bigip"
+        checks:
+          - uid: mondoo-bigip-security-vlan-source-checking
+          - uid: mondoo-bigip-security-route-domain-strict-isolation
+          - uid: mondoo-bigip-security-snmp-restricted-access
+queries:
+  - uid: mondoo-bigip-security-certificates-not-expired
+    title: Ensure SSL certificates are not expired
+    impact: 90
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-2-iv-access-control-encryption-and-decryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-17
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-11
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-3-5-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-1
+    mql: |
+      bigip.certificates.none(
+        expirationDate != 0 && expirationDate < time.now.unix
+      )
+    docs:
+      desc: |
+        This check verifies that every SSL certificate installed on the BIG-IP is still within its validity period.
+
+        The BIG-IP terminates TLS for the applications behind it, so the certificates in its traffic certificate store are the ones clients validate before they trust the site. Review and replace them under **System > Certificate Management > Traffic Certificate Management > SSL Certificate List**, or list them with `tmsh list sys crypto cert`. The check fails any certificate whose expiration date has already passed.
+
+        **Why this matters**
+
+        When a certificate expires, every client that validates properly refuses the connection. Browsers interrupt with a full-page interstitial, and API clients, mobile apps, and service-to-service callers simply fail the handshake. Each virtual server bound to that certificate stops serving traffic, and the failure arrives all at once for everyone.
+
+        The dangerous part is the response to that outage. Under pressure, operators turn validation off rather than fix the certificate: users are told to click through, scripts gain a flag that skips verification, and integrations get certificate checking disabled to restore service. Once that happens an attacker positioned on the path presents a self-signed certificate of their own and the client accepts it, so the attacker reads and rewrites session cookies, authorization headers, and request bodies for as long as the workaround stays in place. The expiration turns a cryptographic guarantee into a prompt someone dismisses.
+
+        Recurring expirations also destroy the warning's value. A population trained to click past certificate errors every few months has no way to react differently to the one raised by a real interception, so the control that was supposed to detect impersonation stops functioning as a signal.
+
+        An expired certificate is also an ownership signal. A certificate nobody renewed is a certificate nobody is monitoring, while its private key is still installed on the device and present in every configuration backup taken since.
+
+        Track renewal well ahead of expiry and install the replacement under the existing certificate object name so SSL profiles keep resolving it without edits. If a certificate has expired because the service it fronted was retired, delete the unused certificate and its key rather than leaving them installed.
+      audit: |
+        ### Audit via the BIG-IP Configuration utility
+
+        1. Log in to the BIG-IP Configuration utility.
+        2. Navigate to **System → Certificate Management → Traffic Certificate Management → SSL Certificate List**.
+        3. Review the **Expiration** column for every certificate in the list.
+
+        If every certificate shows a future expiration date, the device passes. If any certificate shows an expiration date in the past, the device fails.
+
+        ### Audit via tmsh
+
+        1. Open an SSH session to the BIG-IP and enter the tmsh shell.
+        2. List the installed certificates and their expiration dates:
+
+           ```text
+           tmsh list sys crypto cert
+           ```
+        3. Compare the `expiration` value reported for each certificate against the current date.
+
+        If every certificate expires in the future, the device passes. If any certificate has an expiration date in the past, the device fails.
+      remediation:
+        - id: console
+          desc: |
+            To replace expired certificates using the BIG-IP Configuration utility:
+
+            1. Navigate to **System → Certificate Management → Traffic Certificate Management → SSL Certificate List**
+            2. Identify any expired certificates by checking the expiration date
+            3. For each expired certificate, generate a new CSR or import a renewed certificate:
+               - Click the certificate name
+               - Click **Renew** to generate a new CSR, or **Import** to upload a renewed certificate
+            4. If you import the renewed certificate under the same name, existing SSL profiles continue to reference it automatically. If you import it under a new name, update every SSL profile that references the old certificate.
+        - id: cli
+          desc: |
+            To replace expired certificates using tmsh:
+
+            1. Open an SSH session to the BIG-IP and enter the tmsh shell.
+            2. List certificates and their expiration dates:
+
+               ```text
+               tmsh list sys crypto cert
+               ```
+            3. Install the renewed certificate over the existing object name so SSL profiles keep referencing it:
+
+               ```text
+               tmsh install sys crypto cert <name> from-local-file <path>
+               ```
+            4. If the renewal was issued for a new key pair, install the new key as well:
+
+               ```text
+               tmsh install sys crypto key <name> from-local-file <key-path>
+               ```
+            5. Save the configuration so the change persists across reboots and failovers:
+
+               ```text
+               tmsh save sys config
+               ```
+    refs:
+      - url: https://my.f5.com/manage/s/article/K14318
+        title: F5 - Managing SSL certificates
+      - url: https://my.f5.com/manage/s/article/K6353
+        title: F5 - Updating SSL certificates
+
+  - uid: mondoo-bigip-security-certificates-strong-key-size
+    title: Ensure SSL certificates use strong key sizes
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-2-iv-access-control-encryption-and-decryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-12
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-10
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-3-5-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-1
+    mql: |
+      bigip.certificates.all(keySize >= 2048 || keyType.downcase.contains("ec") && keySize >= 256)
+    docs:
+      desc: |
+        This check verifies that the certificates the BIG-IP presents are backed by keys strong enough to resist recovery through factoring.
+
+        Key type and size are fixed when the key and certificate signing request are generated, and they travel with the issued certificate for its whole life. Inspect them under **System > Certificate Management > Traffic Certificate Management > SSL Certificate List** by opening a certificate and reading its **Key Type** and **Key Size**, or run `tmsh list sys crypto cert all-properties`. The check requires an RSA key of at least 2048 bits, or an elliptic curve key of at least 256 bits.
+
+        **Why this matters**
+
+        RSA moduli of 1024 bits and below are within reach of well-resourced attackers, which is why NIST SP 800-131A withdrew them and no public certificate authority will issue against one. An attacker who factors the modulus obtains the private key without ever touching the device, without triggering a login, and without leaving anything in a log. Because the BIG-IP is the TLS termination point, that single key covers every application behind the virtual servers that use it.
+
+        With the key in hand, the attacker decrypts recorded sessions that used RSA key exchange and reads whatever was in them, then stands up a server that presents the site's own valid, unexpired, publicly trusted certificate. Clients see no warning, because nothing about the certificate is wrong. Detection is close to impossible: the break happened offline, and the device has no event to report.
+
+        A certificate below 2048 bits in a current configuration almost always arrives from an internal certificate authority or from configuration carried forward across upgrades for a decade. Where one exists, the surrounding key material usually was not rotated either, so the finding is worth treating as a prompt to review the whole store rather than a single object.
+
+        Replacing the key means re-issuing the certificate, so coordinate with the issuing certificate authority and update every SSL profile that references the old object before removing it. Where the client population includes embedded devices that cannot negotiate elliptic curve suites, a 2048-bit RSA key satisfies this check without cutting those clients off.
+      audit: |
+        ### Audit via the BIG-IP Configuration utility
+
+        1. Log in to the BIG-IP Configuration utility.
+        2. Navigate to **System → Certificate Management → Traffic Certificate Management → SSL Certificate List**.
+        3. Click each certificate name and review the **Key Type** and **Key Size** values on the certificate properties page.
+
+        If every certificate uses an RSA key of at least 2048 bits or an elliptic curve key of at least 256 bits, the device passes. If any certificate falls below these thresholds, the device fails.
+
+        ### Audit via tmsh
+
+        1. Open an SSH session to the BIG-IP and enter the tmsh shell.
+        2. List the installed certificates with all of their properties:
+
+           ```text
+           tmsh list sys crypto cert all-properties
+           ```
+        3. Inspect the `key-size` and `key-type` values reported for each certificate.
+
+        If every certificate uses an RSA key of at least 2048 bits or an elliptic curve key of at least 256 bits, the device passes. If any certificate falls below these thresholds, the device fails.
+      remediation:
+        - id: console
+          desc: |
+            To re-issue certificates with strong keys using the BIG-IP Configuration utility:
+
+            1. Navigate to **System → Certificate Management → Traffic Certificate Management → SSL Certificate List**
+            2. Identify certificates with RSA key sizes below 2048 bits
+            3. For each weak certificate, generate a new key and CSR:
+               - Click **Create**
+               - Set the **Key Type** to RSA with a **Key Size** of 2048 or higher, or to ECDSA with a curve of P-256 or stronger
+               - Complete the CSR fields and submit the CSR to your certificate authority
+            4. Import the issued certificate and update every SSL profile that references the weak certificate
+        - id: cli
+          desc: |
+            To re-issue certificates with strong keys using tmsh:
+
+            1. Open an SSH session to the BIG-IP and enter the tmsh shell.
+            2. Identify weak certificates:
+
+               ```text
+               tmsh list sys crypto cert all-properties
+               ```
+            3. Generate a new key and CSR with a 2048-bit key:
+
+               ```text
+               tmsh create sys crypto key <name> key-size 2048
+               tmsh create sys crypto csr <name> key <name> common-name <cn>
+               ```
+            4. Submit the CSR to your certificate authority, then install the issued certificate:
+
+               ```text
+               tmsh install sys crypto cert <name> from-local-file <path>
+               ```
+            5. Update every SSL profile that references the old certificate, then save the configuration:
+
+               ```text
+               tmsh save sys config
+               ```
+    refs:
+      - url: https://my.f5.com/manage/s/article/K14318
+        title: F5 - Managing SSL certificates
+      - url: https://csrc.nist.gov/pubs/sp/800/131/a/r2/final
+        title: NIST SP 800-131A Rev. 2 - Transitioning the Use of Cryptographic Algorithms
+
+  - uid: mondoo-bigip-security-keys-strong-key-size
+    title: Ensure SSL keys use strong key sizes
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-2-iv-access-control-encryption-and-decryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-12
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-10
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-3-5-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-1
+    mql: |
+      bigip.keys.all(keySize >= 2048 || keyType.downcase.contains("ec") && keySize >= 256)
+    docs:
+      desc: |
+        This check verifies that every SSL private key stored on the BIG-IP is large enough to resist recovery by an attacker who never touches the device.
+
+        The key store holds every private key the device has generated or imported, including keys whose certificates have since been replaced and keys that were generated for a request that was never issued. Inspect them under **System > Certificate Management > Traffic Certificate Management > SSL Certificate List** on the **Key** tab of each object, or run `tmsh list sys crypto key all-properties`. The check requires an RSA key of at least 2048 bits, or an elliptic curve key of at least 256 bits.
+
+        **Why this matters**
+
+        The private key is the entirety of the device's cryptographic identity. Anyone who reconstructs it can decrypt traffic that was captured months earlier and encrypted under RSA key exchange, and can impersonate the site to any client that trusts the matching certificate. On a BIG-IP that means the plaintext of every application behind the affected virtual servers, because the device is where the encryption ends.
+
+        Weak keys stay exploitable after their certificate has been swapped out. The old certificate is public, recorded in certificate transparency logs, and remains valid until it expires or is revoked, so an attacker who breaks the key can pair it with that certificate and be trusted by clients regardless of what the device is currently serving. Auditing only the certificate list misses these keys entirely, which is why the key store is examined on its own.
+
+        Key reuse spreads the problem. When an operator generates a new signing request, selecting an existing key object is easier than creating one, so a single undersized key can be carried into renewal after renewal and end up behind several certificates that each look independently fine.
+
+        Retiring a key that a certificate depends on means re-issuing that certificate, so start with the keys that have no current certificate; those can be deleted outright. For the rest, generate the replacement key and certificate together, repoint the SSL profiles, and delete the old key once nothing references it.
+      audit: |
+        ### Audit via the BIG-IP Configuration utility
+
+        1. Log in to the BIG-IP Configuration utility.
+        2. Navigate to **System → Certificate Management → Traffic Certificate Management → SSL Certificate List**.
+        3. Click each entry whose **Contents** column includes a key, then click the **Key** tab on the object's properties page and review the **Type** and **Size** values.
+
+        If every RSA key is at least 2048 bits and every elliptic curve key is at least 256 bits, the device passes. If any key falls below these thresholds, the device fails.
+
+        ### Audit via tmsh
+
+        1. Open an SSH session to the BIG-IP and enter the tmsh shell.
+        2. List the installed keys with all of their properties:
+
+           ```text
+           tmsh list sys crypto key all-properties
+           ```
+        3. Inspect the `key-size` and `key-type` values reported for each key.
+
+        If every RSA key is at least 2048 bits and every elliptic curve key is at least 256 bits, the device passes. If any key falls below these thresholds, the device fails.
+      remediation:
+        - id: console
+          desc: |
+            To replace weak SSL keys using the BIG-IP Configuration utility:
+
+            1. Navigate to **System → Certificate Management → Traffic Certificate Management → SSL Certificate List**
+            2. Click each entry whose **Contents** column includes a key
+            3. Click the **Key** tab on the object's properties page and review the **Size** value
+            4. For each RSA key smaller than 2048 bits, create a replacement key and CSR with a key size of at least 2048 bits
+            5. Re-issue the associated certificate with the new key, import it, and update every SSL profile that references the old key
+        - id: cli
+          desc: |
+            To replace weak SSL keys using tmsh:
+
+            1. Open an SSH session to the BIG-IP and enter the tmsh shell.
+            2. List existing keys to identify weak ones:
+
+               ```text
+               tmsh list sys crypto key
+               ```
+            3. Generate a new 2048-bit key and a CSR for it:
+
+               ```text
+               tmsh create sys crypto key <name> key-size 2048
+               tmsh create sys crypto csr <name> key <name> common-name <cn>
+               ```
+            4. Re-issue the associated certificate with the new key, install it, update every SSL profile that references the old key, and save the configuration:
+
+               ```text
+               tmsh save sys config
+               ```
+    refs:
+      - url: https://my.f5.com/manage/s/article/K14318
+        title: F5 - Managing SSL certificates
+      - url: https://csrc.nist.gov/pubs/sp/800/131/a/r2/final
+        title: NIST SP 800-131A Rev. 2 - Transitioning the Use of Cryptographic Algorithms
+
+  - uid: mondoo-bigip-security-client-ssl-secure-ciphers
+    title: Ensure client SSL profiles use secure ciphers
+    impact: 85
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: |
+      bigip.clientSslProfiles.none(
+        ciphers.downcase.split(":").any(_ == /^(rc4|des|3des|null|export)/)
+      )
+    docs:
+      desc: |
+        This check verifies that the TLS suites the BIG-IP offers to clients exclude the ones with practical, published breaks.
+
+        A client SSL profile carries the cipher string or cipher group that a virtual server uses when negotiating with clients. Set it under **Local Traffic > Profiles > SSL > Client** with the **Configuration** selector on **Advanced**, or with `tmsh modify ltm profile client-ssl`. The check fails any profile whose cipher list admits RC4, DES, 3DES, NULL, or EXPORT suites.
+
+        **Why this matters**
+
+        RC4 leaks its plaintext through keystream biases. An attacker who can make a browser repeat a request many times, typically by running script in a page under the same origin, recovers a session cookie byte by byte from passively captured ciphertext and then replays it as the user. RFC 7465 prohibits RC4 in TLS for exactly this reason.
+
+        DES and 3DES encrypt in 64-bit blocks, and SWEET32 turns that into plaintext recovery once enough data flows over one connection. An attacker who can keep a long-lived keep-alive connection busy reaches the required volume in hours on a fast link, then extracts the repeated secret in that stream, which in practice is the authentication cookie sent with every request.
+
+        NULL suites negotiate authentication with no encryption at all, so anyone able to see the traffic reads the session as clear text. EXPORT suites are worse than legacy: their 512-bit RSA and Diffie-Hellman parameters were deliberately crippled and can be broken on rented compute in hours. FREAK and Logjam showed that an attacker on the path can force a handshake down into an EXPORT suite even when client and server both prefer strong ones, so merely leaving those suites enabled in the profile is enough. The client never has to ask for them.
+
+        Narrowing a cipher list removes clients that could only negotiate what was removed, so review the negotiated-suite distribution for the affected virtual servers first and stage the change in a maintenance window. On releases that support cipher groups, building the profile from F5's `f5-secure` rule is the more durable form, because the group tracks F5's list rather than freezing a string at the moment it was typed.
+      audit: |
+        ### Audit via the BIG-IP Configuration utility
+
+        1. Log in to the BIG-IP Configuration utility.
+        2. Navigate to **Local Traffic → Profiles → SSL → Client**.
+        3. Click each client SSL profile and review the **Ciphers** field for `RC4`, `DES`, `3DES`, `NULL`, or `EXPORT` entries.
+
+        If no client SSL profile permits these weak ciphers, the device passes. If any profile permits RC4, DES, NULL, or EXPORT ciphers, the device fails.
+
+        ### Audit via tmsh
+
+        1. Open an SSH session to the BIG-IP and enter the tmsh shell.
+        2. List the cipher string configured on each client SSL profile:
+
+           ```text
+           tmsh list ltm profile client-ssl ciphers
+           ```
+        3. Inspect each cipher string for `RC4`, `DES`, `3DES`, `NULL`, or `EXPORT` entries.
+
+        If no client SSL profile permits these weak ciphers, the device passes. If any profile permits RC4, DES, NULL, or EXPORT ciphers, the device fails.
+      remediation:
+        - id: console
+          desc: |
+            The most maintainable approach on BIG-IP 13.0 and later is a cipher group built from F5's `f5-secure` cipher rule, which represents the cipher string `ECDHE:RSA:!SSLV3:!RC4:!EXP:!DES` and so excludes every suite this check flags. To configure one using the BIG-IP Configuration utility:
+
+            1. Navigate to **Local Traffic → Ciphers → Groups** and click **Create**
+            2. Give the group a name, add the `f5-secure` rule to the **Allowed** column, and click **Finished**
+            3. Navigate to **Local Traffic → Profiles → SSL → Client** and click the affected profile
+            4. Set the **Configuration** selector to **Advanced**
+            5. In the **Ciphers** setting, select **Cipher Group** and choose the group you created
+            6. Click **Update**
+
+            `f5-secure` removes the weak suites but still permits RSA key exchange and AES-CBC suites. For a stricter posture, select **Cipher String** instead of **Cipher Group** and enter a list restricted to AES-GCM suites, for example `ECDHE+AES-GCM:DHE+AES-GCM`. Prefer GCM, an authenticated AEAD mode, over the older CBC suites such as `ECDHE+AES` or `DHE+AES`. GCM authenticates the ciphertext as part of decryption, which closes the padding-oracle and timing weaknesses such as BEAST and Lucky 13 that affect CBC suites in TLS.
+
+            **Note**: Clients that support only the removed cipher suites can no longer connect to virtual servers using this profile. Validate the change against your client population in a maintenance window.
+        - id: cli
+          desc: |
+            On BIG-IP 13.0 and later, the recommended approach is a cipher group built from F5's `f5-secure` cipher rule, which represents the cipher string `ECDHE:RSA:!SSLV3:!RC4:!EXP:!DES` and so excludes every suite this check flags:
+
+            1. Open an SSH session to the BIG-IP and enter the tmsh shell.
+            2. Create a cipher group that allows the `f5-secure` rule:
+
+               ```text
+               tmsh create ltm cipher group secure-gcm allow add { f5-secure }
+               ```
+            3. Attach the cipher group to the client SSL profile. The `ciphers none` argument clears any inline cipher string so the group takes effect:
+
+               ```text
+               tmsh modify ltm profile client-ssl <profile-name> cipher-group secure-gcm ciphers none
+               ```
+            4. Confirm the group resolves to the expected suites and that no weak suites remain:
+
+               ```text
+               tmsh show ltm cipher group secure-gcm
+               ```
+            5. Save the configuration:
+
+               ```text
+               tmsh save sys config
+               ```
+
+            `f5-secure` removes the weak suites but still permits RSA key exchange and AES-CBC suites. If your release does not support cipher groups, or you want a stricter posture, set an inline cipher string restricted to AES-GCM suites instead with `tmsh modify ltm profile client-ssl <profile-name> ciphers 'ECDHE+AES-GCM:DHE+AES-GCM'`, then verify the expansion with `tmm --clientciphers 'ECDHE+AES-GCM:DHE+AES-GCM'`. Prefer GCM, an authenticated AEAD mode, over CBC suites such as `ECDHE+AES` or `DHE+AES`. GCM authenticates the ciphertext during decryption, which closes the padding-oracle and timing weaknesses such as BEAST and Lucky 13 that affect CBC suites in TLS.
+    refs:
+      - url: https://my.f5.com/manage/s/article/K13156
+        title: F5 - Configuring the cipher strength for SSL profiles
+      - url: https://datatracker.ietf.org/doc/html/rfc7465
+        title: RFC 7465 - Prohibiting RC4 Cipher Suites
+
+  - uid: mondoo-bigip-security-server-ssl-secure-ciphers
+    title: Ensure server SSL profiles use secure ciphers
+    impact: 85
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    mql: |
+      bigip.serverSslProfiles.none(
+        ciphers.downcase.split(":").any(_ == /^(rc4|des|3des|null|export)/)
+      )
+    docs:
+      desc: |
+        This check verifies that the TLS connections the BIG-IP opens to backend pool members exclude suites with practical, published breaks.
+
+        A server SSL profile governs the second leg of the connection, the one the BIG-IP originates toward pool members after it has decrypted the client request. Set the cipher list under **Local Traffic > Profiles > SSL > Server** with the **Configuration** selector on **Advanced**, or with `tmsh modify ltm profile server-ssl`. The check fails any profile whose cipher list admits RC4, DES, 3DES, NULL, or EXPORT suites.
+
+        **Why this matters**
+
+        The backend leg is routinely left at a permissive default while the client-facing profile gets hardened, on the reasoning that the server segment is internal. It carries the same requests, plus more: the headers the BIG-IP inserts, the original client address, and whatever session or authentication material the traffic policy attaches on the way through.
+
+        An attacker who already has a foothold on that segment, whether from a compromised neighboring workload or a mirrored switch port, records those sessions and breaks them with the same techniques that apply on the front side. SWEET32 against 3DES recovers the repeated secret from a long-lived connection, RC4 keystream analysis recovers cookies, and an attacker who can influence the handshake downgrades it into an EXPORT suite and factors the key. A strong client-facing handshake does nothing to protect any of this.
+
+        A breakable backend leg also undoes the reason for terminating TLS at the BIG-IP in the first place. The device holds the certificates and inspects the traffic so that policy can be applied in one place; if the re-encrypted hop is decryptable, the plaintext is available to precisely the attacker the arrangement was meant to exclude, and the device's central position makes it a richer capture point than any single application server.
+
+        Pool members are frequently older than the client population, so confirm what each member supports before narrowing the list, and expect that a member which negotiates nothing better than 3DES needs upgrading rather than a permanent exception. Where a member genuinely cannot be changed yet, scope the weaker suite to a dedicated profile bound only to that pool and track it for removal.
+      audit: |
+        ### Audit via the BIG-IP Configuration utility
+
+        1. Log in to the BIG-IP Configuration utility.
+        2. Navigate to **Local Traffic → Profiles → SSL → Server**.
+        3. Click each server SSL profile and review the **Ciphers** field for `RC4`, `DES`, `3DES`, `NULL`, or `EXPORT` entries.
+
+        If no server SSL profile permits these weak ciphers, the device passes. If any profile permits RC4, DES, NULL, or EXPORT ciphers, the device fails.
+
+        ### Audit via tmsh
+
+        1. Open an SSH session to the BIG-IP and enter the tmsh shell.
+        2. List the cipher string configured on each server SSL profile:
+
+           ```text
+           tmsh list ltm profile server-ssl ciphers
+           ```
+        3. Inspect each cipher string for `RC4`, `DES`, `3DES`, `NULL`, or `EXPORT` entries.
+
+        If no server SSL profile permits these weak ciphers, the device passes. If any profile permits RC4, DES, NULL, or EXPORT ciphers, the device fails.
+      remediation:
+        - id: console
+          desc: |
+            To remove weak ciphers from server SSL profiles using the BIG-IP Configuration utility:
+
+            1. Navigate to **Local Traffic → Profiles → SSL → Server**
+            2. Click on the affected profile
+            3. Set the **Configuration** selector to **Advanced**
+            4. In the **Ciphers** setting, select **Cipher String** and enter a list restricted to AES-GCM suites:
+               `ECDHE+AES-GCM:DHE+AES-GCM`
+            5. Click **Update**
+
+            This matches the standard the client SSL profiles enforce. Prefer GCM, an authenticated AEAD mode, over the older CBC suites such as `ECDHE+AES` or `DHE+AES`. GCM authenticates the ciphertext as part of decryption, which closes the padding-oracle and timing weaknesses such as BEAST and Lucky 13 that affect CBC suites in TLS. Append `:ECDHE+AES:DHE+AES` only for backends that cannot negotiate GCM, and track those backends for upgrade.
+
+            **Note**: Backend pool members that support only the removed cipher suites can no longer complete TLS handshakes with the BIG-IP. Confirm backend cipher support before applying the change.
+        - id: cli
+          desc: |
+            To remove weak ciphers from server SSL profiles using tmsh:
+
+            1. Open an SSH session to the BIG-IP and enter the tmsh shell.
+            2. Update the cipher string on the server SSL profile:
+
+               ```text
+               tmsh modify ltm profile server-ssl <profile-name> ciphers 'ECDHE+AES-GCM:DHE+AES-GCM'
+               ```
+            3. From the advanced shell, list the cipher suites the string expands to and confirm no weak suites remain:
+
+               ```text
+               tmm --serverciphers 'ECDHE+AES-GCM:DHE+AES-GCM'
+               ```
+            4. Save the configuration:
+
+               ```text
+               tmsh save sys config
+               ```
+
+            This matches the standard the client SSL profiles enforce. Prefer GCM, an authenticated AEAD mode, over the older CBC suites such as `ECDHE+AES` or `DHE+AES`. GCM authenticates the ciphertext during decryption, which closes the padding-oracle and timing weaknesses such as BEAST and Lucky 13 that affect CBC suites in TLS. Append `:ECDHE+AES:DHE+AES` only for backends that cannot negotiate GCM, and track those backends for upgrade.
+    refs:
+      - url: https://my.f5.com/manage/s/article/K13156
+        title: F5 - Configuring the cipher strength for SSL profiles
+      - url: https://datatracker.ietf.org/doc/html/rfc7465
+        title: RFC 7465 - Prohibiting RC4 Cipher Suites
+
+  - uid: mondoo-bigip-security-server-ssl-authenticate-backend
+    title: Ensure server SSL profiles authenticate backend servers
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-02
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-j
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-8-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    # peer-cert-mode is what decides whether the backend certificate is validated at all.
+    # `authenticate` is the authentication frequency and takes only "always" or "once", so
+    # the previous assertion, none(authenticate == "none"), compared against a value the
+    # field cannot hold and passed on every device.
+    mql: |
+      bigip.serverSslProfiles.all(peerCertMode == "require")
+    docs:
+      desc: |
+        This check verifies that the BIG-IP validates the certificate presented by the backend servers it re-encrypts traffic to.
+
+        When the BIG-IP re-encrypts traffic toward a pool member, two settings on the server SSL profile decide how much it trusts what that member presents, and both live under **Local Traffic > Profiles > SSL > Server** with the **Configuration** selector on **Advanced**. **Server Certificate**, in the **Server Authentication** section, decides whether the backend certificate is validated at all; in `tmsh modify ltm profile server-ssl` it is the `peer-cert-mode` field, with the values `ignore` and `require`. It defaults to `ignore`, and it is the value this check reads, failing any profile that does not require a certificate. How often an already-required certificate is re-checked is the separate `authenticate` setting, which this check does not read. A hardened profile sets **Server Certificate** to **require** and points **Trusted Certificate Authorities** at a bundle containing the issuer of the backend certificates.
+
+        **Why this matters**
+
+        With backend authentication off, the BIG-IP completes a TLS handshake with whatever answers on the pool member's address, including a certificate the attacker generated a minute earlier. There is no name check, no chain check, and no failure to notice.
+
+        That turns any address-level control of the server segment into full interception. An attacker who poisons ARP on the server VLAN, edits a DNS record the pool resolves, or claims the address of a decommissioned member terminates the connection themselves. The BIG-IP hands over the complete request, session cookie and authorization header included, and returns the attacker's response to the client under the site's own valid certificate. The client sees a green padlock, because the front-side handshake was genuine.
+
+        Unverified backend TLS also reads as protection in an audit that it does not deliver. The profile shows encryption in place and the traffic capture shows ciphertext, but the encryption is to whoever responded rather than to the intended server, which is the exact property an attacker needs and the exact one the ciphertext hides.
+
+        Requiring verification tightens lateral movement as well. A host compromised elsewhere in the data center cannot simply take over a pool member's address, because it has no certificate that chains to the configured bundle and the connection is dropped rather than served.
+
+        Configure the trusted certificate authority bundle in the same change: requiring verification without one drops every pool member and stops traffic through the affected virtual servers immediately. Where backend certificates come from an internal certificate authority, import that authority first and confirm that each member's certificate chains to it and presents a name the profile expects. The check reads the peer-certificate mode alone and does not assert that a bundle is configured, so confirm the **Trusted Certificate Authorities** setting during the audit rather than reading a pass as covering it.
+
+        A device with no server SSL profiles at all passes, because it terminates nothing toward a backend over TLS and there is no re-encryption to verify.
+      audit: |
+        ### Audit via the BIG-IP Configuration utility
+
+        1. Log in to the BIG-IP Configuration utility.
+        2. Navigate to **Local Traffic → Profiles → SSL → Server**.
+        3. Click each server SSL profile, set the **Configuration** selector to **Advanced**, and review the **Server Certificate** setting in the **Server Authentication** section.
+
+        If every server SSL profile has **Server Certificate** set to **require**, the device passes. If any profile has it set to **ignore**, the device fails.
+
+        ### Audit via tmsh
+
+        1. Open an SSH session to the BIG-IP and enter the tmsh shell.
+        2. List the peer certificate mode and CA bundle configured on each server SSL profile:
+
+           ```text
+           tmsh list ltm profile server-ssl <name> peer-cert-mode ca-file
+           ```
+        3. Inspect the `peer-cert-mode` value reported for each profile.
+
+        If every server SSL profile reports `peer-cert-mode require` with a trusted CA bundle configured, the device passes. If any profile reports `peer-cert-mode ignore`, the device fails.
+      remediation:
+        - id: console
+          desc: |
+            To enable backend server certificate verification using the BIG-IP Configuration utility:
+
+            1. Navigate to **Local Traffic → Profiles → SSL → Server**
+            2. Click on the affected profile
+            3. Set the **Configuration** selector to **Advanced**
+            4. In the **Server Authentication** section, set **Server Certificate** to **require**
+            5. Set **Trusted Certificate Authorities** to a CA bundle that includes the issuing CA of your backend server certificates
+            6. Click **Update**
+
+            **Note**: With verification set to require, the BIG-IP drops connections to any pool member whose certificate fails validation. Confirm that every backend certificate chains to the configured CA bundle before applying this change, or traffic through the affected virtual servers stops.
+        - id: cli
+          desc: |
+            To enable backend server certificate verification using tmsh:
+
+            1. Open an SSH session to the BIG-IP and enter the tmsh shell.
+            2. Require backend certificate verification on the server SSL profile and point it at a trusted CA bundle:
+
+               ```text
+               tmsh modify ltm profile server-ssl <profile-name> peer-cert-mode require ca-file <ca-bundle-name>
+               ```
+            3. Verify the configuration:
+
+               ```text
+               tmsh list ltm profile server-ssl <profile-name> peer-cert-mode ca-file
+               ```
+            4. Save the configuration:
+
+               ```text
+               tmsh save sys config
+               ```
+
+            **Note**: With peer-cert-mode set to require, the BIG-IP drops connections to any pool member whose certificate fails validation. Confirm that every backend certificate chains to the configured CA bundle before applying this change.
+    refs:
+      - url: https://my.f5.com/manage/s/article/K14783
+        title: F5 - Configuring server certificate verification
+
+  - uid: mondoo-bigip-security-vlan-source-checking
+    title: Ensure VLAN source checking is enabled
+    impact: 75
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-22
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      bigip.vlans.all(sourceChecking == "enabled")
+    docs:
+      desc: |
+        This check verifies that source address verification is enabled on every VLAN configured on the BIG-IP.
+
+        Source checking makes the device confirm that the route back toward a packet's source address leaves through the same VLAN the packet arrived on, and drop the packet when it does not. Enable it under **Network > VLANs > VLAN List** with the **Configuration** selector on **Advanced** and the **Source Check** box, or with `tmsh modify net vlan <name> source-checking enabled`.
+
+        **Why this matters**
+
+        Without it the BIG-IP forwards packets whose source address belongs to a segment they could not have come from. An attacker with access to any untrusted VLAN sets the source address of an internal host and reaches virtual servers whose access policy or traffic rule admits connections by client address, so an address allowlist stops being a boundary and becomes a field the attacker fills in. The same forgery defeats logging-based rate limits and any policy that keys on client subnet.
+
+        Forged sources also make the device a reflector. An attacker sends requests to a virtual server carrying a victim's address as the source, and the BIG-IP directs every response at that victim. With an amplifying service behind the virtual server, a modest sending rate becomes a flood the victim traces straight back to your address space, and the device spends its own connection capacity generating it.
+
+        Everything downstream records the forged address. Access logs, connection tables, and any alert built on them attribute the request to a host that never sent it, so an investigation that starts from the logs runs down the wrong system while the real source stays untouched.
+
+        Source checking assumes symmetric routing, and it takes effect only where auto last hop is disabled. In a design where traffic legitimately enters on one VLAN and returns over another, enabling it drops valid connections, so confirm routing symmetry per VLAN before turning it on. Where asymmetry is deliberate and permanent, enforce source trust for that VLAN with a packet filter or an upstream firewall rule instead of leaving the address unchecked.
+      audit: |
+        ### Audit via the BIG-IP Configuration utility
+
+        1. Log in to the BIG-IP Configuration utility.
+        2. Navigate to **Network → VLANs → VLAN List**.
+        3. Click each VLAN and review the **Source Checking** setting.
+
+        If every VLAN has source checking enabled, the device passes. If any VLAN has it disabled, the device fails.
+
+        ### Audit via tmsh
+
+        1. Open an SSH session to the BIG-IP and enter the tmsh shell.
+        2. List the source-checking setting configured on each VLAN:
+
+           ```text
+           tmsh list net vlan source-checking
+           ```
+        3. Inspect the `source-checking` value reported for each VLAN.
+
+        If every VLAN reports `source-checking enabled`, the device passes. If any VLAN reports it as disabled, the device fails.
+      remediation:
+        - id: console
+          desc: |
+            To enable VLAN source checking using the BIG-IP Configuration utility:
+
+            1. Navigate to **Network → VLANs → VLAN List**
+            2. Click on the affected VLAN
+            3. Set the **Configuration** selector to **Advanced**
+            4. Check the **Source Check** box
+            5. Click **Update**
+
+            **Note**: Source checking verifies that the return route for an initial packet points back to the VLAN the packet arrived on, and it takes effect only when auto last hop is disabled. In environments with asymmetric routing this verification drops legitimate traffic, so validate routing symmetry before enabling it.
+        - id: cli
+          desc: |
+            To enable VLAN source checking using tmsh:
+
+            1. Open an SSH session to the BIG-IP and enter the tmsh shell.
+            2. Enable source checking on the VLAN:
+
+               ```text
+               tmsh modify net vlan <vlan-name> source-checking enabled
+               ```
+            3. Verify the setting:
+
+               ```text
+               tmsh list net vlan <vlan-name> source-checking
+               ```
+            4. Save the configuration:
+
+               ```text
+               tmsh save sys config
+               ```
+
+            **Note**: Source checking takes effect only when auto last hop is disabled, and it drops traffic whose return route does not point back to the arrival VLAN. Validate routing symmetry before enabling it.
+    refs:
+      - url: https://my.f5.com/manage/s/article/K13520
+        title: F5 - VLAN configuration
+
+  - uid: mondoo-bigip-security-route-domain-strict-isolation
+    title: Ensure route domains use strict isolation
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-22
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-6-4
+      compliance/vda-isa-5: vda-isa-5-5-2-6
+    mql: |
+      bigip.routeDomains.all(strict == "enabled")
+    docs:
+      desc: |
+        This check verifies that every route domain on the BIG-IP enforces strict isolation.
+
+        A route domain gives a set of addresses its own routing table so that networks with overlapping or separately governed address space can coexist on one device. Strict isolation decides whether traffic may cross out of a domain into another one. Set it under **Network > Route Domains** with the **Strict Isolation** box, or with `tmsh modify net route-domain <name> strict enabled`.
+
+        **Why this matters**
+
+        With strict isolation off, a connection that originates in one route domain can be routed into another, and the separation the design depends on holds only for as long as nothing is configured to cross it. The boundary exists in intent rather than in enforcement.
+
+        An attacker who gains code execution inside an application in a low-trust domain, a public web tier or a customer tenant, reaches services that were never meant to be routable from there: the management network, a payment segment, a database tier, or another tenant's pool members. The pivot needs no new credential and no new exploit, only a route the device is willing to follow.
+
+        Because the crossing happens inside the device's own routing table, it produces nothing at the segment boundary an operator would think to inspect. No firewall records a permitted or denied connection and no interface counter looks unusual; the packet is simply forwarded. Segmentation that regulators and auditors are told exists cannot be demonstrated, because reachability is a property of the path rather than of the endpoints, and a single non-strict domain is enough to make the whole arrangement permeable.
+
+        Enabling strict isolation immediately stops any flow that crosses domain boundaries today, including lookups that currently fall back to a parent route domain. Inventory those flows first, and give the ones that must survive an explicit path such as a virtual server that terminates in each domain, rather than leaving them dependent on implicit crossing.
+      audit: |
+        ### Audit via the BIG-IP Configuration utility
+
+        1. Log in to the BIG-IP Configuration utility.
+        2. Navigate to **Network → Route Domains**.
+        3. Click each route domain and review the **Strict Isolation** setting.
+
+        If every route domain has strict isolation enabled, the device passes. If any route domain has it disabled, the device fails.
+
+        ### Audit via tmsh
+
+        1. Open an SSH session to the BIG-IP and enter the tmsh shell.
+        2. List the strict setting configured on each route domain:
+
+           ```text
+           tmsh list net route-domain strict
+           ```
+        3. Inspect the `strict` value reported for each route domain.
+
+        If every route domain reports `strict enabled`, the device passes. If any route domain reports it as disabled, the device fails.
+      remediation:
+        - id: console
+          desc: |
+            To enable strict isolation on route domains using the BIG-IP Configuration utility:
+
+            1. Navigate to **Network → Route Domains**
+            2. Click on the affected route domain
+            3. Check the **Strict Isolation** box
+            4. Click **Update**
+
+            **Note**: Enabling strict isolation removes cross-domain forwarding, including parent route domain lookups, and immediately breaks any traffic flows that cross route domain boundaries. Review your network architecture before making this change.
+        - id: cli
+          desc: |
+            To enable strict isolation on route domains using tmsh:
+
+            1. Open an SSH session to the BIG-IP and enter the tmsh shell.
+            2. Enable strict isolation on the route domain:
+
+               ```text
+               tmsh modify net route-domain <name> strict enabled
+               ```
+            3. Verify the configuration:
+
+               ```text
+               tmsh list net route-domain <name> strict
+               ```
+            4. Save the configuration:
+
+               ```text
+               tmsh save sys config
+               ```
+
+            **Note**: Enabling strict isolation removes cross-domain forwarding, including parent route domain lookups, and immediately breaks any traffic flows that cross route domain boundaries. Review your network architecture before making this change.
+    refs:
+      - url: https://my.f5.com/manage/s/article/K14163
+        title: F5 - Route domain configuration
+
+  - uid: mondoo-bigip-security-snmp-restricted-access
+    title: Ensure SNMP allowed addresses are restricted
+    impact: 85
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-3
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: |
+      bigip.snmp.allowedAddresses.none(_.in(["0.0.0.0/0", "0.0.0.0", "::/0", "ALL"]))
+    docs:
+      desc: |
+        This check verifies that SNMP access to the BIG-IP is restricted to named management hosts rather than open to every source address.
+
+        The device's SNMP agent answers only sources that appear on its client allowlist. Maintain that list under **System > SNMP > Agent > Properties** in the **Client Allowlist** setting, labeled **SNMP Access** on older releases, or with `tmsh modify sys snmp allowed-addresses`. The check fails when the list contains a wildcard entry such as `0.0.0.0/0`, `::/0`, or `ALL`.
+
+        **Why this matters**
+
+        SNMP on a BIG-IP is a complete map of what the device does. A reader with a valid community string walks the interface table, the virtual server and pool tables, the routing table, and the software version, and comes away knowing which applications sit behind the device, which addresses their members use, and which release the management plane is running. That release string matters most. F5 has repeatedly shipped critical unauthenticated remote code execution flaws in its management interface, and mass exploitation has followed disclosure within days, so an open allowlist hands an attacker the version number to match against the exploit they already have.
+
+        Version 1 and version 2c authenticate with a community string sent in clear text, and defaults such as `public` survive on more devices than anyone expects. With the allowlist unrestricted, that string is guessable and sniffable from anywhere able to route to the management address rather than from a handful of monitoring stations, which turns a weak shared secret into an internet-facing one. Where write access is configured, the same string edits the running configuration.
+
+        A compromised BIG-IP is not one more host on the network. It terminates TLS for everything behind it, so it holds the private keys and sees the plaintext of every application it fronts, and it sits astride the traffic path for all of them. Reconnaissance that shortens an attacker's route to that position is worth denying on its own.
+
+        Keep `127.0.0.0/8` on the list so on-box processes can still query the agent, and enumerate every authorized monitoring station before replacing the list, because a station left out loses access the moment the change is saved. Where the management network is already segmented and reachable only from a monitoring subnet, the allowlist remains the enforcement point on the device itself and should still name those hosts.
+      audit: |
+        ### Audit via the BIG-IP Configuration utility
+
+        1. Log in to the BIG-IP Configuration utility.
+        2. Navigate to **System → SNMP → Agent → Properties**.
+        3. Review the **Client Allowlist** entries for overly broad values such as `0.0.0.0/0`, `::/0`, or `ALL`. On older versions this setting is labeled **SNMP Access**.
+
+        If the allowed addresses list contains only specific hosts or subnets, the device passes. If it contains an unrestricted entry, the device fails.
+
+        ### Audit via tmsh
+
+        1. Open an SSH session to the BIG-IP and enter the tmsh shell.
+        2. List the SNMP allowed addresses:
+
+           ```text
+           tmsh list sys snmp allowed-addresses
+           ```
+        3. Inspect the list for unrestricted entries such as `0.0.0.0/0`, `::/0`, or `ALL`.
+
+        If the allowed addresses list contains only specific hosts or subnets, the device passes. If it contains an unrestricted entry, the device fails.
+      remediation:
+        - id: console
+          desc: |
+            To restrict SNMP allowed addresses using the BIG-IP Configuration utility:
+
+            1. Navigate to **System → SNMP → Agent → Properties**
+            2. In the **Client Allowlist** setting, remove any overly broad entries such as `0.0.0.0/0`. On older versions this setting is labeled **SNMP Access**.
+            3. Add only the specific IP addresses or subnets of authorized SNMP management stations. Keep the default `127.0.0.0/8` entry so local processes on the device can still query the agent.
+            4. Click **Update**
+        - id: cli
+          desc: |
+            To restrict SNMP allowed addresses using tmsh:
+
+            1. Open an SSH session to the BIG-IP and enter the tmsh shell.
+            2. Restrict SNMP access to the loopback range and your specific management hosts:
+
+               ```text
+               tmsh modify sys snmp allowed-addresses replace-all-with { 127.0.0.0/8 10.0.1.100 10.0.1.101 }
+               ```
+            3. Verify the allowed addresses:
+
+               ```text
+               tmsh list sys snmp allowed-addresses
+               ```
+            4. Save the configuration:
+
+               ```text
+               tmsh save sys config
+               ```
+
+            **Note**: The replace-all-with operation removes every existing entry. Any monitoring station missing from the new list loses SNMP access immediately, so compile the complete list of authorized stations before running the command.
+    refs:
+      - url: https://my.f5.com/manage/s/article/K13625
+        title: F5 - Configuring SNMP access

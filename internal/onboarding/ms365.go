@@ -1,0 +1,521 @@
+// Copyright Mondoo, Inc. 2024, 2026
+// SPDX-License-Identifier: BUSL-1.1
+
+package onboarding
+
+import (
+	"strings"
+
+	"github.com/cockroachdb/errors"
+	"github.com/google/uuid"
+	"github.com/hashicorp/hcl/v2/hclwrite"
+	"github.com/rs/zerolog/log"
+
+	"go.mondoo.com/cnspec/internal/tfgen"
+	"go.mondoo.com/mql/cli/theme"
+)
+
+// DefaultMs365AppRegistrationName is the display name of the Entra app registration the automation
+// creates when the caller doesn't set one.
+const DefaultMs365AppRegistrationName = "mondoo_ms365"
+
+// Ms365Integration represents the configuration of a Microsoft 365 integration to be created.
+type Ms365Integration struct {
+	Name  string
+	Space string
+	// AppRegistrationName sets the display name of the Entra app registration. A tenant can hold
+	// several Mondoo integrations, and Entra allows duplicate display names, so telling them apart
+	// afterwards requires distinct names. Empty means DefaultMs365AppRegistrationName.
+	AppRegistrationName string
+}
+
+// The full list of permissions required by Mondoo to scan a Microsoft 365 tenant
+var Ms365AppPermissions = Permissions{
+	{
+		ResourceID: "MicrosoftGraph",
+		Access: []ResourceAccess{
+			{
+				// Allows the app to read all organization's policies without a signed-in user.
+				ID:   "Policy.Read.All",
+				Type: "Role",
+			},
+			{
+				// Allows the app to read organization's security events without a signed-in user.
+				ID:   "SecurityEvents.Read.All",
+				Type: "Role",
+			},
+			{
+				// Allows the app to read organization-wide Microsoft Forms settings without a signed-in user.
+				ID:   "OrgSettings-Forms.Read.All",
+				Type: "Role",
+			},
+			{
+				// Allows the app to read Microsoft Intune device configuration and policies without a signed-in user.
+				ID:   "DeviceManagementConfiguration.Read.All",
+				Type: "Role",
+			},
+			{
+				// Allows the app to read the properties of devices managed by Microsoft Intune
+				ID:   "DeviceManagementManagedDevices.Read.All",
+				Type: "Role",
+			},
+			{
+				// Allows the app to read Microsoft Intune service properties including device enrollment and third party service connection configuration
+				ID:   "DeviceManagementServiceConfig.Read.All",
+				Type: "Role",
+			},
+			{
+				// Allows the app to read organization-wide apps and services settings on behalf of the signed-in user
+				ID:   "OrgSettings-AppsAndServices.Read.All",
+				Type: "Role",
+			},
+			{
+				// PIM role definitions, assignments, role management policies, and eligibility schedules.
+				// Required by the cis-microsoft-365 5.3.x checks and the PIM privileged-roles check.
+				ID:   "RoleManagement.Read.All",
+				Type: "Role",
+			},
+			{
+				// Required by the cis-microsoft-365 5.3.2/5.3.3 access-review checks.
+				ID:   "AccessReview.Read.All",
+				Type: "Role",
+			},
+			{
+				ID:   "UserAuthenticationMethod.Read.All",
+				Type: "Role",
+			},
+			{
+				// Sign-in activity, sign-in logs, and authentication method registration details.
+				ID:   "AuditLog.Read.All",
+				Type: "Role",
+			},
+			{
+				ID:   "IdentityRiskEvent.Read.All",
+				Type: "Role",
+			},
+			{
+				ID:   "IdentityRiskyUser.Read.All",
+				Type: "Role",
+			},
+			{
+				// Intune managed apps, app configurations, and app protection policies.
+				ID:   "DeviceManagementApps.Read.All",
+				Type: "Role",
+			},
+			{
+				// Intune role-based access control (RBAC) settings.
+				ID:   "DeviceManagementRBAC.Read.All",
+				Type: "Role",
+			},
+			{
+				// Microsoft Graph security alerts_v2 (not covered by SecurityEvents.Read.All).
+				ID:   "SecurityAlert.Read.All",
+				Type: "Role",
+			},
+			{
+				ID:   "SecurityIncident.Read.All",
+				Type: "Role",
+			},
+			{
+				ID:   "InformationProtectionPolicy.Read.All",
+				Type: "Role",
+			},
+			{
+				// Directory reads such as OAuth2 permission grants, service principals, and group settings.
+				ID:   "Directory.Read.All",
+				Type: "Role",
+			},
+			{
+				// Domain DNS records (GET /domains/{id}/serviceConfigurationRecords), read by the
+				// cis-microsoft-365 2.1.8 SPF check. Learn lists only Domain.Read.All for this endpoint.
+				ID:   "Domain.Read.All",
+				Type: "Role",
+			},
+			{
+				// Required by the MicrosoftTeams PowerShell module under application auth (Get-Cs* cmdlets
+				// behind ms365.teams, cis-microsoft-365 8.x). No permission is needed on the Skype and Teams
+				// Tenant Admin API, and Learn warns against adding one.
+				ID:   "Organization.Read.All",
+				Type: "Role",
+			},
+			{
+				// Permission grant policies (GET /policies/permissionGrantPolicies). Learn does not list
+				// Policy.Read.All for this endpoint.
+				ID:   "Policy.Read.PermissionGrant",
+				Type: "Role",
+			},
+			{
+				// Entitlement management external origin resource connectors.
+				ID:   "EntitlementManagement.Read.All",
+				Type: "Role",
+			},
+			{
+				// Device registration policy. Learn lists Policy.Read.All for it only under delegated access.
+				ID:   "Policy.Read.DeviceConfiguration",
+				Type: "Role",
+			},
+			{
+				// Domain federation configuration (GET /domains/{id}/federationConfiguration). Learn does not
+				// list Domain.Read.All or Directory.Read.All for this endpoint.
+				ID:   "Domain-InternalFederation.Read.All",
+				Type: "Role",
+			},
+			{
+				// Teams inventory over Microsoft Graph: list teams and read their settings.
+				ID:   "TeamSettings.Read.All",
+				Type: "Role",
+			},
+			{
+				// Channels in the Teams inventory.
+				ID:   "ChannelSettings.Read.All",
+				Type: "Role",
+			},
+		},
+	},
+	{
+		ResourceID: "Office365SharePointOnline",
+		Access: []ResourceAccess{
+			{
+				// Allows the application to have full control of all site collections on behalf of the signed-in user.
+				ID:   "Sites.FullControl.All",
+				Type: "Role",
+			},
+		},
+	},
+	{
+		ResourceID: "Office365ExchangeOnline",
+		Access: []ResourceAccess{
+			{
+				// Allows the application to run Exchange Online cmdlets with the same level of access as an administrator.
+				ID:   "Exchange.ManageAsApp",
+				Type: "Role",
+			},
+		},
+	},
+	{
+		ResourceID: "Office365ExchangeOnlineProtection",
+		Access: []ResourceAccess{
+			{
+				// Security & Compliance PowerShell (Connect-IPPSSession) app-only access: DLP policies
+				// (cis-microsoft-365 3.2.2) and sensitivity label policies. Separate from the
+				// Office365ExchangeOnline grant; both are required.
+				ID:   "Exchange.ManageAsApp",
+				Type: "Role",
+				// Distinct resource name, since Office365ExchangeOnline already uses Exchange_ManageAsApp.
+				Name: "ExchangeOnlineProtection_Exchange_ManageAsApp",
+			},
+		},
+	},
+}
+
+// function wrapper to mock during testing
+var UuidGenerator func() string = func() string {
+	return uuid.New().String()
+}
+
+// GenerateMs365HCL generates automation code to create a Microsoft 365 integration.
+func GenerateMs365HCL(integration Ms365Integration) (string, error) {
+	// Validate integration name is not empty, if it is, generate a random one
+	if integration.Name == "" {
+		integration.Name = generateAzureIntegrationName(UuidGenerator())
+		log.Info().Msgf(
+			"integration name not provided, using %s",
+			theme.DefaultTheme.Primary(integration.Name),
+		)
+	}
+
+	// Generate required providers block
+	requiredProvidersBlock, err := tfgen.CreateRequiredProviders(
+		tfgen.NewRequiredProvider("mondoo",
+			tfgen.HclRequiredProviderWithSource(mondooProviderSource),
+			tfgen.HclRequiredProviderWithVersion(mondooProviderVersion),
+		),
+	)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to generate required providers")
+	}
+
+	selfSignedCertSubjectBlock, err := tfgen.HclCreateGenericBlock("subject", nil,
+		tfgen.Attributes{"common_name": "mondoo"},
+	)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to generate self signed cert subject block")
+	}
+
+	appRegistrationName := integration.AppRegistrationName
+	if appRegistrationName == "" {
+		appRegistrationName = DefaultMs365AppRegistrationName
+	}
+
+	mondooProviderHclModifier := []tfgen.HclProviderModifier{}
+	if integration.Space != "" {
+		mondooProviderHclModifier = append(mondooProviderHclModifier, tfgen.HclProviderWithAttributes(
+			tfgen.Attributes{"space": integration.Space},
+		))
+	}
+
+	permissionsBlocks := []*hclwrite.Block{}
+	for _, permission := range Ms365AppPermissions {
+		block, err := permission.HclBlock()
+		if err != nil {
+			return "", errors.Wrap(err, "failed to generate ms365 permissions block")
+		}
+		permissionsBlocks = append(permissionsBlocks, block)
+	}
+
+	var (
+		providerAzureAD       = tfgen.NewProvider("azuread")
+		providerMondoo        = tfgen.NewProvider("mondoo", mondooProviderHclModifier...)
+		dataADClientConfig    = tfgen.NewDataSource("azuread_client_config", "current")
+		resourceAdApplication = tfgen.NewResource("azuread_application", "mondoo",
+			tfgen.HclResourceWithAttributes(tfgen.Attributes{
+				"display_name":  appRegistrationName,
+				"owners":        []any{dataADClientConfig.TraverseRef("object_id")},
+				"marketing_url": "https://www.mondoo.com/",
+			}),
+			tfgen.HclResourceWithGenericBlocks(permissionsBlocks...),
+		)
+		resourceTLSPrivateKey = tfgen.NewResource("tls_private_key", "credential",
+			tfgen.HclResourceWithAttributes(tfgen.Attributes{
+				"algorithm": "RSA",
+				"rsa_bits":  4096,
+			}),
+		)
+		resourceTLSSelfSignedCert = tfgen.NewResource("tls_self_signed_cert", "credential",
+			tfgen.HclResourceWithAttributes(tfgen.Attributes{
+				"private_key_pem":       resourceTLSPrivateKey.TraverseRef("private_key_pem"),
+				"validity_period_hours": 4096,
+				"early_renewal_hours":   3,
+				"allowed_uses": []string{
+					"key_encipherment",
+					"digital_signature",
+					"data_encipherment",
+					"cert_signing",
+				},
+			}),
+			tfgen.HclResourceWithGenericBlocks(selfSignedCertSubjectBlock),
+		)
+		resourceADApplicationCertificate = tfgen.NewResource("azuread_application_certificate", "mondoo",
+			tfgen.HclResourceWithAttributes(tfgen.Attributes{
+				"application_id": resourceAdApplication.TraverseRef("id"),
+				"type":           "AsymmetricX509Cert",
+				"value":          resourceTLSSelfSignedCert.TraverseRef("cert_pem"),
+			}),
+		)
+		resourceADServicePrincipal = tfgen.NewResource("azuread_service_principal", "mondoo",
+			tfgen.HclResourceWithAttributes(tfgen.Attributes{
+				"client_id":                    resourceAdApplication.TraverseRef("client_id"),
+				"app_role_assignment_required": false,
+				"owners":                       []any{dataADClientConfig.TraverseRef("object_id")},
+			}),
+		)
+		resourceADReadersDirectoryRole = tfgen.NewResource("azuread_directory_role", "global_reader",
+			tfgen.HclResourceWithAttributes(tfgen.Attributes{"display_name": "Global Reader"}),
+		)
+		resourceTimeSleep = tfgen.NewResource("time_sleep", "wait_time",
+			tfgen.HclResourceWithAttributes(tfgen.Attributes{"create_duration": "60s"}),
+		)
+		resourceADReadersRoleAssignment = tfgen.NewResource("azuread_directory_role_assignment", "global_reader",
+			tfgen.HclResourceWithAttributes(tfgen.Attributes{
+				"role_id":             resourceADReadersDirectoryRole.TraverseRef("template_id"),
+				"principal_object_id": resourceADServicePrincipal.TraverseRef("object_id"),
+				"depends_on":          []any{resourceTimeSleep.TraverseRef()},
+			}),
+		)
+		integrationAttributes = tfgen.Attributes{
+			"name":      integration.Name,
+			"tenant_id": dataADClientConfig.TraverseRef("tenant_id"),
+			"client_id": resourceAdApplication.TraverseRef("client_id"),
+			"credentials": tfgen.Attributes{
+				"pem_file": tfgen.NewFuncCall("join",
+					tfgen.CreateSimpleTraversal(`"\n", [tls_self_signed_cert.credential.cert_pem, tls_private_key.credential.private_key_pem]`),
+				),
+			},
+			"depends_on": []any{
+				resourceADServicePrincipal.TraverseRef(),
+				resourceADApplicationCertificate.TraverseRef(),
+				resourceADReadersRoleAssignment.TraverseRef(),
+			},
+		}
+	)
+
+	resourceMondooIntegration := tfgen.NewResource("mondoo_integration_ms365", "this", // Changed to match the .tf file
+		tfgen.HclResourceWithAttributes(integrationAttributes),
+	)
+
+	blocks, err := tfgen.ObjectsToBlocks(
+		providerMondoo,
+		providerAzureAD,
+		dataADClientConfig,
+		dataMicrosoftPublishedAppIDs(),
+		resourceTLSPrivateKey,
+		resourceTLSSelfSignedCert,
+		resourceADApplicationCertificate,
+		resourceADServicePrincipal,
+		resourceAdApplication,
+		resourceADReadersDirectoryRole,
+		resourceADReadersRoleAssignment,
+		resourceTimeSleep,
+		resourceMondooIntegration,
+	)
+	if err != nil {
+		return "", err
+	}
+	hclBlocks := tfgen.CombineHclBlocks(requiredProvidersBlock, blocks)
+
+	// App Registration Permissions Blocks
+	blocks, err = tfgen.ObjectsToBlocks(Ms365AppPermissions.HclResources(resourceADServicePrincipal)...)
+	if err != nil {
+		return "", err
+	}
+	hclBlocks = tfgen.CombineHclBlocks(hclBlocks, blocks)
+
+	return tfgen.CreateHclStringOutput(hclBlocks...), nil
+}
+
+// Permissions are a collection of access and permissions to multiple Microsoft resources (e.g. MicrosoftGraph, SharePoint, etc.)
+type Permissions []Permission
+
+// HclBlocks returns all the hcl blocks for all the defined permissions for a Microsoft 365 integration
+func (p *Permissions) HclBlocks() (blocks []*hclwrite.Block, err error) {
+	for _, permission := range Ms365AppPermissions {
+		block, err := permission.HclBlock()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to generate ms365 permissions block")
+		}
+		blocks = append(blocks, block)
+	}
+	return blocks, nil
+}
+
+// HclResources returns all the hcl resources (service principals) for all the defined permissions for a Microsoft 365 integration
+func (p *Permissions) HclResources(mondooServicePrincipal *tfgen.HclResource) (resources []tfgen.Object) {
+	for _, permission := range Ms365AppPermissions {
+		resources = append(resources, permission.HclResource())
+		for _, access := range permission.Access {
+			resources = append(resources, access.HclResource(mondooServicePrincipal, permission.HclResource()))
+		}
+	}
+	return resources
+}
+
+// Permission represents access and permissions to a single Microsoft resource (e.g. MicrosoftGraph, SharePoint, etc.)
+type Permission struct {
+	ResourceID string
+	Access     []ResourceAccess
+
+	hclResource *tfgen.HclResource
+	hclBlock    *hclwrite.Block
+}
+
+// HclResource returns the service principal resource of the Microsoft resource we are granting permissions
+func (p *Permission) HclResource() *tfgen.HclResource {
+	if p.hclResource == nil {
+		p.hclResource = tfgen.NewResource("azuread_service_principal", p.ResourceID,
+			tfgen.HclResourceWithAttributes(tfgen.Attributes{
+				"client_id":    dataMicrosoftPublishedAppIDs().TraverseRef("result", p.ResourceID),
+				"use_existing": true,
+			}),
+		)
+	}
+	return p.hclResource
+}
+
+// HclBlock returns the hcl block for a single permission of an App Registration
+func (p *Permission) HclBlock() (*hclwrite.Block, error) {
+	if p.hclBlock == nil {
+		resourceAccessBlocks, err := p.ResourceAccessBlocks()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create required_resource_access block")
+		}
+
+		p.hclBlock, err = tfgen.HclCreateGenericBlock("required_resource_access", nil,
+			map[string]any{"resource_app_id": dataMicrosoftPublishedAppIDs().TraverseRef("result", p.ResourceID)},
+			resourceAccessBlocks...,
+		)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create required_resource_access block")
+		}
+	}
+
+	return p.hclBlock, nil
+}
+
+// ResourceAccessBlocks returns hcl blocks for all defined access of a single resource
+func (p *Permission) ResourceAccessBlocks() (blocks []*hclwrite.Block, err error) {
+	var block *hclwrite.Block
+	for _, access := range p.Access {
+		block, err = access.HclBlock(p.HclResource())
+		if err != nil {
+			return
+		}
+
+		blocks = append(blocks, block)
+	}
+	return
+}
+
+// ResourceAccess defines a single access to a resource
+type ResourceAccess struct {
+	ID   string
+	Type string
+	// Name overrides the hcl resource name derived from ID. Set it when another resource grants an
+	// app role with the same ID, since Terraform rejects duplicate resource addresses.
+	Name string
+
+	hclResource *tfgen.HclResource
+	hclBlock    *hclwrite.Block
+}
+
+func (r *ResourceAccess) AppRoleID() string {
+	return `app_role_ids["` + r.ID + `"]`
+}
+
+// The hcl resource name, we expect IDs like 'Policy.Read.All' which will translate into 'Policy_Read_All'
+func (r *ResourceAccess) ResourceName() string {
+	if r.Name != "" {
+		return r.Name
+	}
+	return strings.ReplaceAll(r.ID, ".", "_")
+}
+
+// These resources are used to grant admin consent for application permissions
+// https://registry.terraform.io/providers/hashicorp/azuread/latest/docs/resources/app_role_assignment
+func (r *ResourceAccess) HclResource(mondooServicePrincipal, resourceServicePrincipal *tfgen.HclResource) *tfgen.HclResource {
+	if r.hclResource == nil {
+		r.hclResource = tfgen.NewResource("azuread_app_role_assignment", r.ResourceName(),
+			tfgen.HclResourceWithAttributes(tfgen.Attributes{
+				"app_role_id":         resourceServicePrincipal.TraverseRef(r.AppRoleID()),
+				"resource_object_id":  resourceServicePrincipal.TraverseRef("object_id"),
+				"principal_object_id": mondooServicePrincipal.TraverseRef("object_id"),
+			}),
+		)
+	}
+	return r.hclResource
+}
+
+// These hcl blocks are used to generate the required resource access of the App Registration
+func (r *ResourceAccess) HclBlock(resourceServicePrincipal *tfgen.HclResource) (*hclwrite.Block, error) {
+	var err error
+	if r.hclBlock == nil {
+		r.hclBlock, err = tfgen.HclCreateGenericBlock("resource_access", nil, map[string]any{
+			"id":   resourceServicePrincipal.TraverseRef(r.AppRoleID()),
+			"type": r.Type,
+		})
+	}
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create resource_access block")
+	}
+	return r.hclBlock, nil
+}
+
+// Used to discover application IDs for APIs published by Microsoft
+var dataADPublishedAppIDs *tfgen.HclResource
+
+// https://registry.terraform.io/providers/hashicorp/azuread/latest/docs/data-sources/application_published_app_ids
+func dataMicrosoftPublishedAppIDs() *tfgen.HclResource {
+	if dataADPublishedAppIDs == nil {
+		dataADPublishedAppIDs = tfgen.NewDataSource("azuread_application_published_app_ids", "well_known")
+	}
+	return dataADPublishedAppIDs
+}

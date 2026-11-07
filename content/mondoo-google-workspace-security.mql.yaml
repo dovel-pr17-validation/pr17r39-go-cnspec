@@ -1,0 +1,964 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+policies:
+  - uid: mondoo-google-workspace-security
+    name: Mondoo Google Workspace Security
+    version: 1.2.5
+    license: BUSL-1.1
+    tags:
+      mondoo.com/category: security
+      mondoo.com/platform: google-workspace,saas
+      mondoo.com/icon: google-workspace
+    require:
+      - provider: google-workspace
+    authors:
+      - name: Mondoo, Inc.
+        email: hello@mondoo.com
+    summary: Secure Google Workspace users, apps, and data sharing
+    docs:
+      desc: |
+        The Mondoo Google Workspace Security policy identifies critical misconfigurations in Google Workspace tenants that could expose your organization to account takeover, data breaches, and unauthorized access across email, drive, and connected services. As the productivity and collaboration hub for many organizations, Workspace misconfigurations give attackers a path to corporate data, customer information, and identity-based access to dozens of downstream applications.
+
+        This policy provides security checks across key Google Workspace areas:
+
+        - User authentication and multi-factor enforcement
+        - Administrative access and role management
+        - Application access and OAuth scope controls
+        - Drive and document sharing policies
+        - Gmail, Calendar, and Meet security settings
+        - Mobile device and Chrome management
+        - Audit logging and reporting configuration
+
+        Learn more about scanning Google Workspace in the [cnspec Google Workspace documentation](https://mondoo.com/docs/cnspec/saas/google_workspace).
+
+        Have suggestions for new checks in this policy? Visit our [cnspec repository](https://github.com/mondoohq/cnspec).
+    groups:
+      - title: Authentication & Admin Security
+        filters: asset.platform == "google-workspace"
+        checks:
+          - uid: mondoo-googleworkspace-security-two-step-verification-enforced
+          - uid: mondoo-googleworkspace-security-limit-super-admins
+          - uid: mondoo-googleworkspace-security-minimum-super-admins
+          - uid: mondoo-googleworkspace-security-super-admins-should-use-hardware-based-2fa
+          - uid: mondoo-googleworkspace-security-less-secure-app-access-should-not-be-allowed
+          - uid: mondoo-googleworkspace-security-no-ip-whitelisted-users
+          - uid: mondoo-googleworkspace-security-admins-not-guest-users
+          - uid: mondoo-googleworkspace-security-admins-enrolled-in-2sv
+          - uid: mondoo-googleworkspace-security-admins-no-pending-password-reset
+      - title: Domain & App Security
+        filters: asset.platform == "google-workspace"
+        checks:
+          - uid: mondoo-googleworkspace-security-domains-verified
+          - uid: mondoo-googleworkspace-security-connected-apps-no-full-access
+      - title: Data Sharing
+        filters: asset.platform == "google-workspace"
+        checks:
+          - uid: mondoo-googleworkspace-security-calendar-no-public-sharing
+queries:
+  - uid: mondoo-googleworkspace-security-two-step-verification-enforced
+    title: Ensure 2-step verification (MFA) is enforced for all users
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-14
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-j
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-3
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-4-2
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-2
+    mql: googleworkspace.users.all ( isEnforcedIn2Sv == true )
+    docs:
+      desc: |
+        This check verifies that every user in the Google Workspace account is required to present a second factor, not merely permitted to.
+
+        Google splits this into two settings under **Security > Authentication > 2-step verification** in the Admin console at admin.google.com. Allowing users to turn on 2-step verification opens self-enrollment, and enforcement is what makes it mandatory. Enforcement is applied per organizational unit, so an account can look protected at the top level while a child unit that was never selected carries none of it. This check reads the enforcement state of each user and requires it on all of them.
+
+        **Why this matters**
+
+        Self-enrollment protects the people who were already going to be careful. The accounts that stay password-only are the ones nobody chased, and those are the accounts an attacker finds first.
+
+        Getting the password is the easy half. It comes from a dump of an unrelated service where the employee reused it, or from a sign-in page rendered convincingly enough that they typed it in. With no second factor, that password is the whole authentication. The attacker signs in and Gmail hands over the mailbox: the password reset messages for every other service the person uses, the finance thread with the wire instructions, the contract attachments. Drive hands over whatever the account can open, including the shared drives the person was added to and forgot about. Nothing else has to be broken.
+
+        Enforcement across the entire organization removes the per-user gaps that make this predictable. It also removes the gap between a policy that exists on paper and the accounts it was never actually applied to.
+
+        Roll it out with a new user enrollment period so accounts created after the change can sign in once and enroll, and track coverage under **Reporting > Reports > User Reports > Security** before the enforcement date so nobody is stranded outside their account when it arrives.
+      audit: |
+        ### Audit via Admin Console
+
+        1. Sign in to the Google Admin console at admin.google.com using an administrator account.
+        2. Go to **Security** > **Authentication** > **2-step verification**.
+        3. Confirm that **Allow users to turn on 2-step verification** is set to **On**.
+        4. Under **Enforcement**, confirm that enforcement is turned on for all users and not limited to a subset of organizational units.
+
+        A passing result shows enforcement turned on for the whole organization; a failing result shows enforcement off or applied to only some organizational units.
+
+        ### Audit via API
+
+        Query the Google Admin SDK Directory API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+          "https://admin.googleapis.com/admin/directory/v1/users?customer=my_customer"
+        ```
+
+        A passing response shows `isEnforcedIn2Sv` set to `true` for every user; a failing response shows one or more users with `isEnforcedIn2Sv` set to `false`.
+      remediation:
+        - id: console
+          desc: |
+            This check passes only when 2-step verification is enforced for every user. Allowing users to turn on 2-step verification permits self-enrollment but does not enforce it, so that step alone does not satisfy the check. You must turn on enforcement.
+
+            To enforce 2-step verification for Google Workspace users:
+
+            1. Sign in to the [Google Admin console](https://admin.google.com/) using your administrator account.
+            2. Go to **Security** > **Authentication** > **2-step verification**.
+            3. Check **Allow users to turn on 2-step verification** and click **Save**. This permits enrollment but is a prerequisite only and does not by itself make the check pass.
+            4. Notify all users to enroll in 2-step verification, and track enrollment progress under **Reporting** > **Reports** > **User Reports** > **Security**.
+            5. Turn on enforcement: return to **Security** > **Authentication** > **2-step verification** and under **Enforcement** select **Turn on enforcement from** with a date that gives remaining users time to enroll. This enforcement step is what makes the check pass.
+            6. Set a **New user enrollment period** such as one week so new accounts can sign in once and enroll before enforcement applies to them.
+            7. Click **Save**.
+
+            Users who have not enrolled when enforcement begins are locked out of their accounts, so confirm enrollment status before the enforcement date.
+
+            For more details, see [Deploy 2-Step Verification](https://knowledge.workspace.google.com/admin/security/protect-your-business-with-2-step-verification).
+    refs:
+      - url: https://knowledge.workspace.google.com/admin/security/protect-your-business-with-2-step-verification
+        title: Protect your business with 2-Step Verification
+      - url: https://knowledge.workspace.google.com/admin/users/security-best-practices-for-administrator-accounts
+        title: Security best practices for administrator accounts
+  - uid: mondoo-googleworkspace-security-limit-super-admins
+    title: Ensure no more than four users have super admin permissions
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-10
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-2
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-5
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-2
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: googleworkspace.report.users.where(isSuperAdmin == true).length <= 4
+    docs:
+      desc: |
+        This check verifies that no more than four accounts hold the super admin role.
+
+        A super admin has unrestricted control of the Google Workspace account: every setting, every organizational unit, every user, and the ability to reset any password or read any mailbox by granting itself delegation. You list them in the Admin console under **Directory > Users** with the **Admin role** filter set to **Super Admin**. This check counts those accounts and requires four or fewer.
+
+        **Why this matters**
+
+        The role accumulates. Someone needed it for a migration in 2021, someone else was made a super admin because a delegated role could not do one specific task, and neither was reviewed afterwards. Each of those accounts is a complete path to the organization, held by a person who no longer thinks of themselves as an administrator and does not treat the account like one.
+
+        That is precisely what an attacker looks for. They do not target the security lead who uses a hardware key. They target the marketing manager who was granted super admin for a Drive cleanup two years ago and still signs in from a personal laptop. With that account they create a user of their own, grant it domain-wide delegation, and read every mailbox in the organization through the API without ever touching another password. Because the access is granted rather than stolen, revoking the original account does not remove it.
+
+        Capping the count is what makes the remaining accounts reviewable. Four accounts can be watched, given hardware keys, and checked against a named owner. Fifteen cannot.
+
+        Move each user beyond that set to a delegated role such as **User Management Admin** or **Help Desk Admin**, or build a custom role carrying only the privileges the person's actual work requires. Keep at least two, since a single super admin is its own failure and a companion check in this policy enforces the lower bound.
+      audit: |
+        ### Audit via Admin Console
+
+        1. Sign in to the Google Admin console at admin.google.com using an administrator account.
+        2. Go to **Directory** > **Users**.
+        3. Add the filter **Admin role** and select **Super Admin**.
+        4. Count the users returned by the filter.
+
+        A passing result shows four or fewer super admin accounts; a failing result shows five or more.
+
+        ### Audit via API
+
+        Query the Google Admin SDK Reports API and inspect the result:
+
+        ```bash
+        # GNU date (Linux) uses -d; BSD date (macOS) uses -v. This tries both so the snippet is portable.
+        REPORT_DATE=$(date -d "2 days ago" +%Y-%m-%d 2>/dev/null || date -v-2d +%Y-%m-%d)
+        curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+          "https://admin.googleapis.com/admin/reports/v1/usage/users/all/dates/$REPORT_DATE?parameters=accounts:is_super_admin"
+        ```
+
+        A passing response shows four or fewer users with `accounts:is_super_admin` set to `true`; a failing response shows five or more.
+      remediation:
+        - id: console
+          desc: |
+            To reduce the number of super admin accounts:
+
+            1. Sign in to the [Google Admin console](https://admin.google.com/) using your administrator account.
+            2. Go to **Directory** > **Users** and filter by the **Super Admin** role to list all current super admins.
+            3. Decide which two to four users genuinely require full administrative control.
+            4. For each super admin beyond that set, open the user, click **Admin roles and privileges**, and remove the **Super Admin** role assignment.
+            5. Assign a delegated role such as **User Management Admin** or **Help Desk Admin** that covers the tasks the user actually performs, or [create a custom role](https://knowledge.workspace.google.com/admin/users/create-edit-and-delete-custom-admin-roles) with only the required privileges.
+
+            For more details, see [Pre-built administrator roles](https://knowledge.workspace.google.com/admin/users/prebuilt-administrator-roles).
+    refs:
+      - url: https://knowledge.workspace.google.com/admin/users/security-best-practices-for-administrator-accounts
+        title: Security best practices for administrator accounts
+  - uid: mondoo-googleworkspace-security-minimum-super-admins
+    title: Ensure more than one user has super admin permissions
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-10
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-2
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-2
+      compliance/nist-sp-800-171: false
+      compliance/owasp-top-10-2025: false
+      compliance/pci-dss-4: pcidss-requirement-7-2-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: googleworkspace.report.users.where(isSuperAdmin == true).length > 1
+    docs:
+      desc: |
+        This check verifies that more than one account holds the super admin role.
+
+        Super admin is the only role that can restore access to the Google Workspace account when the usual paths fail. It resets any password, changes the recovery details, reassigns roles, and unlocks accounts. You see who holds it in the Admin console under **Directory > Users** with the **Admin role** filter set to **Super Admin**. This check requires at least two such accounts.
+
+        **Why this matters**
+
+        With a single super admin, that person is the account. If they lose their second factor on a Friday, leave without a handover, are hit by the same phishing campaign as everyone else, or are on a long flight, nobody can act on the organization until they come back.
+
+        The security consequences arrive at the worst moment. During an active compromise, the response is to suspend the affected accounts, reset passwords, revoke the OAuth tokens the attacker is using, and force sign-out. Every one of those actions needs a super admin. If the account the attacker took is the sole super admin, they now hold the only key and can lock the legitimate owners out of their own organization while they work.
+
+        Google's recovery process for a locked-out sole super admin runs through a support and ownership verification path that takes days, and it requires evidence about the domain that somebody has to find while the incident continues.
+
+        Add a second trusted super admin, keep the number small since a companion check in this policy caps it, and require the backup account to enroll a hardware security key before you rely on it. Give the backup account its own credentials rather than sharing one login, so the audit log can still tell the two administrators apart.
+      audit: |
+        ### Audit via Admin Console
+
+        1. Sign in to the Google Admin console at admin.google.com using an administrator account.
+        2. Go to **Directory** > **Users**.
+        3. Add the filter **Admin role** and select **Super Admin**.
+        4. Count the users returned by the filter.
+
+        A passing result shows two or more super admin accounts; a failing result shows one or zero.
+
+        ### Audit via API
+
+        Query the Google Admin SDK Reports API and inspect the result:
+
+        ```bash
+        # GNU date (Linux) uses -d; BSD date (macOS) uses -v. This tries both so the snippet is portable.
+        REPORT_DATE=$(date -d "2 days ago" +%Y-%m-%d 2>/dev/null || date -v-2d +%Y-%m-%d)
+        curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+          "https://admin.googleapis.com/admin/reports/v1/usage/users/all/dates/$REPORT_DATE?parameters=accounts:is_super_admin"
+        ```
+
+        A passing response shows two or more users with `accounts:is_super_admin` set to `true`; a failing response shows one or zero.
+      remediation:
+        - id: console
+          desc: |
+            To add a backup super admin account:
+
+            1. Sign in to the [Google Admin console](https://admin.google.com/) using your administrator account.
+            2. Go to **Directory** > **Users** and select a trusted user who should serve as a backup administrator.
+            3. Click **Admin roles and privileges**.
+            4. Next to the **Super Admin** role, turn on the assignment slider and click **Save**.
+            5. Require the new super admin to enroll in 2-step verification with a hardware security key before relying on the account.
+
+            For more details, see [Assign specific admin roles](https://knowledge.workspace.google.com/admin/users/add-an-account-for-a-new-user).
+    refs:
+      - url: https://knowledge.workspace.google.com/admin/users/security-best-practices-for-administrator-accounts
+        title: Security best practices for administrator accounts
+  - uid: mondoo-googleworkspace-security-less-secure-app-access-should-not-be-allowed
+    title: Users should not be allowed less secure app access
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-14
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ip-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-2
+    mql: googleworkspace.report.users.all(isLessSecureAppsAccessAllowed == false)
+    docs:
+      desc: |
+        This check verifies that no account is still marked as permitted to use less secure app access.
+
+        Less secure app access was the Google Workspace setting that let a client authenticate to Gmail, Calendar, or Contacts with a username and password alone, without OAuth. Google removed it from Workspace in 2024, and the **Less secure apps** page no longer appears in the Admin console, so sign-ins of that shape are already rejected. This check reads the per-user reporting data and flags any account still carrying the flag, which now means stale report data or a value set through the API before the feature was withdrawn.
+
+        **Why this matters**
+
+        The reason the control existed is worth keeping in view, because the underlying pattern has not gone away. A client that authenticates with a raw password has to store that password somewhere on the device, and it cannot present a second factor at all. An attacker who reaches the device reads the credential out of the mail client's configuration, and an attacker who has only the password uses it against a protocol that never asks for anything else, walking straight past the 2-step verification you enforced everywhere else.
+
+        Those sign-ins also log poorly. There is no app identity, no consent record, and nothing to revoke short of changing the password, so the access is hard to see while it is happening and hard to scope afterwards.
+
+        The residual state this check reports carries no live risk on its own, since the authentication path is closed. Treat a finding as a prompt to look for what the flag was set for.
+
+        Review third-party access under **Security > Access and data control > API controls**, find any user or device still connecting over IMAP, POP, or SMTP with a password, move it to a client that supports OAuth, and have the owners remove app passwords they no longer need.
+      audit: |
+        ### Audit via Admin Console
+
+        Google removed less secure app support from Google Workspace in 2024, and the **Less secure apps** page no longer appears in the Admin console. Sign-ins that use only a username and password are rejected, so there is no console setting left to review. This check reads report data, which can still flag accounts with stale report values or a legacy configuration set through the API.
+
+        ### Audit via API
+
+        Query the Google Admin SDK Reports API and inspect the result:
+
+        ```bash
+        # GNU date (Linux) uses -d; BSD date (macOS) uses -v. This tries both so the snippet is portable.
+        REPORT_DATE=$(date -d "2 days ago" +%Y-%m-%d 2>/dev/null || date -v-2d +%Y-%m-%d)
+        curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+          "https://admin.googleapis.com/admin/reports/v1/usage/users/all/dates/$REPORT_DATE?parameters=accounts:is_less_secure_apps_access_allowed"
+        ```
+
+        A passing response shows `accounts:is_less_secure_apps_access_allowed` set to `false` for every user; a failing response shows one or more users with the value set to `true`.
+      remediation:
+        - id: console
+          desc: |
+            This remediation is informational. Google removed support for less secure apps from Google Workspace in 2024, and the **Less secure apps** setting no longer appears in the Admin console. Sign-ins that use only a username and password are rejected for Gmail, Google Calendar, and Google Contacts, so there is no live setting to disable. Any account still reporting less secure app access reflects residual legacy state: stale report data, or a value that was set through the API before the feature was removed.
+
+            Because the control no longer exists, no configuration change is required to make the environment safe. The steps below only clean up leftover legacy access and report noise:
+
+            1. Sign in to the [Google Admin console](https://admin.google.com/) using your administrator account.
+            2. Go to **Security** > **Access and data control** > **API controls** and review which apps are granted access to Google Workspace data.
+            3. Identify users or devices still connecting through IMAP, POP, or SMTP with passwords and migrate them to clients that support OAuth.
+            4. Remove app passwords that are no longer needed by having each user visit [App passwords](https://myaccount.google.com/apppasswords) and delete unused entries.
+
+            Note for maintainers: because less secure app access can no longer be enabled in Google Workspace, this control reports only residual legacy state and may warrant deprecation or a lower impact in a future revision.
+
+            For more details, see [Transition from less secure apps to OAuth](https://support.google.com/a/answer/14114704).
+    refs:
+      - url: https://knowledge.workspace.google.com/admin/apps/control-which-apps-access-google-workspace-data
+        title: Control which apps access Google Workspace data
+      - url: https://knowledge.workspace.google.com/admin/users/security-best-practices-for-administrator-accounts
+        title: Security best practices for administrator accounts
+  - uid: mondoo-googleworkspace-security-super-admins-should-use-hardware-based-2fa
+    title: Super users should use hardware-based security keys
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-14
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-j
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-3
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-4-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-2
+    mql: googleworkspace.report.users.where(isSuperAdmin == true).all(numSecurityKeys >= 1)
+    docs:
+      desc: |
+        This check verifies that every super admin has a hardware security key registered on their account.
+
+        A security key is a physical FIDO2 authenticator such as a YubiKey or a Google Titan key, registered from the user's own 2-Step Verification settings. In the Admin console you can then require it exclusively by putting the super admins in a dedicated organizational unit or group, opening **Security > Authentication > 2-step verification** with that unit selected, and choosing the security key only method. This check reads the number of registered keys on each super admin account and requires at least one.
+
+        **Why this matters**
+
+        Every other second factor can be relayed. A phishing kit acting as a proxy shows the user a convincing sign-in page, forwards the credentials to Google in real time, prompts for the code from their authenticator app or the push approval on their phone, and passes that through too. The user sees a successful login. The attacker has a session cookie for a super admin account, which is unrestricted control of the organization.
+
+        A security key does not participate in that. It signs a challenge bound to the origin the browser is actually talking to, so a key registered for the real Google sign-in page produces nothing a proxy on a lookalike domain can use. The attack fails at the step it was built to defeat, and it fails silently from the attacker's side.
+
+        Keys also close the SMS path outright, since there is no code to intercept and no phone number to have transferred at a carrier's front desk.
+
+        Register at least two keys per administrator so a lost key does not lock the account, and confirm every super admin has registered before restricting the allowed method, because an administrator without a key is locked out the moment the restriction takes effect.
+      audit: |
+        ### Audit via Admin Console
+
+        1. Sign in to the Google Admin console at admin.google.com using an administrator account.
+        2. Go to **Directory** > **Users** and filter by the **Super Admin** role.
+        3. Open each super admin and review the **Security** section.
+        4. Confirm that at least one security key is registered under the user's 2-step verification methods.
+
+        A passing result shows every super admin with a registered security key; a failing result shows a super admin with no security key.
+
+        ### Audit via API
+
+        Query the Google Admin SDK Reports API and inspect the result:
+
+        ```bash
+        # GNU date (Linux) uses -d; BSD date (macOS) uses -v. This tries both so the snippet is portable.
+        REPORT_DATE=$(date -d "2 days ago" +%Y-%m-%d 2>/dev/null || date -v-2d +%Y-%m-%d)
+        curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+          "https://admin.googleapis.com/admin/reports/v1/usage/users/all/dates/$REPORT_DATE?parameters=accounts:is_super_admin,accounts:num_security_keys"
+        ```
+
+        A passing response shows every user with `accounts:is_super_admin` set to `true` also reporting `accounts:num_security_keys` of one or more; a failing response shows a super admin with `accounts:num_security_keys` of zero.
+      remediation:
+        - id: console
+          desc: |
+            To require hardware security keys for super admin accounts:
+
+            1. Sign in to the [Google Admin console](https://admin.google.com/) using your administrator account.
+            2. Place all super admin accounts in a dedicated organizational unit or group so the stricter policy applies only to them.
+            3. Distribute FIDO2 hardware security keys such as YubiKey or Google Titan to each super admin.
+            4. Have each super admin register a key at [2-Step Verification settings](https://myaccount.google.com/signinoptions/twosv) by selecting **Add security key** and following the prompts. Register at least two keys per admin so a lost key does not lock the account.
+            5. In the Admin console, go to **Security** > **Authentication** > **2-step verification**, select the organizational unit or group containing the super admins, and under the allowed methods select **Only security key**.
+            6. Click **Save**.
+
+            Confirm every super admin has registered a key before restricting methods, because admins without a registered key are locked out once the restriction takes effect.
+
+            For more details, see [Use a security key for 2-Step Verification](https://support.google.com/accounts/answer/6103523).
+    refs:
+      - url: https://knowledge.workspace.google.com/admin/security/protect-your-business-with-2-step-verification
+        title: Protect your business with 2-Step Verification
+      - url: https://knowledge.workspace.google.com/admin/users/security-best-practices-for-administrator-accounts
+        title: Security best practices for administrator accounts
+  - uid: mondoo-googleworkspace-security-connected-apps-no-full-access
+    title: Ensure no connected apps have full Gmail or Drive access
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-05
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-3
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-5
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-5
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: |
+      googleworkspace.connectedApps.none(
+        scopes.any(_.in(["https://mail.google.com/", "https://www.googleapis.com/auth/drive"]))
+      )
+    docs:
+      desc: |
+        This check verifies that no third-party application holds unrestricted access to Gmail or Drive.
+
+        OAuth scopes decide what a connected app can do, and two of them are effectively total. `https://mail.google.com/` grants full control of a user's mailbox, and `https://www.googleapis.com/auth/drive` grants the same over their files. You review what each app has been granted in the Admin console under **Security > Access and data control > API controls**, in **Manage Third-Party App Access**. This check requires no connected app to hold either scope.
+
+        **Why this matters**
+
+        An app with those scopes reads, writes, and deletes everything the user can, and it does so through the API rather than through a browser session, at whatever rate it likes. If the vendor is compromised, or the app was built to harvest data in the first place, the outcome is a bulk copy of the mailboxes and drives of everyone who consented, which is a breach of your data caused by an organization you do not control and may not be able to audit.
+
+        Full Gmail access carries a second capability that is easy to miss: the app can send as the user and delete what it sends. That is a complete business email compromise toolkit granted through a consent screen instead of a stolen password.
+
+        The access also outlives the credential. An OAuth token remains valid after the user changes their password and after they enroll a second factor, so the usual response to a compromised account does not touch it.
+
+        Coordinate with the owners of each affected integration before you act, since removing access stops the app working until it is reauthorized with narrower scopes. Set the app to blocked or limited, then revoke the tokens users already issued, and reauthorize the ones you still need with the narrowest scope that does the job.
+      audit: |
+        ### Audit via Admin Console
+
+        1. Sign in to the Google Admin console at admin.google.com using an administrator account.
+        2. Go to **Security** > **Access and data control** > **API controls**.
+        3. Open **Manage Third-Party App Access** and review connected apps and their granted scopes.
+        4. Look for any app with the Gmail scope `https://mail.google.com/` or the Drive scope `https://www.googleapis.com/auth/drive`.
+
+        A passing result shows no connected app with full Gmail or Drive access; a failing result shows at least one app holding those scopes.
+
+        ### Audit via API
+
+        Query the Google Admin SDK Directory API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+          "https://admin.googleapis.com/admin/directory/v1/users/{userKey}/tokens"
+        ```
+
+        A passing response shows no token whose `scopes` array contains `https://mail.google.com/` or `https://www.googleapis.com/auth/drive`; a failing response shows a token granting either scope.
+      remediation:
+        - id: console
+          desc: |
+            To remove full Gmail and Drive access from connected apps:
+
+            1. Sign in to the [Google Admin console](https://admin.google.com/).
+            2. Go to **Security** > **Access and data control** > **API controls** and click **Manage Third-Party App Access**.
+            3. Review each connected app and its granted scopes. Identify apps holding the full Gmail scope `https://mail.google.com/` or the full Drive scope `https://www.googleapis.com/auth/drive`.
+            4. Coordinate with the owners of each affected integration before making changes, because removing access stops the app from working until it is reauthorized with narrower scopes.
+            5. Set each affected app to **Blocked**, or to **Limited** if it should keep access to non-sensitive data.
+            6. Revoke the tokens users have already issued to the app. Go to **Directory** > **Users**, select each affected user, click **Security** > **Connected applications**, select the app, and click **Remove access**. To revoke at scale, use the Directory API:
+
+               ```bash
+               curl -s -X DELETE -H "Authorization: Bearer $ACCESS_TOKEN" \
+                 "https://admin.googleapis.com/admin/directory/v1/users/jane@example.com/tokens/$CLIENT_ID"
+               ```
+
+            7. Where the integration is still needed, work with the vendor to reauthorize it using narrower scopes such as `gmail.send` or `drive.file`.
+
+            For more details, see [Control which third-party and internal apps access Google Workspace data](https://knowledge.workspace.google.com/admin/apps/control-which-apps-access-google-workspace-data).
+    refs:
+      - url: https://knowledge.workspace.google.com/admin/apps/control-which-apps-access-google-workspace-data
+        title: Control which apps access Google Workspace data
+      - url: https://knowledge.workspace.google.com/admin/users/security-best-practices-for-administrator-accounts
+        title: Security best practices for administrator accounts
+  - uid: mondoo-googleworkspace-security-domains-verified
+    title: Ensure all domains are verified
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: false
+      compliance/dora: dora-art-9
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-5-16
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-6
+      compliance/nist-csf-2: nist-csf-2-pr-aa-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-9
+      compliance/nist-sp-800-171: false
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: false
+    mql: |
+      googleworkspace.domains.all(verified == true)
+    docs:
+      desc: |
+        This check verifies that every domain registered in the Google Workspace account has completed ownership verification.
+
+        Adding a domain in the Admin console under **Account > Domains > Manage domains** does not by itself prove you control it. Verification does, by requiring a DNS TXT or CNAME record that only somebody with access to the zone can publish. This check requires every listed domain to show as verified rather than pending or failed.
+
+        **Why this matters**
+
+        An unverified domain is a claim without evidence, and it usually means one of two things. Either the setup was abandoned partway, in which case mail routing and the rest of the domain's configuration are in an unknown state, or the domain does not belong to you in the way somebody assumed when they typed it in.
+
+        Both matter for email authentication, which is the practical exposure. SPF, DKIM, and DMARC all rest on records published in the domain's own DNS zone, and none of them can be established for a domain whose zone you have not demonstrated control of. Until that is fixed, receiving mail servers have no published policy telling them which senders are legitimate, so an attacker sends mail that appears to come from an address at your domain and it arrives with nothing to fail. That is the delivery mechanism for the invoice-redirection message to your customer and the credential-harvesting message to your own staff, both carrying your name.
+
+        Unverified entries also clutter the domain list, which makes it harder to notice a domain that should not be there at all.
+
+        Complete verification for every domain your organization actually uses, then publish the authentication records for each one. Remove domains you no longer need rather than leaving them unverified, since an entry that serves no purpose still appears in the account's configuration.
+      audit: |
+        ### Audit via Admin Console
+
+        1. Sign in to the Google Admin console at admin.google.com using an administrator account.
+        2. Go to **Account** > **Domains** > **Manage domains**.
+        3. Review the status column for every listed domain.
+
+        A passing result shows all domains marked as verified; a failing result shows one or more domains marked as unverified or pending verification.
+
+        ### Audit via API
+
+        Query the Google Admin SDK Directory API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+          "https://admin.googleapis.com/admin/directory/v1/customer/my_customer/domains"
+        ```
+
+        A passing response shows `verified` set to `true` for every domain; a failing response shows one or more domains with `verified` set to `false`.
+      remediation:
+        - id: console
+          desc: |
+            To verify domains in Google Workspace:
+
+            1. Sign in to the [Google Admin console](https://admin.google.com/).
+            2. Go to **Account** > **Domains** > **Manage domains**.
+            3. For each unverified domain, click **Verify** and follow the prompts.
+            4. Add the required DNS TXT or CNAME record to your domain's DNS configuration.
+            5. Return to the Admin console and click **Verify** to confirm the DNS record.
+            6. Remove any domains that are no longer needed by your organization.
+
+            For more details, see [Verify your domain](https://knowledge.workspace.google.com/admin/domains/verify-your-domain-for-google-workspace).
+    refs:
+      - url: https://knowledge.workspace.google.com/admin/domains/verify-your-domain-for-google-workspace
+        title: Verify your domain for Google Workspace
+      - url: https://knowledge.workspace.google.com/admin/users/security-best-practices-for-administrator-accounts
+        title: Security best practices for administrator accounts
+  - uid: mondoo-googleworkspace-security-calendar-no-public-sharing
+    title: Ensure calendar sharing is not set to public
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-16
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-3
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-22
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: |
+      googleworkspace.calendars
+        .all(
+          acl.none( scope.type == "default" && role != "none" )
+        )
+    docs:
+      desc: |
+        This check verifies that no calendar is readable by anyone on the internet.
+
+        A Google Calendar access rule with a scope type of `default` means the public, and any role on that rule other than `none` grants the public something. The organization-wide setting sits in the Admin console under **Apps > Google Workspace > Calendar > Sharing settings**, where the most restrictive external option shows free and busy information only. This check reads the access rules on the calendars themselves, so a calendar a user already made public keeps its rule until it is removed individually.
+
+        **Why this matters**
+
+        A calendar is an organizational chart with timestamps. Attendee lists reveal who reports to whom and which teams are working together. Meeting titles name the acquisition, the customer escalation, the incident bridge, and the vendor being evaluated. Recurring one-to-ones identify a person's manager, and a gap in the pattern identifies when they are away.
+
+        That is source material for a targeted attack rather than an abstract privacy concern. Knowing that the finance lead meets the CFO every Tuesday, and that the CFO is travelling on Thursday, is what makes the Thursday payment request from a spoofed address plausible. Knowing an incident bridge is running right now is what makes a message impersonating the responder land.
+
+        Executive travel raises the stakes further, since a public calendar with locations tells anyone reading it where a named individual will be and when.
+
+        Note that free and busy visibility still makes a calendar publicly readable in the sense this check reads, so removing the public access rule on each affected calendar is the step that resolves it. Restrict the organization setting first so new calendars do not repeat the pattern, then have each affected user clear the public access on their own calendar and share with named people or groups instead.
+      audit: |
+        ### Audit via Admin Console
+
+        1. Sign in to the Google Admin console at admin.google.com using an administrator account.
+        2. Go to **Apps** > **Google Workspace** > **Calendar**.
+        3. Open **Sharing settings** and review **External sharing options for primary calendars**.
+        4. Confirm the setting is **Only free/busy information (hide event details)** rather than one of the **Share all information** options.
+
+        A passing result shows external sharing limited to free/busy; a failing result shows calendar details shared with everyone. This setting governs what users may share, so also confirm no individual calendar carries a public access rule, which is what the check reads.
+
+        ### Audit via API
+
+        Per-calendar access control lists are checked with the Calendar API. Query a calendar's ACL and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+          "https://www.googleapis.com/calendar/v3/calendars/{calendarId}/acl"
+        ```
+
+        A passing response shows no ACL rule with `scope.type` of `default` and a `role` other than `none`; a failing response shows such a rule, which grants public access.
+      remediation:
+        - id: console
+          desc: |
+            To remove public calendar sharing:
+
+            1. Sign in to the [Google Admin console](https://admin.google.com/).
+            2. Go to **Apps** > **Google Workspace** > **Calendar**.
+            3. Under **Sharing settings**, set **External sharing options for primary calendars** to **Only free/busy information (hide event details)**, the most restrictive external option Google offers. The remaining options all begin with **Share all information** and expose event details outside the organization. There is no external option that disables sharing outright; **No sharing** exists only under **Internal sharing options for primary calendars**.
+            4. Click **Save**.
+
+            That organization-wide setting limits future sharing but does not satisfy this check on its own. Calendars users already made public keep their existing public access rule, and free/busy public access still leaves a calendar publicly visible, which is what the check reads. Remove the existing public access rule on each affected calendar:
+
+            1. Have the user open [Google Calendar](https://calendar.google.com/).
+            2. Click the three dots next to the calendar name and select **Settings and sharing**.
+            3. Under **Access permissions for events**, uncheck **Make available to public**.
+
+            To remove the public access rule directly through the Calendar API:
+
+            ```bash
+            curl -s -X DELETE -H "Authorization: Bearer $ACCESS_TOKEN" \
+              "https://www.googleapis.com/calendar/v3/calendars/jane@example.com/acl/default"
+            ```
+
+            For more details, see [Set Calendar sharing options](https://knowledge.workspace.google.com/admin/calendar/set-google-calendar-sharing-options).
+    refs:
+      - url: https://knowledge.workspace.google.com/admin/calendar/set-google-calendar-sharing-options
+        title: Set Google Calendar sharing options
+      - url: https://knowledge.workspace.google.com/admin/users/security-best-practices-for-administrator-accounts
+        title: Security best practices for administrator accounts
+  - uid: mondoo-googleworkspace-security-no-ip-whitelisted-users
+    title: Ensure no users have IP whitelisting enabled
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-14
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ip-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-2-2-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-2
+    mql: googleworkspace.users.none(ipWhitelisted == true)
+    docs:
+      desc: |
+        This check verifies that no account carries the deprecated per-user IP exemption.
+
+        The `ipWhitelisted` flag is a legacy property on a Google Workspace user that exempts that account from network-based access enforcement. The Admin console does not display it anywhere, so it can neither be found nor cleared from the interface; both jobs run through the Admin SDK Directory API. This check reads the flag on every user and requires it to be false throughout.
+
+        **Why this matters**
+
+        An exemption nobody can see is worse than a missing control, because the organization believes the control is uniform. The access policy on the dashboard says one thing, and a handful of accounts quietly do not obey it.
+
+        Those accounts are the ones an attacker wants. Whatever network conditions your other controls place on a sign-in, an exempt account is not evaluated against them, so a stolen password works from a residential connection in another country exactly as it would from a corporate office. The sign-in does not trip the location rule that was supposed to catch it, and there is no console page an administrator can open to discover why.
+
+        The flag survives ordinary hygiene. Password resets, role changes, and organizational unit moves do not clear it, so an exemption granted for a contractor's connectivity problem in 2019 is still exempting whoever holds that account today.
+
+        Clear the flag on each affected account through the Directory API. If the account genuinely needed a network exemption, configure context-aware access policies instead, which express the same intent as a reviewable policy that names the device and network conditions rather than as an invisible per-user override.
+      audit: |
+        ### Audit via Admin Console
+
+        The deprecated IP whitelisting flag is not displayed anywhere in the Admin console, so affected users cannot be identified there. Audit the setting through the Directory API query below.
+
+        ### Audit via API
+
+        Query the Google Admin SDK Directory API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+          "https://admin.googleapis.com/admin/directory/v1/users?customer=my_customer"
+        ```
+
+        A passing response shows `ipWhitelisted` set to `false` for every user; a failing response shows one or more users with `ipWhitelisted` set to `true`.
+      remediation:
+        - id: cli
+          desc: |
+            The IP whitelisting flag is a deprecated user property that the Admin console does not display, so it must be cleared through the Directory API.
+
+            1. Identify affected users by listing accounts and checking the `ipWhitelisted` property:
+
+               ```bash
+               curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+                 "https://admin.googleapis.com/admin/directory/v1/users?customer=my_customer" \
+                 | jq -r '.users[] | select(.ipWhitelisted == true) | .primaryEmail'
+               ```
+
+            2. Clear the flag on each affected user:
+
+               ```bash
+               curl -s -X PATCH \
+                 -H "Authorization: Bearer $ACCESS_TOKEN" \
+                 -H "Content-Type: application/json" \
+                 -d '{"ipWhitelisted": false}' \
+                 "https://admin.googleapis.com/admin/directory/v1/users/jane@example.com"
+               ```
+
+            3. If the users relied on the exemption for network-based access, configure [context-aware access policies](https://knowledge.workspace.google.com/admin/security/protect-your-business-with-context-aware-access) as the supported replacement for IP-based controls.
+
+            For more details, see [Context-Aware Access overview](https://knowledge.workspace.google.com/admin/security/protect-your-business-with-context-aware-access).
+    refs:
+      - url: https://knowledge.workspace.google.com/admin/security/protect-your-business-with-context-aware-access
+        title: Protect your business with Context-Aware Access
+      - url: https://knowledge.workspace.google.com/admin/users/security-best-practices-for-administrator-accounts
+        title: Security best practices for administrator accounts
+  - uid: mondoo-googleworkspace-security-admins-not-guest-users
+    title: Ensure admin accounts are not guest users
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-10
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-2
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-2
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: googleworkspace.users.where(isAdmin == true).none(isGuestUser == true)
+    docs:
+      desc: |
+        This check verifies that no administrative role is held by a guest account.
+
+        A guest in Google Workspace is an identity that exists in the directory without being a full member of the organization, typically created for an external collaborator. Full accounts are governed by the organizational unit they sit in, which is what applies your authentication requirements, session policy, and offboarding. This check takes every account with an admin role, visible under **Directory > Users** in the Admin console, and requires none of them to be a guest.
+
+        **Why this matters**
+
+        An administrative role assumes an identity your organization vetted, provisioned, and can retire. A guest account satisfies none of those assumptions. It was created because somebody outside needed access to something, its lifecycle belongs to whoever set it up rather than to your joiner and leaver process, and it is not covered by the policies you scope to organizational units.
+
+        That combination is the attack. The guest identity sits outside your 2-step verification enforcement and your context-aware access rules, so it is the softest credential in the directory, and it holds a role that can change other people's settings, reset passwords, and read data across the organization. An attacker who takes it does not need to escalate, because the escalation was already granted.
+
+        The account is also durable in the wrong way. When the collaboration ends, the contractor's engagement closes and their own employer offboards them, but the guest account in your directory keeps its role, since no process on either side owns it.
+
+        If the person genuinely needs administrative access, create a full organizational account for them so the access inherits your authentication and lifecycle controls, and assign the narrowest delegated role that covers the work rather than reusing the guest identity.
+      audit: |
+        ### Audit via Admin Console
+
+        1. Sign in to the Google Admin console at admin.google.com using an administrator account.
+        2. Go to **Directory** > **Users**.
+        3. Filter for users with admin roles and review each one's account details.
+        4. Confirm that none of the admin users are guest accounts.
+
+        A passing result shows every admin account is a full organizational account; a failing result shows a guest account with an admin role.
+
+        ### Audit via API
+
+        Query the Google Admin SDK Directory API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+          "https://admin.googleapis.com/admin/directory/v1/users?customer=my_customer"
+        ```
+
+        A passing response shows that no user with `isAdmin` set to `true` is a guest account; a failing response shows a guest account that also has `isAdmin` set to `true`.
+      remediation:
+        - id: console
+          desc: |
+            To remove admin privileges from guest accounts:
+
+            1. Sign in to the [Google Admin console](https://admin.google.com/).
+            2. Go to **Directory** > **Users**.
+            3. Identify any guest users with admin roles by checking user details.
+            4. Remove admin role assignments from guest accounts under **Admin roles and privileges**.
+            5. If administrative access is needed, create a full organizational account for the individual instead.
+
+            For more details, see [Security best practices for administrator accounts](https://knowledge.workspace.google.com/admin/users/security-best-practices-for-administrator-accounts).
+    refs:
+      - url: https://knowledge.workspace.google.com/admin/users/security-best-practices-for-administrator-accounts
+        title: Security best practices for administrator accounts
+      - url: https://knowledge.workspace.google.com/admin/users/add-an-account-for-a-new-user
+        title: Add an account for a new user
+  - uid: mondoo-googleworkspace-security-admins-enrolled-in-2sv
+    title: Ensure all admin accounts have completed 2-step verification enrollment
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-14
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-j
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-3
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-4-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-2
+    mql: googleworkspace.users.where(isAdmin == true).all(isEnrolledIn2Sv == true)
+    docs:
+      desc: |
+        This check verifies that every administrator has actually finished enrolling in 2-step verification, not merely that the policy requires it.
+
+        Enforcement and enrollment are separate states in Google Workspace. Turning enforcement on under **Security > Authentication > 2-step verification** sets the requirement, while enrollment is the user registering a factor. Google offers an enrollment grace period for new accounts, and an account inside that window signs in with a password alone despite the policy. This check reads the enrollment status of each account holding an admin role and requires it to be complete.
+
+        **Why this matters**
+
+        A policy that has not taken effect on an account provides that account no protection, and the dashboard does not distinguish the two. An organization can report full enforcement while several administrators are still password-only, and the gap sits exactly where it matters most.
+
+        New administrator accounts are the common case. One is created for a person joining the platform team, the enrollment period gives them a week to register a factor, and during that week the account already holds the role. If the account's initial password was delivered over a channel that leaked, or matches a pattern an attacker guesses, the second factor that would have stopped the sign-in has not been registered yet.
+
+        An attacker with the password of an unenrolled administrator gets in, and the first thing they do is register a factor of their own, which converts a temporary window into durable access that now looks compliant.
+
+        Verify enrollment rather than policy. Reduce or remove the grace period so new admin accounts cannot linger unenrolled, contact anyone still outstanding, and consider withholding the role until enrollment is complete so the privilege and the second factor arrive together.
+      audit: |
+        ### Audit via Admin Console
+
+        1. Sign in to the Google Admin console at admin.google.com using an administrator account.
+        2. Go to **Directory** > **Users** and filter for users with admin roles.
+        3. Open each admin's **Security** settings and review the 2-step verification enrollment status.
+
+        A passing result shows every admin enrolled in 2-step verification; a failing result shows an admin that has not completed enrollment.
+
+        ### Audit via API
+
+        Query the Google Admin SDK Directory API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+          "https://admin.googleapis.com/admin/directory/v1/users?customer=my_customer"
+        ```
+
+        A passing response shows every user with `isAdmin` set to `true` also reporting `isEnrolledIn2Sv` set to `true`; a failing response shows an admin user with `isEnrolledIn2Sv` set to `false`.
+      remediation:
+        - id: console
+          desc: |
+            To verify and ensure admin 2SV enrollment:
+
+            1. Sign in to the [Google Admin console](https://admin.google.com/).
+            2. Go to **Directory** > **Users**.
+            3. Filter for users with admin roles.
+            4. Check each admin's **Security** settings to verify 2SV enrollment status.
+            5. For admins not yet enrolled:
+               - Contact them directly and require immediate 2SV setup.
+               - Reduce or eliminate the enrollment grace period under **Security** > **Authentication** > **2-step verification**.
+               - Consider temporarily removing admin privileges until enrollment is complete.
+
+            For more details, see [Deploy 2-Step Verification](https://knowledge.workspace.google.com/admin/security/protect-your-business-with-2-step-verification).
+    refs:
+      - url: https://knowledge.workspace.google.com/admin/security/protect-your-business-with-2-step-verification
+        title: Protect your business with 2-Step Verification
+      - url: https://knowledge.workspace.google.com/admin/users/security-best-practices-for-administrator-accounts
+        title: Security best practices for administrator accounts
+  - uid: mondoo-googleworkspace-security-admins-no-pending-password-reset
+    title: Ensure no admin accounts have a pending forced password change
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-15
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-5-17
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-3-5
+      compliance/soc2-2017: soc2-control-cc6-1-8
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: googleworkspace.users.where(isAdmin == true).none(changePasswordAtNextLogin == true)
+    docs:
+      desc: |
+        This check verifies that no administrator account is sitting on a password change that was demanded and never completed.
+
+        When an administrator forces a reset on an account, Google flags it to change its password at next sign-in and leaves the current password working until that sign-in happens. The Admin console does not display the pending state, so it is read through the Admin SDK Directory API. This check requires no account holding an admin role to carry the flag.
+
+        **Why this matters**
+
+        The flag is usually set for a reason, and the most common reason is a suspicion that the current password is known to somebody else. Until the account signs in, that suspect password is still valid. An attacker who already has it does not care that a change is pending; they authenticate with the old credential, and if they get there before the legitimate administrator does, they complete the change themselves and set a password only they know. The forced reset then becomes the mechanism by which the real owner loses the account.
+
+        A flag that stays pending for weeks says something else as well: nobody is signing in to that account. An administrator account that goes unused for that long is one that no one is watching, which is the profile of an account that was created for a project, granted a role, and never retired.
+
+        There is also an availability edge. An account in this state cannot be used cleanly for emergency response, which matters when the accounts that hold administrative roles are the ones the response depends on.
+
+        Have each affected administrator complete the change immediately, remove the role or suspend the account if it is no longer needed, and look into why the reset was triggered by reviewing the sign-in events under **Reporting > Audit and investigation** for signs the account was already compromised.
+      audit: |
+        ### Audit via Admin Console
+
+        1. Sign in to the Google Admin console at admin.google.com using an administrator account.
+        2. Go to **Directory** > **Users** and filter for users with admin roles.
+        3. Open each admin account and check whether a password change is pending at next sign-in.
+
+        A passing result shows no admin with a pending forced password change; a failing result shows an admin account flagged to change its password at next login.
+
+        ### Audit via API
+
+        Query the Google Admin SDK Directory API and inspect the result:
+
+        ```bash
+        curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+          "https://admin.googleapis.com/admin/directory/v1/users?customer=my_customer"
+        ```
+
+        A passing response shows every user with `isAdmin` set to `true` reporting `changePasswordAtNextLogin` set to `false`; a failing response shows an admin user with `changePasswordAtNextLogin` set to `true`.
+      remediation:
+        - id: console
+          desc: |
+            To resolve pending admin password resets:
+
+            1. Identify admin accounts with a pending forced password change. The Admin console does not display this state, so query the Directory API:
+
+               ```bash
+               curl -s -H "Authorization: Bearer $ACCESS_TOKEN" \
+                 "https://admin.googleapis.com/admin/directory/v1/users?customer=my_customer&query=isAdmin=true" \
+                 | jq -r '.users[] | select(.changePasswordAtNextLogin == true) | .primaryEmail'
+               ```
+
+            2. Contact each affected admin and require them to sign in and complete the password change immediately.
+            3. If the admin account is inactive or no longer needed, remove its admin privileges or suspend it in the [Google Admin console](https://admin.google.com/) under **Directory** > **Users**.
+            4. Review why the password reset was triggered and investigate signs of compromise, such as suspicious sign-in events under **Reporting** > **Audit and investigation**.
+
+            For more details, see [Reset a user's password](https://knowledge.workspace.google.com/admin/users/reset-a-users-password).
+    refs:
+      - url: https://knowledge.workspace.google.com/admin/users/reset-a-users-password
+        title: Reset a user's password
+      - url: https://knowledge.workspace.google.com/admin/users/security-best-practices-for-administrator-accounts
+        title: Security best practices for administrator accounts

@@ -1,0 +1,759 @@
+// Copyright Mondoo, Inc. 2024, 2026
+// SPDX-License-Identifier: BUSL-1.1
+
+package cmd
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"sort"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/cockroachdb/errors"
+	"github.com/mattn/go-isatty"
+	"github.com/rs/zerolog/log"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
+	"go.mondoo.com/cnspec/cli/reporter"
+	"go.mondoo.com/cnspec/internal/datalakes/sqlite"
+	"go.mondoo.com/cnspec/internal/scandump"
+	"go.mondoo.com/cnspec/internal/supportbundle"
+	"go.mondoo.com/cnspec/policy"
+	"go.mondoo.com/cnspec/policy/scan"
+	"go.mondoo.com/mql"
+	"go.mondoo.com/mql/cli/config"
+	"go.mondoo.com/mql/cli/execruntime"
+	"go.mondoo.com/mql/cli/inventoryloader"
+	"go.mondoo.com/mql/cli/theme"
+	"go.mondoo.com/mql/logger"
+	"go.mondoo.com/mql/mqlc"
+	"go.mondoo.com/mql/providers"
+	"go.mondoo.com/mql/providers-sdk/v1/inventory"
+	"go.mondoo.com/mql/providers-sdk/v1/plugin"
+	"go.mondoo.com/mql/providers-sdk/v1/upstream"
+)
+
+func init() {
+	rootCmd.AddCommand(scanCmd)
+
+	_ = scanCmd.Flags().StringP("output", "o", "compact", "Set the output format: "+reporter.AllFormats())
+	_ = scanCmd.Flags().BoolP("json", "j", false, "Run the query and return the object in a JSON structure")
+	_ = scanCmd.Flags().String("platform-id", "", "Select a specific target asset by providing its platform ID")
+
+	_ = scanCmd.Flags().String("inventory-file", "", "Set the path to the inventory file")
+	_ = scanCmd.Flags().String("inventory-template", "", "Set the path to the inventory template")
+	_ = scanCmd.Flags().MarkHidden("inventory-template")
+
+	_ = scanCmd.Flags().Bool("inventory-format-ansible", false, "Set the inventory format to Ansible")
+	// "inventory-ansible" is deprecated, use "inventory-format-ansible" instead
+	_ = scanCmd.Flags().Bool("inventory-ansible", false, "Set the inventory format to Ansible")
+	_ = scanCmd.Flags().MarkDeprecated("inventory-ansible", "use --inventory-format-ansible")
+	_ = scanCmd.Flags().MarkHidden("inventory-ansible")
+
+	_ = scanCmd.Flags().Bool("inventory-format-domainlist", false, "Set the inventory format to domain list")
+	// "inventory-domainlist" is deprecated, use "inventory-format-domainlist" instead
+	_ = scanCmd.Flags().Bool("inventory-domainlist", false, "Set the inventory format to domain list")
+	_ = scanCmd.Flags().MarkDeprecated("inventory-domainlist", "use --inventory-format-domainlist")
+	_ = scanCmd.Flags().MarkHidden("inventory-domainlist")
+
+	// bundles, packs & incognito mode
+	_ = scanCmd.Flags().Bool("incognito", false, "Run in incognito mode. Do not report scan results to Mondoo Platform")
+	_ = scanCmd.Flags().StringSlice("policy", nil, "Specify policies to execute. This requires --policy-bundle. You can pass multiple policies using --policy POLICY")
+	_ = scanCmd.Flags().StringSliceP("policy-bundle", "f", nil, "Set the path to a policy file. Supports local paths, s3:// URIs, and http(s):// URLs")
+	// flag completion command
+	_ = scanCmd.RegisterFlagCompletionFunc("policy", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return getPoliciesForCompletion(), cobra.ShellCompDirectiveDefault
+	})
+	_ = scanCmd.Flags().String("asset-name", "", "Override the asset name")
+	_ = scanCmd.Flags().StringToString("annotation", nil, "Add an annotation to the asset in the form KEY=VALUE") // user-added, editable
+	_ = scanCmd.Flags().StringToString("props", nil, "Set custom values for properties")
+	_ = scanCmd.Flags().String("trace-id", "", "Set a trace identifier")
+
+	// v6 should make detect-cicd and category flag public
+	_ = scanCmd.Flags().Bool("detect-cicd", true, "Try to detect CI/CD environments. If detected, set the asset category to 'cicd'")
+	_ = scanCmd.Flags().String("category", "inventory", "Set the category for the assets to 'inventory|cicd'")
+	_ = scanCmd.Flags().MarkHidden("category")
+	// Experimental: This is not intended to be used by users. It is internal use only.
+	_ = scanCmd.Flags().String("report-type", "full", "Experimental: Set the report type for the output: full, error")
+	_ = scanCmd.Flags().MarkHidden("report-type")
+	_ = scanCmd.Flags().Int("score-threshold", 0, "If any score falls below the threshold, exit 1")
+	_ = scanCmd.Flags().MarkDeprecated("score-threshold", "Please use --risk-threshold instead")
+	_ = scanCmd.Flags().Int("risk-threshold", reporter.DEFAULT_RISK_THRESHOLD, "Set the risk threshold. Exit with status 1 if any risk meets or exceeds this value")
+	_ = scanCmd.Flags().String("output-target", "", "Set the output target for the asset report: an AWS SQS topic URL, a local file, or a local directory (with -o hdf, one OHDF file per asset; with the OCSF formats, one file per event class)")
+	_ = scanCmd.Flags().Int("parallelism", 0, "Set the number of assets to scan in parallel. Defaults to a per-provider value capped by the CPUs available on this machine. Use 1 for sequential")
+	_ = scanCmd.Flags().String("output-scan-db", "", "Save each asset's scan database (SQLite) to this directory in addition to uploading. Used to capture seeds for the cnspec loadtest tool")
+	_ = scanCmd.Flags().MarkHidden("output-scan-db")
+	_ = scanCmd.Flags().Bool("collect-support-bundle", false, "Collect a support bundle (debug logs, asset bundle, inventory, resolved policy, report, provider versions) for sharing with Mondoo support. By default writes to a timestamped directory in the current working dir; override with --support-bundle-dir.")
+	_ = scanCmd.Flags().String("support-bundle-dir", "", "Directory to write the support bundle into. Only used when --collect-support-bundle is set. Defaults to ./cnspec-support-bundle-<timestamp>/.")
+	_ = scanCmd.Flags().String("exceptions-submit", "auto", "Preview: When to submit exceptions from mondoo.yml files to Mondoo Platform: auto (a CI run on the default branch; set MONDOO_DEFAULT_BRANCH on Jenkins, Azure Pipelines or CircleCI if they cannot tell it), always, or never")
+}
+
+var scanCmd = &cobra.Command{
+	Use:   "scan",
+	Short: "Scan assets with one or more policies",
+	Long: `
+This command scans an asset using a policy. For example, you can scan
+the local system with its pre-configured policies:
+
+		$ cnspec scan local
+
+To manually configure a policy, use this:
+
+		$ cnspec scan local -f bundle.mql.yaml --incognito
+
+`,
+	PreRun: func(cmd *cobra.Command, _ []string) {
+		// Special handling for users that want to see what output options are
+		// available. We have to do this before printing the help because we
+		// don't have a target connection or provider.
+		output, _ := cmd.Flags().GetString("output")
+		if output == "help" {
+			fmt.Println(reporter.AllAvailableOptions())
+			os.Exit(0)
+		}
+
+		_ = viper.BindPFlag("platform-id", cmd.Flags().Lookup("platform-id"))
+
+		_ = viper.BindPFlag("inventory-file", cmd.Flags().Lookup("inventory-file"))
+		_ = viper.BindPFlag("inventory-template", cmd.Flags().Lookup("inventory-template"))
+		_ = viper.BindPFlag("inventory-format-ansible", cmd.Flags().Lookup("inventory-format-ansible"))
+		// inventory-ansible is deprecated
+		_ = viper.BindPFlag("inventory-ansible", cmd.Flags().Lookup("inventory-ansible"))
+		_ = viper.BindPFlag("inventory-format-domainlist", cmd.Flags().Lookup("inventory-format-domainlist"))
+		// inventory-domainlist is deprecated
+		_ = viper.BindPFlag("inventory-domainlist", cmd.Flags().Lookup("inventory-domainlist"))
+
+		_ = viper.BindPFlag("policy-bundle", cmd.Flags().Lookup("policy-bundle"))
+		_ = viper.BindPFlag("detect-cicd", cmd.Flags().Lookup("detect-cicd"))
+		_ = viper.BindPFlag("asset-name", cmd.Flags().Lookup("asset-name"))
+		_ = viper.BindPFlag("trace-id", cmd.Flags().Lookup("trace-id"))
+		_ = viper.BindPFlag("category", cmd.Flags().Lookup("category"))
+		_ = viper.BindPFlag("report-type", cmd.Flags().Lookup("report-type"))
+		_ = viper.BindPFlag("score-threshold", cmd.Flags().Lookup("score-threshold"))
+		_ = viper.BindPFlag("risk-threshold", cmd.Flags().Lookup("risk-threshold"))
+		_ = viper.BindPFlag("exceptions-submit", cmd.Flags().Lookup("exceptions-submit"))
+
+		// for all assets
+		_ = viper.BindPFlag("incognito", cmd.Flags().Lookup("incognito"))
+		_ = viper.BindPFlag("insecure", cmd.Flags().Lookup("insecure"))
+		_ = viper.BindPFlag("policies", cmd.Flags().Lookup("policy"))
+		_ = viper.BindPFlag("sudo.active", cmd.Flags().Lookup("sudo"))
+		_ = viper.BindPFlag("record", cmd.Flags().Lookup("record"))
+		_ = viper.BindPFlag("annotations", cmd.Flags().Lookup("annotation"))
+		_ = viper.BindPFlag("props", cmd.Flags().Lookup("props"))
+
+		_ = viper.BindPFlag("json", cmd.Flags().Lookup("json"))
+		_ = viper.BindPFlag("output", cmd.Flags().Lookup("output"))
+		_ = viper.BindPFlag("output-target", cmd.Flags().Lookup("output-target"))
+		_ = viper.BindPFlag("parallelism", cmd.Flags().Lookup("parallelism"))
+		_ = viper.BindPFlag("output-scan-db", cmd.Flags().Lookup("output-scan-db"))
+		_ = viper.BindPFlag("collect-support-bundle", cmd.Flags().Lookup("collect-support-bundle"))
+		_ = viper.BindPFlag("support-bundle-dir", cmd.Flags().Lookup("support-bundle-dir"))
+	},
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) == 0 {
+			return []string{"yml", "yaml", "json"}, cobra.ShellCompDirectiveFilterFileExt
+		}
+		return []string{}, cobra.ShellCompDirectiveNoFileComp
+	},
+	// we have to initialize an empty run so it shows up as a runnable command in --help
+	Run: func(cmd *cobra.Command, args []string) {},
+}
+
+var scanCmdRun = func(cmd *cobra.Command, runtime *providers.Runtime, cliRes *plugin.ParseCLIRes) {
+	ctx := context.Background()
+
+	// Wire up debug dumping: --collect-support-bundle takes precedence over
+	// DEBUG=1, which produces just the dump directory without manifest/log.
+	var support *supportbundle.Bundle
+	if viper.GetBool("collect-support-bundle") {
+		var err error
+		support, err = supportbundle.New(viper.GetString("support-bundle-dir"))
+		if err != nil {
+			log.Fatal().Err(err).Msg("failed to prepare support bundle")
+		}
+		support.Args = os.Args
+		ctx, err = support.Activate(ctx)
+		if err != nil {
+			log.Fatal().Err(err).Msg("failed to activate support bundle")
+		}
+		// zerolog calls os.Exit(1) after Fatal hooks run, so HookFatal is
+		// our only chance to flush on log.Fatal paths.
+		support.HookFatal()
+		// Defer covers panics and normal returns; the os.Exit branches below
+		// call FinalizeAndAnnounce directly.
+		defer support.FinalizeAndAnnounce(os.Stderr)
+	} else {
+		ctx = setupDebugDumps(ctx, "cnspec-debug")
+	}
+
+	conf, err := getCobraScanConfig(cmd, runtime, cliRes)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to prepare config")
+	}
+
+	err = conf.loadPolicies(ctx)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to resolve policies")
+	}
+	// Dump the aggregated bundle at the run level (used to fire inside
+	// policy.BundleLoader.BundleFromPaths via the mql logger; moved here so
+	// it can be ctx-aware and only fires for scan, not policy lint).
+	scandump.YAML(ctx, "resolved_mql_bundle.mql", conf.Bundle)
+
+	report, err := RunScan(ctx, conf, scan.WithReportType(conf.ReportType), scan.WithAutoUpdate(AutoUpdateEnabled()))
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to run scan")
+	}
+
+	scandump.JSON(ctx, "report", report)
+	recordResolvedAssets(ctx, report)
+
+	handlerConf := reporter.HandlerConfig{
+		Format:        conf.OutputFormat,
+		OutputTarget:  conf.OutputTarget,
+		Incognito:     conf.IsIncognito,
+		RiskThreshold: conf.RiskThreshold,
+	}
+	outputHandler, err := reporter.NewOutputHandler(handlerConf)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to create an output handler")
+	}
+
+	fCtx := mql.SetFeatures(ctx, conf.Features)
+	if err := outputHandler.WriteReport(fCtx, report); err != nil {
+		log.Fatal().Err(err).Msg("failed to write report to output target")
+	}
+
+	// If we had asset errors or the worst-case score exceeds the threshold,
+	// return non-zero. Flush the support bundle first so the user gets it.
+	if report != nil {
+		if len(report.Errors) > 0 {
+			if support != nil {
+				support.FinalizeAndAnnounce(os.Stderr)
+			}
+			os.Exit(1)
+		}
+
+		if (100 - report.GetWorstScore()) >= uint32(conf.RiskThreshold) {
+			if support != nil {
+				support.FinalizeAndAnnounce(os.Stderr)
+			}
+			os.Exit(1)
+		}
+	}
+}
+
+// isDebugDumpEnabled mirrors the gate the cnspec logger uses to flip into
+// debug level (DEBUG=1 or DEBUG=true). TRACE=1 also flips logging but doesn't
+// need to imply dump capture — DEBUG is the user's "I want files" signal.
+func isDebugDumpEnabled() bool {
+	v := os.Getenv("DEBUG")
+	return v == "1" || v == "true"
+}
+
+// setupDebugDumps wires a scandump.Run when DEBUG=1 is set and returns the
+// augmented context. The dirPrefix is the directory name to use ("cnspec-debug",
+// "cnspec-sbom-debug", etc.) — a timestamp is appended. Used by sbom and vuln
+// which don't have the --collect-support-bundle flag but should still
+// benefit from the per-asset folder layout when DEBUG=1.
+func setupDebugDumps(ctx context.Context, dirPrefix string) context.Context {
+	if !isDebugDumpEnabled() {
+		return ctx
+	}
+	runDir := dirPrefix + "-" + time.Now().UTC().Format("20060102T150405Z")
+	run, err := scandump.NewRun(runDir)
+	if err != nil {
+		log.Warn().Err(err).Str("dir", runDir).Msg("failed to set up debug dumps; continuing without")
+		return ctx
+	}
+	logger.DumpLocal = filepath.Join(run.Dir, "mondoo-debug-")
+	log.Info().Str("dir", run.Dir).Msg("debug dumps will be written here")
+	return scandump.WithRun(ctx, run)
+}
+
+// recordResolvedAssets dumps the asset list as the scan saw them, so support
+// can see what got resolved from the inventory.
+func recordResolvedAssets(ctx context.Context, report *policy.ReportCollection) {
+	if report == nil {
+		return
+	}
+	resolved := struct {
+		Assets map[string]*inventory.Asset `json:"assets"`
+		Errors map[string]string           `json:"errors,omitempty"`
+	}{
+		Assets: report.Assets,
+		Errors: report.Errors,
+	}
+	scandump.JSON(ctx, "assets-resolved", resolved)
+}
+
+// helper method to retrieve the list of policies for autocomplete
+func getPoliciesForCompletion() []string {
+	policyList := []string{}
+
+	// TODO: autocompletion
+	sort.Strings(policyList)
+
+	return policyList
+}
+
+type scanConfig struct {
+	Features mql.Features
+	// Strict is the operator's fallback MQL strict mode (mql ADR 043) for
+	// policies that declare none of their own, read from `strict` in the config
+	// file or --strict. A policy that declares a mode always wins.
+	Strict       bool
+	Inventory    *inventory.Inventory
+	ReportType   scan.ReportType
+	OutputTarget string
+	OutputFormat string
+	OutputScanDB string
+	PolicyPaths  []string
+	PolicyNames  []string
+	Props        map[string]string
+	Bundle       *policy.Bundle
+	runtime      *providers.Runtime
+
+	IsIncognito   bool
+	RiskThreshold int
+	Parallelism   int
+
+	DoRecord bool
+	AgentMrn string
+
+	// Exceptions are the user-scope exceptions of the client config at
+	// ExceptionsConfigPath (ADR-0006).
+	Exceptions           []config.Exception
+	ExceptionsConfigPath string
+	// SubmitExceptions says whether this run submits exceptions upstream.
+	SubmitExceptions bool
+}
+
+func getCobraScanConfig(cmd *cobra.Command, runtime *providers.Runtime, cliRes *plugin.ParseCLIRes) (*scanConfig, error) {
+	opts, err := config.Read()
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to load config")
+	}
+
+	config.DisplayUsedConfig()
+
+	props := viper.GetStringMapString("props")
+
+	// merge the config and the user-provided annotations with the latter having precedence
+	optAnnotations := opts.Annotations
+	if optAnnotations == nil {
+		optAnnotations = map[string]string{}
+	}
+
+	assetName, err := cmd.Flags().GetString("asset-name")
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to parse asset-name")
+	}
+	if assetName != "" && cliRes.Asset != nil {
+		cliRes.Asset.Name = assetName
+	}
+
+	platformID := viper.GetString("platform-id")
+	if platformID != "" && cliRes.Asset != nil {
+		log.Info().Str("platform-id", platformID).Msg("platform-id overridden by user")
+		cliRes.Asset.PlatformIds = append(cliRes.Asset.PlatformIds, platformID)
+	}
+
+	traceId := viper.GetString("trace-id")
+	if traceId != "" && cliRes.Asset != nil {
+		cliRes.Asset.TraceId = traceId
+	}
+
+	// Auto-discover an inventory.yml next to the loaded mondoo.yml when
+	// --inventory-file was not set explicitly. This makes ad-hoc
+	// `cnspec scan local` see the same per-asset configuration (notably the
+	// id_detector list) that `cnspec serve` already auto-loads on each
+	// scheduled scan cycle. We gate on config.LoadedConfig so a stray
+	// inventory.yml in $PWD does not get picked up by scans that have no
+	// managed-agent context. inventoryloader.ParseOrUse reads the path
+	// from the global viper "inventory-file" key, matching how serve.go
+	// performs the same lookup.
+	autoDiscoveredInventory := false
+	if config.LoadedConfig && viper.GetString("inventory-file") == "" {
+		if invPath, ok := config.InventoryPath(viper.ConfigFileUsed()); ok {
+			log.Info().
+				Str("path", invPath).
+				Msg("auto-discovered default inventory file next to mondoo.yml")
+			viper.Set("inventory-file", invPath)
+			autoDiscoveredInventory = true
+		}
+	}
+
+	inv, err := inventoryloader.ParseOrUse(cliRes.Asset, viper.GetBool("insecure"), optAnnotations)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to parse inventory")
+	}
+
+	// When the inventory file was auto-discovered (not user-supplied) and the
+	// CLI gave us a target asset, treat the inventory as a library of per-asset
+	// overrides rather than as the authoritative asset list. We copy the
+	// id_detector list from any inventory asset whose connection type overlaps
+	// the CLI asset's, then narrow inv.Spec.Assets to just the CLI asset. This
+	// keeps `cnspec scan local` picking up the id_detector configured by the
+	// Windows installer while leaving `cnspec scan aws account 123` and other
+	// non-local targets unaffected even though the same inventory.yml is on
+	// disk next to mondoo.yml.
+	if autoDiscoveredInventory && cliRes.Asset != nil {
+		applyAutoDiscoveredInventory(cliRes.Asset, inv)
+	}
+
+	riskThreshold := viper.GetInt("risk-threshold")
+
+	// FIXME: DEPRECATED, just remove this section in v13, it is no longer necessary
+	deprecatedThreshold := 100 - viper.GetInt("score-threshold")
+	// note: the score threshold is off by one compared to the risk threshold;
+	// ie: risk threshold 90 => risk of 90 - 100 get exit 1
+	// vs: score threshold 11 => 100-11 = risk > 89 gets exit 1
+	if deprecatedThreshold+1 < riskThreshold {
+		riskThreshold = deprecatedThreshold + 1
+	}
+	// ^^
+
+	reportType := scan.ReportType_FULL
+	rtString := strings.ToUpper(viper.GetString("report-type"))
+	switch rtString {
+	case scan.ReportType_FULL.String():
+		reportType = scan.ReportType_FULL
+	case scan.ReportType_ERROR.String():
+		reportType = scan.ReportType_ERROR
+	case scan.ReportType_NONE.String():
+		reportType = scan.ReportType_NONE
+	}
+
+	features := opts.GetFeatures()
+	// --output-scan-db requires the SQLite scan-db datalake (UploadResultsV2);
+	// turn it on automatically so users don't have to know about the feature flag.
+	if viper.GetString("output-scan-db") != "" && !features.IsActive(mql.UploadResultsV2) {
+		features = append(features, byte(mql.UploadResultsV2))
+		log.Info().Msg("--output-scan-db: enabling UploadResultsV2 feature so the scan database is produced")
+	}
+
+	conf := scanConfig{
+		Features:      features,
+		Strict:        opts.GetStrict(),
+		IsIncognito:   viper.GetBool("incognito"),
+		Inventory:     inv,
+		ReportType:    reportType,
+		PolicyPaths:   dedupe(viper.GetStringSlice("policy-bundle")),
+		PolicyNames:   viper.GetStringSlice("policies"),
+		RiskThreshold: riskThreshold,
+		Props:         props,
+		runtime:       runtime,
+		AgentMrn:      opts.AgentMrn,
+		OutputTarget:  viper.GetString("output-target"),
+		OutputScanDB:  viper.GetString("output-scan-db"),
+		Parallelism:   viper.GetInt("parallelism"),
+	}
+
+	// Resource recording (UploadResourcesData) is NOT armed here: the
+	// feature usually arrives server-driven via ScanParameters, which this
+	// CLI setup never sees. The per-asset scanner arms it against the final
+	// feature set instead (localAssetScanner.run) — the recorded rows are
+	// delivered inside the uploaded scan database (UploadResultsV2 only).
+
+	// if users want to get more information on available output options,
+	// print them before executing the scan
+	output := viper.GetString("output")
+	if output == "help" {
+		fmt.Println(reporter.AllAvailableOptions())
+		os.Exit(0)
+	}
+
+	// --json takes precedence
+	if ok := viper.GetBool("json"); ok {
+		output = "json"
+	}
+	conf.OutputFormat = output
+
+	// detect CI/CD runs and read labels from runtime and apply them to all assets in the inventory
+	runtimeEnv := execruntime.Detect()
+
+	conf.Exceptions = opts.Exceptions
+	conf.ExceptionsConfigPath = viper.ConfigFileUsed()
+	conf.SubmitExceptions, err = submitExceptions(viper.GetString("exceptions-submit"), runtimeEnv)
+	if err != nil {
+		return nil, err
+	}
+	if opts.AutoDetectCICDCategory && runtimeEnv.IsAutomatedEnv() || opts.Category == "cicd" {
+		log.Info().Msg("detected ci-cd environment")
+		// NOTE: we only apply those runtime environment labels for CI/CD runs to ensure other assets from the
+		// inventory are not touched, we may consider to add the data to the flagAsset
+		if runtimeEnv != nil {
+			runtimeLabels := runtimeEnv.Labels()
+			conf.Inventory.ApplyLabels(runtimeLabels)
+		}
+		conf.Inventory.ApplyCategory(inventory.AssetCategory_CATEGORY_CICD)
+	}
+
+	serviceAccount := opts.GetServiceCredential()
+
+	// NOTE: even if we have incognito, we want to set the upstream config. Otherwise we would not be able to
+	// use the policies that are defined in Mondoo Platform
+	if serviceAccount != nil {
+		// Providers build their own upstream client from these credentials
+		// when they connect to an asset. A key that cannot be loaded fails
+		// that connection, and in an incognito collection (sbom, aibom) the
+		// failure only surfaces as an empty result. Reject it here instead.
+		if err := verifyServiceAccount(serviceAccount, configSourceDescription()); err != nil {
+			return nil, err
+		}
+		log.Info().Msg("using service account credentials")
+
+		spaceMrn := opts.GetParentMrn()
+		if spaceMrn == "" {
+			log.Info().Msgf("spaceMrn is empty, using serviceAccount.ScopeMrn: %s", serviceAccount.ScopeMrn)
+			spaceMrn = serviceAccount.ScopeMrn
+		}
+
+		conf.runtime.UpstreamConfig = &upstream.UpstreamConfig{
+			SpaceMrn:    spaceMrn,
+			ApiEndpoint: opts.UpstreamApiEndpoint(),
+			ApiProxy:    opts.APIProxy,
+			Incognito:   conf.IsIncognito,
+			Creds:       serviceAccount,
+		}
+		providers.DefaultRuntime().UpstreamConfig = conf.runtime.UpstreamConfig
+	} else {
+		// only warn users that we switch to incognito if we aren't already in incognito
+		if !conf.IsIncognito {
+			log.Warn().Msg("No credentials provided. Switching to --incognito mode.")
+		}
+		conf.IsIncognito = true
+	}
+
+	if len(conf.PolicyPaths) > 0 && !conf.IsIncognito {
+		log.Warn().Msg("Scanning with local bundles will switch into --incognito mode by default. Your results will not be sent upstream.")
+		conf.IsIncognito = true
+	}
+
+	// print headline when its not printed to yaml
+	if output == "" {
+		fmt.Fprintln(os.Stdout, theme.DefaultTheme.Landing)
+	}
+
+	return &conf, nil
+}
+
+// applyAutoDiscoveredInventory narrows an auto-discovered inventory down to the
+// CLI-provided asset, after lifting per-asset fields (currently only the
+// id_detector list) from any inventory asset whose connection type overlaps
+// the target's. Auto-discovery happens only when --inventory-file was not set
+// by the user, so this function should never be reached for an inventory the
+// user explicitly pointed at.
+func applyAutoDiscoveredInventory(target *inventory.Asset, inv *inventory.Inventory) {
+	if target == nil || inv == nil || inv.Spec == nil {
+		return
+	}
+	targetConns := make(map[string]struct{}, len(target.Connections))
+	for _, c := range target.Connections {
+		if c != nil && c.Type != "" {
+			targetConns[c.Type] = struct{}{}
+		}
+	}
+	for _, invAsset := range inv.Spec.GetAssets() {
+		if invAsset == nil || invAsset == target {
+			continue
+		}
+		if !assetSharesConnectionType(invAsset, targetConns) {
+			continue
+		}
+		if len(target.IdDetector) == 0 && len(invAsset.IdDetector) > 0 {
+			target.IdDetector = append(target.IdDetector, invAsset.IdDetector...)
+		}
+		// First-match wins. The Windows installer writes exactly one
+		// local-scan asset, and we only care about lifting id_detector here;
+		// later matches would not contribute anything beyond what the first
+		// already provided. If inventories ever grow to carry multiple
+		// assets of the same connection type with *different* id_detector
+		// lists that should all apply, this loop needs to merge across
+		// matches instead of breaking.
+		break
+	}
+	// Auto-discovered inventories are treated as per-asset override libraries,
+	// not as the authoritative asset list, so any inventory asset that didn't
+	// match the CLI target is intentionally dropped here. Log it at debug so
+	// the dropped count is visible when troubleshooting unexpected scan
+	// targets.
+	dropped := 0
+	for _, a := range inv.Spec.GetAssets() {
+		if a != nil && a != target {
+			dropped++
+		}
+	}
+	if dropped > 0 {
+		log.Debug().
+			Int("count", dropped).
+			Msg("dropping inventory assets that did not match the CLI target")
+	}
+	inv.Spec.Assets = []*inventory.Asset{target}
+}
+
+func assetSharesConnectionType(asset *inventory.Asset, want map[string]struct{}) bool {
+	if asset == nil || len(want) == 0 {
+		return false
+	}
+	for _, c := range asset.Connections {
+		if c == nil {
+			continue
+		}
+		if _, ok := want[c.Type]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *scanConfig) loadPolicies(ctx context.Context) error {
+	if c.IsIncognito {
+		if len(c.PolicyPaths) == 0 {
+			return nil
+		}
+
+		bundleLoader := policy.DefaultBundleLoader()
+		bundle, err := bundleLoader.BundleFromPaths(c.PolicyPaths...)
+		if err != nil {
+			return err
+		}
+
+		// ensure all required providers are installed before we try to compile the bundle
+		if bundle.HasRequirements() {
+			if err := bundle.EnsureRequirements(AutoUpdateEnabled()); err != nil {
+				return errors.Wrap(err, "failed to ensure policy requirements")
+			}
+		}
+
+		// prepare the bundle for compilation
+		bundle.Prepare()
+		conf := mqlc.NewConfig(c.runtime.Schema(), mql.DefaultFeatures)
+		// c.Strict, not the config package's: this is the value resolved for
+		// this scan. `config` here is the imported package, which reads like the
+		// receiver and is why this was wrong to begin with.
+		conf.Strict = c.Strict
+
+		_, err = bundle.CompileExt(ctx, policy.BundleCompileConf{
+			CompilerConfig: conf,
+			// We don't care about failing queries for local runs. We may only
+			// process a subset of all the queries in the bundle. When we receive
+			// things from the server, upstream can filter things for us. But running
+			// them locally requires us to do it in here.
+			RemoveFailing: true,
+		})
+		if err != nil {
+			return errors.Wrap(err, "failed to compile bundle")
+		}
+
+		c.Bundle = bundle
+		return nil
+	}
+
+	return nil
+}
+
+// submitExceptions decides whether a run submits exceptions from config files
+// upstream. Only an authoritative run does by default, a CI run on the default
+// branch: a scan of a feature branch applies and reports exceptions, but never
+// turns a developer's experiment into a shared exception (ADR-0006).
+func submitExceptions(mode string, env *execruntime.RuntimeEnv) (bool, error) {
+	switch mode {
+	case "", "auto":
+		return env.IsAutomatedEnv() && env.OnDefaultBranch(), nil
+	case "always":
+		return true, nil
+	case "never":
+		return false, nil
+	}
+	return false, fmt.Errorf("invalid --exceptions-submit %q, use auto, always or never", mode)
+}
+
+// interactiveActivityTrigger says how a CLI scan came to be. A terminal on
+// stdin means a person ran it. Without one it could be cron, a fleet tool or
+// CI, which cannot be told apart from here, so it stays unspecified.
+func interactiveActivityTrigger() policy.AssetActivityTrigger {
+	if isatty.IsTerminal(os.Stdin.Fd()) {
+		return policy.AssetActivityTrigger_ASSET_ACTIVITY_TRIGGER_AD_HOC
+	}
+	return policy.AssetActivityTrigger_ASSET_ACTIVITY_TRIGGER_UNSPECIFIED
+}
+
+func RunScan(parentCtx context.Context, config *scanConfig, scannerOpts ...scan.ScannerOption) (*policy.ReportCollection, error) {
+	// RunScan is the entry point for the interactive CLI scan commands (scan,
+	// vuln, sbom, aibom, ...), so default the scan source to interactive. It is
+	// prepended so callers (e.g. `serve`) can override it via WithScanSource.
+	opts := append([]scan.ScannerOption{
+		scan.WithScanSource(scan.ScanSourceInteractive),
+		scan.WithActivityTrigger(interactiveActivityTrigger()),
+	}, scannerOpts...)
+	if config.runtime.UpstreamConfig != nil {
+		opts = append(opts, scan.WithUpstream(config.runtime.UpstreamConfig))
+	}
+	opts = append(opts, scan.WithRecording(config.runtime.Recording()))
+	// Fallback strict mode for policies that declare none; a policy that
+	// declares one is unaffected (mql ADR 043 §6). `config` is the *scanConfig
+	// parameter here, not the config package - the two are easy to confuse in
+	// this file, so this reads the per-scan value deliberately.
+	opts = append(opts, scan.WithStrict(config.Strict))
+	opts = append(opts, scan.WithExceptions(config.Exceptions, config.ExceptionsConfigPath, config.SubmitExceptions))
+
+	scanner := scan.NewLocalScanner(opts...)
+	// parentCtx carries scandump.WithRun (when debug dumping is on) plus
+	// anything the caller wants surfaced; signal.NotifyContext layers
+	// interrupt cancellation on top.
+	ctx, stop := signal.NotifyContext(parentCtx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ctx = mql.SetFeatures(ctx, config.Features)
+	// Carry --output-scan-db through ctx so the SQLite datalake knows where
+	// to keep the captured scan db. No-op when the flag isn't set.
+	ctx = sqlite.WithOutputDir(ctx, config.OutputScanDB)
+
+	var res *scan.ScanResult
+	var err error
+	if config.IsIncognito {
+		res, err = scanner.RunIncognito(
+			ctx,
+			&scan.Job{
+				Inventory:     config.Inventory,
+				Bundle:        config.Bundle,
+				PolicyFilters: config.PolicyNames,
+				Props:         config.Props,
+				Parallelism:   int32(config.Parallelism),
+			})
+	} else {
+		res, err = scanner.Run(
+			ctx,
+			&scan.Job{
+				Inventory:     config.Inventory,
+				Bundle:        config.Bundle,
+				PolicyFilters: config.PolicyNames,
+				Props:         config.Props,
+				Parallelism:   int32(config.Parallelism),
+			})
+	}
+
+	if err != nil {
+		return nil, err
+	}
+	return res.GetFull(), nil
+}
+
+func dedupe[T string | int](sliceList []T) []T {
+	allKeys := make(map[T]bool)
+	list := []T{}
+	for _, item := range sliceList {
+		if _, value := allKeys[item]; !value {
+			allKeys[item] = true
+			list = append(list, item)
+		}
+	}
+	return list
+}

@@ -1,0 +1,65 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+
+packs:
+  - uid: mondoo-googleworkspace-incident-response
+    name: Google Workspace Incident Response Pack
+    version: 1.1.2
+    license: BUSL-1.1
+    require:
+      - provider: google-workspace
+    authors:
+      - name: Mondoo, Inc
+        email: hello@mondoo.com
+    tags:
+      mondoo.com/platform: google-workspace,saas
+      mondoo.com/category: security
+      mondoo.com/icon: google-workspace
+    summary: Gather Google Workspace evidence for incident response
+    docs:
+      desc: |
+        Collects Google Workspace evidence for incident investigation: configured domains, user 2-Step Verification enrollment, super admin accounts, hardware security key usage, and account recovery email addresses.
+
+        Enable this query pack in [Mondoo Platform](https://mondoo.com/platform) to automatically gather this evidence from your Google Workspace account, or scan it manually with cnspec. Manual scans need a service account with domain-wide delegation and the required admin read scopes; see the [Google Workspace setup guide](https://mondoo.com/docs/cnspec/saas/google_workspace):
+
+        ```bash
+        export GOOGLEWORKSPACE_CREDENTIALS=$PWD/service-account.json
+        cnspec scan google-workspace --customer-id <customer_id> --impersonated-user-email <admin_email> -f mondoo-googleworkplace-incident-response.mql.yaml
+        ```
+    filters: asset.platform == "googleworkspace" || asset.platform == "google-workspace"
+    queries:
+      - uid: mondoo-googleworkspace-incident-response-domain
+        title: Google Workspace domains
+        docs:
+          desc: Configured domains with primary and verification status.
+        mql: googleworkspace.domains { domainName isPrimary verified }
+      - uid: mondoo-googleworkspace-incident-response-user-mfa-status
+        title: Google Workspace users' MFA status
+        docs:
+          desc: Each user and whether 2-Step Verification is enforced.
+        mql: googleworkspace.users { primaryEmail isEnforcedIn2Sv }
+      - uid: mondoo-googleworkspace-incident-response-super-admins
+        title: Google Workspace super admins
+        docs:
+          desc: Accounts holding super admin privileges.
+        mql: googleworkspace.report.users.where(isSuperAdmin == true) { userEmail }
+      - uid: mondoo-googleworkspace-incident-response-super-admins-without-2FA-enrolled
+        title: Google Workspace super admins who are not enrolled in 2FA
+        docs:
+          desc: Admin accounts not enrolled in 2-Step Verification.
+        mql: googleworkspace.users.where(isEnrolledIn2Sv != true && isAdmin == true) {primaryEmail isEnrolledIn2Sv isAdmin}
+      - uid: mondoo-googleworkspace-incident-response-users-without-2FA-enrolled
+        title: Google Workspace user accounts that are not enrolled in 2FA
+        docs:
+          desc: Accounts not enrolled in 2-Step Verification.
+        mql: googleworkspace.users.where(isEnrolledIn2Sv != true) {primaryEmail isEnrolledIn2Sv isAdmin}
+      - uid: mondoo-googleworkspace-incident-response-super-admins-without-hardware-based-2fa
+        title: Super admin accounts that do not use hardware-based security keys
+        docs:
+          desc: Super admins with no hardware security key registered.
+        mql: googleworkspace.report.users.where(isSuperAdmin == true && numSecurityKeys <= 0 ) {userEmail numSecurityKeys}
+      - uid: mondoo-googleworkspace-incident-response-config-drift-recovery-email
+        title: Primary and recovery email accounts of all Google Workspace users
+        docs:
+          desc: Each user's primary and recovery email addresses.
+        mql: googleworkspace.users {primaryEmail recoveryEmail}

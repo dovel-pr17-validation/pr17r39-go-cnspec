@@ -1,0 +1,1910 @@
+// Copyright Mondoo, Inc. 2024, 2026
+// SPDX-License-Identifier: BUSL-1.1
+
+package scan
+
+import (
+	"context"
+	"encoding/base64"
+	"fmt"
+	"os"
+	"slices"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/cockroachdb/errors"
+	"github.com/google/uuid"
+	"github.com/mattn/go-isatty"
+	"github.com/rs/zerolog/log"
+	"github.com/segmentio/ksuid"
+	"go.mondoo.com/cnspec"
+	"go.mondoo.com/cnspec/cli/progress"
+	"go.mondoo.com/cnspec/internal/datalakes/inmemory"
+	"go.mondoo.com/cnspec/internal/datalakes/sqlite"
+	"go.mondoo.com/cnspec/internal/scandump"
+	"go.mondoo.com/cnspec/policy"
+	"go.mondoo.com/cnspec/policy/executor"
+	"go.mondoo.com/cnspec/policy/scanstats"
+	"go.mondoo.com/mql"
+	"go.mondoo.com/mql/cli/config"
+	"go.mondoo.com/mql/cli/execruntime"
+	"go.mondoo.com/mql/discovery"
+	"go.mondoo.com/mql/llx"
+	"go.mondoo.com/mql/logger"
+	"go.mondoo.com/mql/mqlc"
+	"go.mondoo.com/mql/mrn"
+	"go.mondoo.com/mql/providers"
+	"go.mondoo.com/mql/providers-sdk/v1/inventory"
+	"go.mondoo.com/mql/providers-sdk/v1/plugin"
+	"go.mondoo.com/mql/providers-sdk/v1/recording"
+	"go.mondoo.com/mql/providers-sdk/v1/upstream"
+	"go.mondoo.com/mql/providers-sdk/v1/upstream/gql"
+	"go.mondoo.com/mql/providers-sdk/v1/upstream/health"
+	"go.mondoo.com/mql/utils/multierr"
+	ranger "go.mondoo.com/ranger-rpc"
+	"go.mondoo.com/ranger-rpc/codes"
+	"go.mondoo.com/ranger-rpc/status"
+	"google.golang.org/protobuf/proto"
+)
+
+const (
+	defaultRefreshInterval = 3600
+)
+
+// memSampleInterval is how often the scan's memory footprint is sampled.
+// runtime/metrics reads are sub-microsecond and do not stop the world, so
+// one second costs nothing against scans that run for minutes.
+const memSampleInterval = time.Second
+
+type LocalScanner struct {
+	queue           *diskQueueClient
+	ctx             context.Context
+	fetcher         *fetcher
+	upstream        *upstream.UpstreamConfig
+	_upstreamClient *upstream.UpstreamClient
+	upstreamOnce    sync.Once
+	upstreamErr     error
+	recording       llx.Recording
+	runtime         llx.Runtime
+
+	// allows setting the upstream credentials from a job
+	allowJobCredentials bool
+	disableProgressBar  bool
+	reportType          ReportType
+	autoUpdate          bool
+	refreshInterval     int
+	// scanSource records how the scan was triggered (e.g. "interactive" or
+	// "service"). When set, it is applied as a label to every scanned asset.
+	scanSource string
+	// activityTrigger is how this scanner's runs came to be, reported upstream
+	// when a scan starts (ReportAssetActivityStarted). Unspecified when the
+	// invocation cannot tell.
+	activityTrigger policy.AssetActivityTrigger
+	// strict is the fallback MQL strict mode (mql ADR 043) for policies that
+	// declare none of their own. A policy that declares one always wins.
+	strict bool
+	// exceptions is how exceptions from config files are treated (ADR-0006).
+	exceptions *exceptionsConfig
+}
+
+const (
+	// LabelScanSource is the asset label that records how a scan was triggered.
+	LabelScanSource = "mondoo.com/scan-source"
+	// ScanSourceInteractive marks scans started interactively via `cnspec scan`.
+	ScanSourceInteractive = "interactive"
+	// ScanSourceService marks scans started by a long-running service, e.g.
+	// `cnspec serve` or the scan REST API.
+	ScanSourceService = "service"
+)
+
+type ScannerOption func(*LocalScanner)
+
+func WithUpstream(conf *upstream.UpstreamConfig) ScannerOption {
+	return func(s *LocalScanner) {
+		s.upstream = conf
+	}
+}
+
+func WithRecording(r llx.Recording) func(s *LocalScanner) {
+	return func(s *LocalScanner) {
+		s.recording = r
+	}
+}
+
+func AllowJobCredentials() ScannerOption {
+	return func(s *LocalScanner) {
+		s.allowJobCredentials = true
+	}
+}
+
+func DisableProgressBar() ScannerOption {
+	return func(s *LocalScanner) {
+		s.disableProgressBar = true
+	}
+}
+
+func WithReportType(reportType ReportType) ScannerOption {
+	return func(s *LocalScanner) {
+		s.reportType = reportType
+	}
+}
+
+func WithAutoUpdate(onoff bool) ScannerOption {
+	return func(s *LocalScanner) {
+		s.autoUpdate = onoff
+	}
+}
+
+func WithRefreshInterval(refreshInterval int) ScannerOption {
+	return func(s *LocalScanner) {
+		s.refreshInterval = refreshInterval
+	}
+}
+
+func WithRuntime(r *providers.Runtime) ScannerOption {
+	return func(s *LocalScanner) {
+		s.runtime = r
+	}
+}
+
+// WithStrict sets the fallback MQL strict mode for policies that do not declare
+// one. It never overrides a policy that does.
+func WithStrict(strict bool) ScannerOption {
+	return func(s *LocalScanner) {
+		s.strict = strict
+	}
+}
+
+// WithScanSource records how scans run by this scanner were triggered. The
+// value (e.g. ScanSourceInteractive or ScanSourceService) is stamped onto every
+// scanned asset as the LabelScanSource label so it can be aggregated upstream.
+func WithScanSource(source string) ScannerOption {
+	return func(s *LocalScanner) {
+		s.scanSource = source
+	}
+}
+
+// WithActivityTrigger records how scans run by this scanner came to be:
+// started by a person, by a schedule, or by a remote request. It is reported
+// upstream when a scan starts so the platform can show assets being scanned.
+func WithActivityTrigger(trigger policy.AssetActivityTrigger) ScannerOption {
+	return func(s *LocalScanner) {
+		s.activityTrigger = trigger
+	}
+}
+
+func NewLocalScanner(opts ...ScannerOption) *LocalScanner {
+	ls := &LocalScanner{
+		fetcher: newFetcher(),
+		ctx:     context.Background(),
+		// By default, auto-update is enabled. It can be explicitly disabled
+		// by passing WithAutoUpdate(false)
+		autoUpdate: true,
+	}
+
+	for i := range opts {
+		opts[i](ls)
+	}
+
+	if ls.recording == nil {
+		ls.recording = recording.Null{}
+	}
+
+	if ls.runtime == nil {
+		runtime := providers.DefaultRuntime()
+		refreshInterval := defaultRefreshInterval
+		if ls.refreshInterval > 0 {
+			refreshInterval = ls.refreshInterval
+		}
+
+		runtime.AutoUpdate = providers.UpdateProvidersConfig{
+			Enabled:         ls.autoUpdate,
+			RefreshInterval: refreshInterval,
+		}
+		ls.runtime = runtime
+	}
+
+	return ls
+}
+
+func (s *LocalScanner) EnableQueue() error {
+	var err error
+	s.queue, err = newDqueClient(defaultDqueConfig, func(job *Job) {
+		// this is the handler for jobs, when they are picked up
+		ctx := mql.SetFeatures(s.ctx, mql.DefaultFeatures)
+		_, err := s.Run(ctx, job)
+		if err != nil {
+			log.Error().Err(err).Msg("could not complete the scan")
+		}
+	})
+	return err
+}
+
+func (s *LocalScanner) Schedule(ctx context.Context, job *Job) (*Empty, error) {
+	if job == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "missing scan job")
+	}
+
+	if s.queue == nil {
+		return nil, status.Errorf(codes.Unavailable, "job queue is not available")
+	}
+
+	s.queue.Channel() <- *job
+	return &Empty{}, nil
+}
+
+func (s *LocalScanner) Run(ctx context.Context, job *Job) (*ScanResult, error) {
+	if job == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "missing scan job")
+	}
+
+	if job.Inventory == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "missing inventory")
+	}
+
+	if ctx == nil {
+		return nil, errors.New("no context provided to run job with local scanner")
+	}
+
+	upstream, err := s.getUpstreamConfig(false, job)
+	if err != nil {
+		return nil, err
+	}
+
+	// The job report type has precedence over the global report type. The default is FULL
+	if job.ReportType == ReportType_FULL {
+		job.ReportType = s.reportType
+	}
+
+	reports, err := s.distributeJob(job, ctx, upstream)
+	if err != nil {
+		return nil, err
+	}
+
+	return reports, nil
+}
+
+func (s *LocalScanner) RunIncognito(ctx context.Context, job *Job) (*ScanResult, error) {
+	if job == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "missing scan job")
+	}
+
+	if job.Inventory == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "missing inventory")
+	}
+
+	if ctx == nil {
+		return nil, errors.New("no context provided to run job with local scanner")
+	}
+
+	upstream, err := s.getUpstreamConfig(true, job)
+	if err != nil {
+		return nil, err
+	}
+
+	// The job report type has precedence over the global report type. The default is FULL
+	if job.ReportType == ReportType_FULL {
+		job.ReportType = s.reportType
+	}
+
+	reports, err := s.distributeJob(job, ctx, upstream)
+	if err != nil {
+		return nil, err
+	}
+
+	return reports, nil
+}
+
+// preprocessPolicyFilters expends short registry mrns into full mrns
+func preprocessPolicyFilters(filters []string) []string {
+	res := make([]string, len(filters))
+	for i := range filters {
+		f := filters[i]
+		if strings.HasPrefix(f, "//") {
+			res[i] = f
+			continue
+		}
+
+		// expand short registry mrns
+		m := strings.Split(f, "/")
+		if len(m) == 2 {
+			res[i] = policy.NewPolicyMrn(m[0], m[1])
+		} else {
+			res[i] = f
+		}
+	}
+	return res
+}
+
+func createReporter(ctx context.Context, job *Job, upstream *upstream.UpstreamConfig) (Reporter, error) {
+	var reporter Reporter
+	switch job.ReportType {
+	case ReportType_FULL:
+		reporter = NewAggregateReporter()
+
+		// case where users pass in a bundle directly via a file
+		if job.Bundle != nil {
+			reporter.AddBundle(job.Bundle)
+			return reporter, nil
+		}
+
+		// - pass in bundle via file
+		// - use Mondoo Platform upstream with/without incognito
+		// - bundles fetched from public registry (not covered here, but in ensureBundle)
+		//
+		// if we use upstream with/without incognito, we want to fetch the bundle here to ensure we only fetch it once
+		// for all assets in the same space
+		if upstream != nil && upstream.Creds != nil {
+			client, err := upstream.InitClient(ctx)
+			if err != nil {
+				return nil, err
+			}
+
+			services, err := policy.NewRemoteServices(client.ApiEndpoint, client.Plugins, client.HttpClient)
+			if err != nil {
+				return nil, err
+			}
+
+			// retrieve the bundle for the parent (which is the space). That bundle contains all policies, queries and checks
+			var bundle *policy.Bundle
+			err = upstreamRetryFrom(ctx).do(ctx, "GetBundle", func() error {
+				var err error
+				bundle, err = services.GetBundle(ctx, &policy.Mrn{Mrn: upstream.Creds.ParentMrn}) //nolint:staticcheck // SA1019: ParentMrn is deprecated but still used for backward compatibility
+				return err
+			})
+			if err != nil {
+				return nil, err
+			}
+			for i := range bundle.Policies {
+				if bundle.Policies[i].Version == "n/a" {
+					bundle.Policies[i].Version = "0.0.0" // space policy has no version but we need it to compile it
+				}
+			}
+			job.Bundle = bundle // also update the job with the fetched bundle
+			reporter.AddBundle(bundle)
+		}
+	case ReportType_ERROR:
+		reporter = NewErrorReporter()
+	case ReportType_NONE:
+		reporter = NewNoOpReporter()
+	default:
+		return nil, errors.Errorf("unknown report type: %s", job.ReportType)
+	}
+	return reporter, nil
+}
+
+// stampScanSource applies the configured scan source (e.g. "interactive" or
+// "service") as the LabelScanSource label to every asset in the job inventory.
+// It is a no-op when no scan source was configured or there is no inventory.
+func (s *LocalScanner) stampScanSource(job *Job) {
+	if s.scanSource == "" || job == nil || job.Inventory == nil {
+		return
+	}
+	job.Inventory.ApplyLabels(map[string]string{LabelScanSource: s.scanSource})
+}
+
+// withServerFeatures layers the named server-activated mql features onto ctx.
+// Server features are layered on top of features already set by local config —
+// we never replace or disable what the user asked for. Unknown names are logged
+// and skipped. It is a no-op for an empty list.
+func withServerFeatures(ctx context.Context, featureNames []string) context.Context {
+	if len(featureNames) == 0 {
+		return ctx
+	}
+	log.Info().Strs("features", featureNames).Msg("server activated features")
+	for _, name := range featureNames {
+		f, ok := mql.FeaturesValue[name]
+		if !ok {
+			log.Warn().Str("feature", name).Msg("unknown server feature, ignoring")
+			continue
+		}
+		ctx = mql.WithFeature(ctx, f)
+	}
+	return ctx
+}
+
+// resolveServerScanParameters fetches server-controlled scan parameters and
+// layers any server-activated features onto ctx. It returns the enriched ctx
+// plus the resolved remote services and space MRN, which the scan pipeline
+// reuses, and the parameters themselves for the settings the pipeline reads
+// directly (e.g. MaxParallelism).
+//
+// This MUST run before asset discovery. Connection-level features (e.g.
+// TerraformResolveVars, read at provider Connect time) only take effect if they
+// are present on the context when the provider connects, and discovery connects
+// the root asset. Fetching scan parameters after discovery — as this code used
+// to — left those features inactive on the root connection. For incognito or
+// credential-less scans it is a no-op that returns ctx unchanged with nil
+// services and nil parameters.
+func (s *LocalScanner) resolveServerScanParameters(ctx context.Context, upstreamConfig *upstream.UpstreamConfig) (context.Context, *policy.Services, string, *policy.ScanParameters, error) {
+	if upstreamConfig == nil || upstreamConfig.ApiEndpoint == "" || upstreamConfig.Incognito {
+		return ctx, nil, "", nil, nil
+	}
+
+	client, err := upstreamConfig.InitClient(ctx)
+	if err != nil {
+		return ctx, nil, "", nil, err
+	}
+	spaceMrn := client.SpaceMrn
+
+	services, err := policy.NewRemoteServices(client.ApiEndpoint, client.Plugins, client.HttpClient)
+	if err != nil {
+		return ctx, nil, "", nil, err
+	}
+
+	var resp *policy.ScanParameters
+	err = upstreamRetryFrom(ctx).do(ctx, "GetScanParameters", func() error {
+		var err error
+		resp, err = services.GetScanParameters(ctx, &policy.GetScanParametersReq{ScopeMrn: spaceMrn})
+		return err
+	})
+	if err != nil {
+		// A failed scan-parameters call must not abort the scan; proceed without
+		// server-activated features. Note that this also means we proceed without
+		// the server's parallelism ceiling: it is a throttle for a scope under
+		// load, not a safety control, and failing the scan over an unreachable
+		// settings endpoint would be worse than scanning at the local default.
+		log.Warn().Err(err).Msg("could not get server scan parameters")
+		return ctx, services, spaceMrn, nil, nil
+	}
+
+	ctx = withServerFeatures(ctx, resp.GetEnabledFeatures())
+	return ctx, services, spaceMrn, resp, nil
+}
+
+// resolveScanParallelism decides how many assets this scan may run at once.
+// The provider defaults (or the user's explicit --parallelism) are resolved
+// first, then the server's ceiling is applied on top -- in that order, so the
+// server outranks an explicit request rather than merely competing with it.
+func resolveScanParallelism(requested int, roots []*inventory.Asset, serverMax int) int {
+	parallelism := providers.ResolveParallelism(requested, roots)
+
+	limited := clampToServerMax(parallelism, serverMax)
+	if limited != parallelism {
+		log.Info().
+			Int("requested", parallelism).
+			Int("server_max", serverMax).
+			Msg("scan parallelism limited by the server")
+	}
+	return limited
+}
+
+// clampToServerMax applies the server's ceiling on scan parallelism. The server
+// gets the last word — above the provider's declared default and above an
+// explicit --parallelism — so a scope under load can throttle every scan pointed
+// at it without touching the clients. A max of zero means the server set none.
+func clampToServerMax(parallelism, serverMax int) int {
+	if serverMax <= 0 || parallelism <= serverMax {
+		return parallelism
+	}
+	return serverMax
+}
+
+func (s *LocalScanner) distributeJob(job *Job, ctx context.Context, upstream *upstream.UpstreamConfig) (*ScanResult, error) {
+	// Stamp the scan source (interactive vs. service) onto every asset so it can
+	// be aggregated upstream. This is the single chokepoint for Run/RunIncognito
+	// and the admission-review and queue paths.
+	s.stampScanSource(job)
+
+	// With MONDOO_UPSTREAM_RETRY, every Mondoo Platform call of this scan shares
+	// one retry policy, so an outage that outlasts one call's wait is not waited
+	// out again by the next. Without it, each call runs as before.
+	if upstreamRetryEnabled() {
+		ctx = withUpstreamRetry(ctx, newUpstreamRetry())
+	}
+
+	reporter, err := createReporter(ctx, job, upstream)
+	if err != nil {
+		return nil, err
+	}
+
+	// Ensure all required providers are installed before we try to run the scan.
+	// We only check here for bundles fetched from the server. Local policy bundles
+	// already have their requirements ensured before compilation in loadPolicies().
+	if job.Bundle != nil && upstream != nil && upstream.Creds != nil && job.Bundle.HasRequirements() {
+		if err := job.Bundle.EnsureRequirements(s.autoUpdate); err != nil {
+			return nil, errors.Wrap(err, "failed to ensure policy requirements")
+		}
+	}
+
+	// Enable staged discovery on root inventory assets so that providers
+	// supporting it can split discovery into phases (e.g. cluster first,
+	// workloads per namespace later), matching the batched scan approach.
+	for _, asset := range job.Inventory.Spec.Assets {
+		for _, conf := range asset.Connections {
+			if conf.Options == nil {
+				conf.Options = map[string]string{}
+			}
+			conf.Options[plugin.OptionStagedDiscovery] = ""
+		}
+	}
+
+	// Fetch server-controlled scan parameters and layer any server-activated
+	// features onto ctx BEFORE discovery, so connection-level features (e.g.
+	// TerraformResolveVars) are present when discovery connects the root asset.
+	ctx, services, spaceMrn, scanParams, err := s.resolveServerScanParameters(ctx, upstream)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Info().Msgf("discover related assets for %d asset(s)", len(job.Inventory.Spec.Assets))
+	explorer, err := discovery.NewAssetExplorer(ctx, discovery.AssetExplorerConfig{
+		Inventory: job.Inventory,
+		Upstream:  upstream,
+		Recording: s.recording,
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer explorer.Shutdown()
+
+	// Report initial discovery errors
+	for _, assetErr := range explorer.Errors() {
+		reporter.AddScanError(assetErr.Asset, assetErr.Err)
+	}
+
+	if len(explorer.Connected()) == 0 {
+		return reporter.Reports(), nil
+	}
+
+	multiprogress, err := createProgressBar(s.disableProgressBar)
+	if err != nil {
+		return nil, err
+	}
+
+	// start the progress bar
+	scanGroups := sync.WaitGroup{}
+	scanGroups.Go(func() {
+		defer health.ReportPanic("cnspec", cnspec.Version, cnspec.Build)
+
+		if err := multiprogress.Open(); err != nil {
+			log.Error().Err(err).Msg("failed to open progress bar")
+		}
+	})
+	// Make sure the progress bar is closed when we exit early. Calling this multiple times
+	// is safe
+	defer multiprogress.Close()
+
+	// Children are connected one branch at a time further down, so everything
+	// Connected() reports right now is a root -- the set the default parallelism
+	// is derived from. A job that carries an explicit parallelism keeps it; the
+	// roots are only consulted when it does not.
+	connectedRoots := explorer.Connected()
+	rootAssets := make([]*inventory.Asset, 0, len(connectedRoots))
+	for _, root := range connectedRoots {
+		rootAssets = append(rootAssets, root.Asset)
+	}
+	serverMax := int(scanParams.GetMaxParallelism())
+	parallelism := resolveScanParallelism(int(job.Parallelism), rootAssets, serverMax)
+
+	maxConn := getMaxConnections()
+	log.Info().
+		Int("max_connections", maxConn).
+		Int("parallelism", parallelism).
+		Bool("parallelism_explicit", job.Parallelism > 0).
+		Int("server_max_parallelism", serverMax).
+		Msg("scan pipeline configuration")
+	connSem := make(chan struct{}, maxConn)
+	var scannedAssets atomic.Int64
+
+	// Memory is process-wide while scanstats Collectors are per-asset, so the
+	// tracker is created once per run and shared by every asset. run_id lets
+	// the resulting per-asset records be grouped back into one process.
+	//
+	// uuid.NewRandom (unlike uuid.New) can fail rather than panic if the
+	// entropy source is unavailable; telemetry must never fail a scan, so a
+	// failure here just leaves RunID empty, which Record already omits.
+	runID := ""
+	if u, err := uuid.NewRandom(); err == nil {
+		runID = u.String()
+	}
+	resourceTracker := scanstats.NewResourceTracker(scanstats.ResourceTrackerConfig{
+		RunID:          runID,
+		Parallelism:    parallelism,
+		MaxConnections: maxConn,
+	})
+	ctx = scanstats.ContextWithResourceTracker(ctx, resourceTracker)
+
+	dispatcher := newScanDispatcher(
+		parallelism, connSem, s, explorer, job, upstream,
+		reporter, multiprogress, services, spaceMrn, &scannedAssets,
+		resourceTracker,
+	)
+	// Registered before Start so the sampler's immediate first sample —
+	// which can end up being the run's peak — already has an accessor to
+	// call, instead of recording an in-flight count of zero that would be
+	// indistinguishable from a legitimate zero.
+	resourceTracker.SetInFlightFunc(dispatcher.inFlight)
+	resourceTracker.Start(memSampleInterval)
+	defer resourceTracker.Stop()
+	batcher := newSyncBatcher(dispatcher, services, spaceMrn, s.recording, multiprogress, s.activityTrigger)
+
+	scanCtx := &scanContext{
+		claimLane:          newClaimLaneState(scanParams, services, os.Getenv(claimAssetsEnvVar)),
+		services:           services,
+		spaceMrn:           spaceMrn,
+		explorer:           explorer,
+		reporter:           reporter,
+		multiprogress:      multiprogress,
+		connSem:            connSem,
+		platformIdsExclude: platformIdsExcludeSet(job.Inventory),
+		batcher:            batcher,
+		dispatcher:         dispatcher,
+	}
+
+	// Process each root asset's subtree. The root is already connected by
+	// NewAssetExplorer; scanSubtree will connect children one branch at a
+	// time so only one parent's children data is in memory at once.
+	for _, root := range explorer.Connected() {
+		scanCtx.registerRootTasks(ctx, root)
+
+		if err := scanCtx.scanSubtree(ctx, root); err != nil {
+			return nil, err
+		}
+	}
+
+	multiprogress.Close()
+	scanGroups.Wait() // wait for the progress bar to finish
+
+	if scannedAssets.Load() == 0 {
+		if err := scanCtx.errNothingScanned(); err != nil {
+			return nil, err
+		}
+	}
+
+	return reporter.Reports(), nil
+}
+
+// errNothingScanned is called when a run scanned no asset. It returns nil when
+// that is a normal outcome (every discovered asset was already reported, or
+// the claim lane materialized all of them server-side) and an error otherwise.
+func (sc *scanContext) errNothingScanned() error {
+	if sc.platformIdsExclude != nil {
+		log.Info().Msg("all discovered assets already reported, nothing to scan")
+		return nil
+	}
+	if sc.claimedCount > 0 {
+		log.Info().Int("claimed", sc.claimedCount).
+			Msg("all discovered assets were claimed from earlier scans, nothing to scan")
+		return nil
+	}
+	return errors.New("could not find an asset that we can connect to")
+}
+
+// scanContext holds the shared state needed while recursively walking the
+// asset tree. It avoids threading many parameters through every call.
+type scanContext struct {
+	explorer      *discovery.AssetExplorer
+	reporter      Reporter
+	multiprogress progress.MultiProgress
+
+	// connSem limits the number of simultaneously connected assets.
+	connSem chan struct{}
+
+	platformIdsExclude map[string]struct{}
+
+	// Pipeline stages.
+	batcher    *syncBatcher
+	dispatcher *scanDispatcher
+
+	// claimLane is the per-run state of the pre-Connect claim lane.
+	// services and spaceMrn are what it calls ClaimAssets with;
+	// the lane is only ever active when services is non-nil.
+	claimLane *claimLaneState
+	services  *policy.Services
+	spaceMrn  string
+
+	// registeredRoots is the set of roots registerRootTasks has already run
+	// the claim lane over and reported as discovered, so scanSubtree's own
+	// pre-pass and Discovered call on the same root are skipped. Only roots
+	// are ever visited twice, so only roots are inserted;
+	// branch nodes are not retained for the whole run. It is read and written
+	// without a lock: distributeJob iterates roots sequentially and
+	// scanSubtree recurses sequentially, so access is strictly sequential.
+	registeredRoots map[*discovery.TrackedAsset]struct{}
+
+	// claimedCount is how many children the claim lane skipped this run. A
+	// run that scanned nothing but claimed something is a success. Sequential
+	// access, like registeredRoots.
+	claimedCount int
+}
+
+// registerRootTasks registers a root and its already-discovered children in the
+// progress bar so the TODO list knows how much work is pending and doesn't
+// close prematurely.
+//
+// The root's children are reported as discovered first, then the claim lane
+// runs over them, so a claimed child is counted as filtered only after it was
+// counted as discovered, and is never registered as a pending task: it would
+// sit in the TODO list until Close. scanSubtree calls the pre-pass again for
+// the same root; the visited set makes that second call free and keeps the
+// children from being reported as discovered twice.
+func (sc *scanContext) registerRootTasks(ctx context.Context, root *discovery.TrackedAsset) {
+	if len(root.Children) > 0 {
+		sc.multiprogress.Discovered(len(root.Children))
+	}
+	sc.claimSubtreeChildren(ctx, root)
+	if sc.registeredRoots == nil {
+		sc.registeredRoots = map[*discovery.TrackedAsset]struct{}{}
+	}
+	sc.registeredRoots[root] = struct{}{}
+
+	if len(root.Asset.PlatformIds) > 0 {
+		sc.multiprogress.AddTask(root.Asset.PlatformIds[0], root.Asset)
+	}
+	for _, child := range root.Children {
+		if child.Asset == nil {
+			continue // claimed by the claim lane, already resolved as filtered
+		}
+		if len(child.Asset.PlatformIds) > 0 {
+			sc.multiprogress.AddTask(child.Asset.PlatformIds[0], child.Asset)
+		}
+	}
+}
+
+// skipUnconnectedAsset resolves a child that was never connected, because the
+// claim lane found its claim records and materialized it server-side. It marks
+// the progress task filtered, counts the claim and drops the asset, and does
+// nothing else:
+//
+//   - It must not call explorer.CloseAsset. CloseAsset rejects any asset whose
+//     state is not Connected, and this one never was, so the call would only
+//     log an error.
+//   - It must not release connSem. The slot is acquired just before Connect,
+//     and a claimed child is skipped before that point, so there is no slot to
+//     give back; receiving here would steal one from a connected asset.
+//
+// skipAsset is the counterpart for assets that were connected.
+func (sc *scanContext) skipUnconnectedAsset(child *discovery.TrackedAsset) {
+	sc.multiprogress.Filtered(1)
+	sc.claimedCount++
+	child.Asset = nil
+}
+
+// claimSubtreeChildren is the lane's pre-pass, run once per subtree before its
+// children are connected. It asks the server which claim-bearing children it
+// can materialize and skips those (their Asset becomes nil, which the children
+// loop passes over). On any error it disables the lane for the rest of the run
+// and skips nothing: every child is scanned as usual, except when the error is
+// the run's own cancellation, where the lane is left as it is (the run is
+// ending, and a warning on Ctrl-C would be noise).
+//
+// It is idempotent for roots: registerRootTasks runs it for each root before
+// registering the root's children as progress tasks and records the root, so
+// scanSubtree's call on the same root returns at once, without an RPC.
+func (sc *scanContext) claimSubtreeChildren(ctx context.Context, node *discovery.TrackedAsset) {
+	if !sc.claimLane.active() {
+		return
+	}
+	if _, done := sc.registeredRoots[node]; done {
+		return
+	}
+
+	claimed, err := claimAssetsBatch(ctx, sc.services, sc.spaceMrn, node.Children)
+	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		sc.claimLane.disable("ClaimAssets failed", err)
+		return
+	}
+	for _, child := range node.Children {
+		if _, ok := claimed[child]; ok {
+			sc.skipUnconnectedAsset(child)
+		}
+	}
+}
+
+func (sc *scanContext) skipAsset(asset *discovery.TrackedAsset) {
+	sc.multiprogress.Filtered(1)
+	assetName := ""
+	if asset.Asset != nil {
+		assetName = asset.Asset.Name
+	}
+	if err := sc.explorer.CloseAsset(asset); err != nil {
+		log.Error().Err(err).Str("asset", assetName).Msg("failed to close asset")
+	}
+	asset.Asset = nil
+	<-sc.connSem
+}
+
+func platformIdsExcludeSet(inv *inventory.Inventory) map[string]struct{} {
+	if v := inventoryAnnotation(inv, "platformids-exclude"); v != "" {
+		parts := strings.Split(v, ",")
+		set := make(map[string]struct{}, len(parts))
+		for _, p := range parts {
+			set[strings.TrimSpace(p)] = struct{}{}
+		}
+		return set
+	}
+	return nil
+}
+
+func inventoryAnnotation(inv *inventory.Inventory, key string) string {
+	if inv == nil || inv.Metadata == nil {
+		return ""
+	}
+	return inv.Metadata.Annotations[key]
+}
+
+// isReportableChildConnectError tells whether a failed child connection is a
+// scan error. A duplicate asset and a child its provider declined are not.
+func isReportableChildConnectError(err error) bool {
+	return !errors.Is(err, discovery.ErrDuplicateAsset) && !errors.Is(err, discovery.ErrNoMatch)
+}
+
+// scanSubtree processes a single connected node's subtree depth-first.
+// It connects each child, feeds leaves to the syncBatcher (which batches
+// upstream sync calls), and the batcher forwards synced assets to the
+// scanDispatcher (which manages the worker pool). Branch nodes flush the
+// batcher and drain the dispatcher before recursing.
+//
+// After all children are connected and dispatched, the node itself is
+// dispatched for scanning without waiting for child scans to finish first.
+// This lets the node scan run concurrently with any still-running children.
+func (sc *scanContext) scanSubtree(ctx context.Context, node *discovery.TrackedAsset) error {
+	// A registered root's children were reported by registerRootTasks.
+	if _, registered := sc.registeredRoots[node]; !registered && len(node.Children) > 0 {
+		sc.multiprogress.Discovered(len(node.Children))
+	}
+
+	// Claim lane pre-pass: once per subtree, before any child is
+	// connected.
+	sc.claimSubtreeChildren(ctx, node)
+
+	for _, child := range node.Children {
+		select {
+		case <-ctx.Done():
+			sc.multiprogress.Close()
+			return ctx.Err()
+		default:
+		}
+
+		// Claimed by the claim lane: already materialized server-side, never
+		// connected, nothing left to do.
+		if child.Asset == nil {
+			continue
+		}
+
+		// Acquire a connection slot before connecting. This limits the
+		// total number of assets with open runtimes/gRPC connections.
+		select {
+		case sc.connSem <- struct{}{}:
+		case <-ctx.Done():
+			sc.multiprogress.Close()
+			return ctx.Err()
+		}
+
+		connected, err := sc.explorer.Connect(child)
+		if err != nil {
+			<-sc.connSem
+			if isReportableChildConnectError(err) {
+				sc.reporter.AddScanError(child.Asset, err)
+			}
+			continue
+		}
+
+		if len(connected.Children) > 0 {
+			// Branch node — release connection slot (children acquire their own),
+			// flush pending syncs, drain running scans, then recurse.
+			// We drain before recursing to avoid keeping data from multiple
+			// subtrees (e.g. namespaces) in memory simultaneously.
+			<-sc.connSem
+			if err := sc.batcher.Flush(ctx); err != nil {
+				return err
+			}
+			sc.dispatcher.Wait()
+			if err := sc.scanSubtree(ctx, connected); err != nil {
+				return err
+			}
+			continue
+		}
+
+		// Leaf node — skip if it has no platform IDs (not scannable).
+		if len(connected.Asset.PlatformIds) == 0 {
+			log.Debug().Str("name", connected.Asset.Name).Msg("asset has no platform IDs, skipping")
+			sc.skipAsset(connected)
+			continue
+		}
+
+		if sc.platformIdsExclude != nil {
+			var excludedID string
+			for _, pid := range connected.Asset.PlatformIds {
+				if _, ok := sc.platformIdsExclude[pid]; ok {
+					excludedID = pid
+					break
+				}
+			}
+			if excludedID != "" {
+				log.Info().Str("name", connected.Asset.Name).Str("platformId", excludedID).Msg("asset already reported, skipping")
+				sc.skipAsset(connected)
+				continue
+			}
+		}
+
+		// Feed leaf to the batcher — it will sync and dispatch automatically.
+		if err := sc.batcher.Add(ctx, connected); err != nil {
+			return err
+		}
+	}
+
+	// Flush remaining children so they're all dispatched for scanning.
+	if err := sc.batcher.Flush(ctx); err != nil {
+		return err
+	}
+
+	// Dispatch the node itself for scanning. All children are already
+	// connected and dispatched, so closing the node's runtime after its
+	// scan won't interfere with child connections. The node scan runs
+	// concurrently with any still-running child scans — no need to wait
+	// for children to finish first.
+	if len(node.Asset.PlatformIds) > 0 {
+		select {
+		case sc.connSem <- struct{}{}:
+		case <-ctx.Done():
+			sc.multiprogress.Close()
+			return ctx.Err()
+		}
+		if err := sc.batcher.Add(ctx, node); err != nil {
+			return err
+		}
+		if err := sc.batcher.Flush(ctx); err != nil {
+			return err
+		}
+	} else {
+		sc.multiprogress.Filtered(1)
+		nodeName := ""
+		if node.Asset != nil {
+			nodeName = node.Asset.Name
+		}
+		if err := sc.explorer.CloseAsset(node); err != nil {
+			log.Error().Err(err).Str("asset", nodeName).Msg("failed to close asset")
+		}
+		node.Asset = nil
+	}
+
+	// Wait for all scans (children + node) to complete before returning.
+	sc.dispatcher.Wait()
+
+	// Release the subtree's children references. All children have been
+	// scanned and closed, so these pointers only prevent GC. Clearing
+	// them before processing the next subtree (namespace) keeps peak
+	// memory proportional to one subtree, not the entire tree.
+	node.Children = nil
+
+	return nil
+}
+
+// syncAssetsLegacy is SynchronizeAssets without MONDOO_UPSTREAM_RETRY: three
+// attempts on any error, 2s and then 4s apart.
+func syncAssetsLegacy(ctx context.Context, services *policy.Services, req *policy.SynchronizeAssetsReq) (*policy.SynchronizeAssetsResp, error) {
+	const maxSyncRetries = 3
+	var resp *policy.SynchronizeAssetsResp
+	var err error
+	for attempt := 1; attempt <= maxSyncRetries; attempt++ {
+		resp, err = services.SynchronizeAssets(ctx, req)
+		if err == nil {
+			break
+		}
+		if attempt < maxSyncRetries {
+			backoff := time.Duration(attempt) * 2 * time.Second
+			log.Warn().Err(err).Int("attempt", attempt).Dur("backoff", backoff).
+				Msg("SynchronizeAssets failed, retrying")
+			t := time.NewTimer(backoff)
+			select {
+			case <-ctx.Done():
+				t.Stop()
+				return nil, ctx.Err()
+			case <-t.C:
+			}
+		}
+	}
+	if err != nil {
+		log.Error().Err(err).Int("attempts", maxSyncRetries).Msg("SynchronizeAssets failed after all retries")
+		return nil, err
+	}
+	return resp, nil
+}
+
+// syncBatchWithUpstream synchronizes a batch of connected assets with the
+// upstream Mondoo Platform, or assigns local MRNs when running in incognito mode.
+func syncBatchWithUpstream(
+	ctx context.Context,
+	batch []*discovery.TrackedAsset,
+	services *policy.Services,
+	spaceMrn string,
+	rec llx.Recording,
+	trigger policy.AssetActivityTrigger,
+) error {
+	if services != nil {
+		log.Info().Int("batch-size", len(batch)).Msg("synchronizing assets with upstream")
+		assetsToSync := make([]*inventory.Asset, 0, len(batch))
+		for _, tracked := range batch {
+			assetsToSync = append(assetsToSync, tracked.Asset)
+		}
+
+		req := &policy.SynchronizeAssetsReq{SpaceMrn: spaceMrn, List: assetsToSync}
+		var resp *policy.SynchronizeAssetsResp
+		var err error
+		if retry := upstreamRetryFrom(ctx); retry != nil {
+			err = retry.do(ctx, "SynchronizeAssets", func() error {
+				var err error
+				resp, err = services.SynchronizeAssets(ctx, req)
+				return err
+			})
+			if err != nil {
+				log.Error().Err(err).Msg("SynchronizeAssets failed")
+			}
+		} else {
+			resp, err = syncAssetsLegacy(ctx, services, req)
+		}
+		if err != nil {
+			return err
+		}
+		log.Debug().Int("assets", len(resp.Details)).Msg("got assets details")
+		platformAssetMapping := make(map[string]*policy.SynchronizeAssetsRespAssetDetail)
+		assetMrns := make([]string, 0, len(resp.Details))
+		for i := range resp.Details {
+			log.Debug().Str("platform-mrn", resp.Details[i].PlatformMrn).Str("asset", resp.Details[i].AssetMrn).Msg("asset mapping")
+			platformAssetMapping[resp.Details[i].PlatformMrn] = resp.Details[i]
+			if resp.Details[i].AssetMrn != "" {
+				assetMrns = append(assetMrns, resp.Details[i].AssetMrn)
+			}
+		}
+		// Concurrent with the scan it announces, and never in its way.
+		go reportAssetActivityStarted(ctx, services, spaceMrn, assetMrns, trigger)
+
+		for _, tracked := range batch {
+			asset := tracked.Asset
+			log.Debug().Str("asset", asset.Name).Strs("platform-ids", asset.PlatformIds).Msg("update asset")
+
+			for _, platformMrn := range asset.PlatformIds {
+				if details, ok := platformAssetMapping[platformMrn]; ok {
+					asset.Mrn = details.AssetMrn
+					asset.Url = details.Url
+					if asset.Labels == nil {
+						asset.Labels = make(map[string]string)
+					}
+					asset.Labels["mondoo.com/project-id"] = details.ProjectId
+
+					if asset.Annotations == nil {
+						asset.Annotations = make(map[string]string)
+					}
+					for k, v := range details.Annotations {
+						if _, ok := asset.Annotations[k]; !ok {
+							asset.Annotations[k] = v
+						}
+					}
+
+					err = tracked.Runtime.SetRecording(rec)
+					if err != nil {
+						log.Error().Err(err).Msg("could not set recording")
+						break
+					}
+					tracked.Runtime.AssetUpdated(asset)
+					break
+				}
+			}
+		}
+	} else {
+		// Incognito mode: ensure we have non-empty asset MRNs
+		for _, tracked := range batch {
+			asset := tracked.Asset
+			if asset.Mrn == "" {
+				randID := "//" + policy.POLICY_SERVICE_NAME + "/" + policy.MRN_RESOURCE_ASSET + "/" + ksuid.New().String()
+				x, err := mrn.NewMRN(randID)
+				if err != nil {
+					return multierr.Wrap(err, "failed to generate a random asset MRN")
+				}
+				asset.Mrn = x.String()
+				tracked.Runtime.AssetUpdated(asset)
+			}
+		}
+	}
+	return nil
+}
+
+func (s *LocalScanner) upstreamServices(ctx context.Context, conf *upstream.UpstreamConfig) *policy.Services {
+	if conf == nil ||
+		conf.ApiEndpoint == "" ||
+		conf.Incognito {
+		return nil
+	}
+
+	client, err := s.upstreamClient(ctx, conf)
+	if err != nil {
+		log.Error().Err(err).Msg("could not init upstream client")
+		return nil
+	}
+
+	res, err := policy.NewRemoteServices(client.ApiEndpoint, client.Plugins, client.HttpClient)
+	if err != nil {
+		log.Error().Err(err).Msg("could not connect to upstream")
+	}
+
+	return res
+}
+
+func (s *LocalScanner) RunAssetJob(job *AssetJob) {
+	log.Debug().Msgf("connecting to asset %s", job.Asset.HumanName())
+
+	results, err := s.runMotorizedAsset(job)
+	if err != nil {
+		log.Debug().Str("asset", job.Asset.Name).Msg("could not complete scan for asset")
+		job.Reporter.AddScanError(job.Asset, err)
+		job.ProgressReporter.Score(policy.ScoreRatingTextError)
+		job.ProgressReporter.Errored()
+		return
+	}
+
+	job.Reporter.AddReport(job.Asset, results)
+
+	// Mark the asset as completed in the progress bar after all post-scan
+	// work finishes. Deferred so early returns (e.g. vuln report fetch
+	// failure) still mark the asset as done — the scan itself succeeded.
+	defer func() {
+		if results != nil && results.Report != nil && results.Report.Score.Rating().Text() == policy.ScoreRatingTextUnrated {
+			job.ProgressReporter.NotApplicable()
+		} else {
+			job.ProgressReporter.Completed()
+		}
+		if s.disableProgressBar {
+			log.Info().Msgf("scan for asset %s completed", job.Asset.HumanName())
+		}
+	}()
+
+	upstream := s.upstreamServices(job.Ctx, job.UpstreamConfig)
+	// The vuln report is relevant only when we have an aggregate reporter
+	if vulnReporter, isAggregateReporter := job.Reporter.(VulnReporter); upstream != nil && isAggregateReporter {
+		// get new gql client
+		mondooClient, err := gql.NewClient(job.UpstreamConfig, s._upstreamClient.HttpClient)
+		if err != nil {
+			return
+		}
+
+		gqlVulnReport, err := mondooClient.GetVulnCompactReport(job.Asset.Mrn)
+		if err != nil {
+			log.Error().Err(err).Msg("could not get vulnerability report")
+			return
+		}
+		vulnReporter.AddVulnReport(job.Asset, gqlVulnReport)
+	}
+}
+
+func (s *LocalScanner) upstreamClient(ctx context.Context, conf *upstream.UpstreamConfig) (*upstream.UpstreamClient, error) {
+	s.upstreamOnce.Do(func() {
+		s._upstreamClient, s.upstreamErr = conf.InitClient(ctx)
+	})
+	return s._upstreamClient, s.upstreamErr
+}
+
+func (s *LocalScanner) runMotorizedAsset(job *AssetJob) (*AssetReport, error) {
+	if job.Asset.Mrn == "" {
+		return nil, errors.New("asset MRN is required to run the scan")
+	}
+
+	var res *AssetReport
+	var policyErr error
+	var client *upstream.UpstreamClient
+	if job.UpstreamConfig.ApiEndpoint != "" && !job.UpstreamConfig.Incognito {
+		var err error
+		log.Debug().Msg("using API endpoint " + job.UpstreamConfig.ApiEndpoint)
+		client, err = s.upstreamClient(job.Ctx, job.UpstreamConfig)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	runtimeErr := WithServices(job.Ctx, s.runtime, job.Asset, client, func(ctx context.Context, services *policy.LocalServices) error {
+		// Adopt the ctx returned from WithServices so any values the datalake
+		// stack injected (e.g. sqlite.WithOutputDir for --output-scan-db)
+		// flow into runPolicy via job.Ctx.
+		job.Ctx = ctx
+		// Reserve a per-asset debug dump directory; downstream dump calls
+		// (assetBundle, resolvedPolicy, graph dot files, etc.) write here.
+		// No-op when no scandump.Run is attached.
+		var assetDir string
+		var assetErr error
+		job.Ctx, assetDir, assetErr = scandump.WithAsset(job.Ctx, job.Asset.Name)
+		if assetErr != nil {
+			log.Warn().Err(assetErr).Str("asset", job.Asset.Name).
+				Msg("failed to reserve asset debug-dump directory; continuing without dumps for this asset")
+		} else if assetDir != "" {
+			log.Debug().Str("asset", job.Asset.Name).Str("dir", assetDir).
+				Msg("debug dumps for this asset will be written here")
+		}
+		// The datalake builds services without knowing about the CLI, so the
+		// operator's default is applied here, where both are in scope.
+		services.Strict = s.strict
+
+		scanner := &localAssetScanner{
+			services:         services,
+			job:              job,
+			fetcher:          s.fetcher,
+			Runtime:          job.runtime,
+			ProgressReporter: job.ProgressReporter,
+			exceptions:       s.exceptions,
+		}
+		log.Debug().Str("asset", job.Asset.Name).Msg("run scan")
+		res, policyErr = scanner.run()
+		if policyErr != nil {
+			reportAssetScanFailed(ctx, services, job.Asset.Mrn, policyErr)
+		}
+		return policyErr
+	})
+	if runtimeErr != nil {
+		return res, runtimeErr
+	}
+
+	return res, policyErr
+}
+
+// reportAssetScanFailed tells upstream that scanning a synced asset failed,
+// with the failure's classification (mql ADR-46). Best effort: the scan has
+// already failed and is reported locally either way, and a server that predates
+// the RPC answers NotFound.
+func reportAssetScanFailed(ctx context.Context, services policy.PolicyResolver, assetMrn string, scanErr error) {
+	_, err := services.ReportAssetScanFailed(ctx, &policy.ReportAssetScanFailedReq{
+		AssetMrn:    assetMrn,
+		Error:       scanErr.Error(),
+		ErrorDetail: llx.ErrorDetailOf(scanErr),
+	})
+	if err != nil {
+		log.Debug().Err(err).Str("asset", assetMrn).Msg("could not report the failed scan upstream")
+	}
+}
+
+// reportAssetActivityStartedTimeout bounds the start report. It runs beside the
+// scan, so a slow server must not keep it alive past any useful point.
+const reportAssetActivityStartedTimeout = 30 * time.Second
+
+// reportAssetActivityStarted tells upstream that scanning these synced assets
+// has begun, so the platform can show them as being scanned until their
+// results arrive. Best effort: the scan runs regardless, and a server that
+// predates the RPC answers NotFound.
+func reportAssetActivityStarted(ctx context.Context, services policy.PolicyResolver, spaceMrn string, assetMrns []string, trigger policy.AssetActivityTrigger) {
+	if len(assetMrns) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, reportAssetActivityStartedTimeout)
+	defer cancel()
+	_, err := services.ReportAssetActivityStarted(ctx, &policy.ReportAssetActivityStartedReq{
+		SpaceMrn:  spaceMrn,
+		AssetMrns: assetMrns,
+		Kind:      policy.AssetActivityKind_ASSET_ACTIVITY_KIND_AGENT,
+		Trigger:   trigger,
+	})
+	if err != nil {
+		log.Debug().Err(err).Int("assets", len(assetMrns)).Msg("could not report scan start upstream")
+	}
+}
+
+func (s *LocalScanner) RunAdmissionReview(ctx context.Context, job *AdmissionReviewJob) (*ScanResult, error) {
+	opts := job.Options
+	if opts == nil {
+		opts = make(map[string]string)
+	}
+	data, err := job.Data.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+	opts["k8s-admission-review"] = base64.StdEncoding.EncodeToString(data)
+
+	// construct the inventory to scan the admission review
+	inv := &inventory.Inventory{
+		Spec: &inventory.InventorySpec{
+			Assets: []*inventory.Asset{{
+				Connections: []*inventory.Config{{
+					Type:     "k8s",
+					Options:  opts,
+					Discover: job.Discovery,
+				}},
+				Labels:   job.Labels,
+				Category: inventory.AssetCategory_CATEGORY_CICD,
+			}},
+		},
+	}
+
+	runtimeEnv := execruntime.Detect()
+	if runtimeEnv != nil {
+		runtimeLabels := runtimeEnv.Labels()
+		inv.ApplyLabels(runtimeLabels)
+	}
+
+	return s.Run(ctx, &Job{Inventory: inv, ReportType: job.ReportType})
+}
+
+func (s *LocalScanner) GarbageCollectAssets(ctx context.Context, garbageCollectOpts *GarbageCollectOptions) (*Empty, error) {
+	if garbageCollectOpts == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "missing garbage collection options")
+	}
+	if s.upstream == nil {
+		return nil, status.Errorf(codes.Internal, "missing upstream config in service")
+	}
+
+	client, err := s.upstreamClient(ctx, s.upstream)
+	if err != nil {
+		return nil, err
+	}
+
+	pClient, err := policy.NewRemoteServices(s.upstream.ApiEndpoint, client.Plugins, client.HttpClient)
+	if err != nil {
+		return nil, errors.Wrap(err, "could not initialize asset synchronization")
+	}
+
+	dar := &policy.PurgeAssetsRequest{
+		SpaceMrn:        s.upstream.SpaceMrn, //nolint:staticcheck // SA1019: SpaceMrn is deprecated but still used for backward compatibility
+		ScopeMrn:        s.upstream.SpaceMrn,
+		ManagedBy:       garbageCollectOpts.ManagedBy,
+		PlatformRuntime: garbageCollectOpts.PlatformRuntime,
+		Labels:          garbageCollectOpts.Labels,
+	}
+
+	if garbageCollectOpts.OlderThan != "" {
+		timestamp, err := time.Parse(time.RFC3339, garbageCollectOpts.OlderThan)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed converting timestamp from RFC3339 format")
+		}
+
+		dar.DateFilter = &policy.DateFilter{
+			Timestamp: timestamp.Format(time.RFC3339),
+			// LESS_THAN b/c we want assets with a lastUpdated timestamp older
+			// (ie timewise considered less) than the timestamp provided
+			Comparison: policy.Comparison_LESS_THAN,
+			Field:      policy.DateFilterField_FILTER_LAST_UPDATED,
+		}
+	}
+
+	_, err = pClient.PurgeAssets(ctx, dar)
+	if err != nil {
+		log.Error().Err(err).Msg("error while trying to garbage collect assets")
+	}
+	return &Empty{}, err
+}
+
+func (s *LocalScanner) HealthCheck(ctx context.Context, req *HealthCheckRequest) (*HealthCheckResponse, error) {
+	// check the server overall health status.
+	return &HealthCheckResponse{
+		Status:     HealthCheckResponse_SERVING,
+		Time:       time.Now().Format(time.RFC3339),
+		ApiVersion: "v1",
+		Build:      cnspec.GetBuild(),
+		Version:    cnspec.GetVersion(),
+	}, nil
+}
+
+func (s *LocalScanner) getUpstreamConfig(incognito bool, job *Job) (*upstream.UpstreamConfig, error) {
+	var res *upstream.UpstreamConfig
+	if s.upstream != nil {
+		res = proto.Clone(s.upstream).(*upstream.UpstreamConfig)
+	} else {
+		res = &upstream.UpstreamConfig{}
+	}
+	res.Incognito = incognito
+
+	jobCredentials := job.GetInventory().GetSpec().GetUpstreamCredentials()
+	if s.allowJobCredentials && jobCredentials != nil {
+		res.Creds = jobCredentials
+		res.ApiEndpoint = jobCredentials.GetApiEndpoint()
+		res.SpaceMrn = jobCredentials.GetScopeMrn()
+		if res.SpaceMrn == "" {
+			// service accounts issued before scope_mrn existed only carry parent_mrn
+			res.SpaceMrn = jobCredentials.GetParentMrn()
+		}
+	}
+
+	if !res.Incognito {
+		if res.ApiEndpoint == "" {
+			return nil, errors.New("missing API endpoint")
+		}
+		if res.SpaceMrn == "" {
+			return nil, errors.New("missing space mrn")
+		}
+	}
+
+	return res, nil
+}
+
+type localAssetScanner struct {
+	services *policy.LocalServices
+	job      *AssetJob
+	fetcher  *fetcher
+
+	Runtime          llx.Runtime
+	ProgressReporter progress.Progress
+
+	// exceptions is the scanner's exception handling; nil when exceptions
+	// come only from the asset's own context config.
+	exceptions *exceptionsConfig
+	// compiledQueries are the queries of the asset's compiled bundle, set
+	// when the bundle is compiled locally; they translate excepted check UIDs.
+	compiledQueries []*policy.Mquery
+}
+
+// run() runs a bundle on a single asset. It returns the results of the scan and an error if the scan failed. Even in
+// case of an error, the results may contain partial results. The error is only returned if the scan failed to run not
+// when individual policies failed.
+func (s *localAssetScanner) run() (*AssetReport, error) {
+	// Resource recording must be armed BEFORE any query executes — the
+	// recording captures resource data as the policy run touches it. Armed
+	// here rather than at CLI setup because UploadResourcesData usually
+	// arrives server-driven (ScanParameters → withServerFeatures) on the
+	// job ctx, which does not exist when the CLI parses its local config —
+	// and the sync batcher stamps runtimes with the scanner-level recording
+	// (Null by default) before this point. This is the one site that sees
+	// both the final feature set and the final runtime.
+	feats := mql.GetFeatures(s.job.Ctx)
+	if feats.IsActive(mql.UploadResourcesData) && feats.IsActive(mql.UploadResultsV2) && s.job.runtime != nil {
+		// EnsureResourcesRecording mounts an in-memory recording (Null-only
+		// swap — a --record recording is never clobbered) AND registers the
+		// job asset with it, which is what makes enabling after connect
+		// work: the recording machinery's invariants live behind that one
+		// call. The job asset is passed because it carries the
+		// platform-assigned MRN the store step reads back by. job.runtime
+		// is the same runtime as s.Runtime, just concretely typed.
+		if err := s.job.runtime.EnsureResourcesRecording(s.job.Asset); err != nil {
+			log.Warn().Err(err).Str("asset", s.job.Asset.Mrn).Msg("could not enable resources recording")
+		}
+	}
+
+	if err := s.prepareAsset(); err != nil {
+		return nil, err
+	}
+
+	// Exceptions are decided before the policy is resolved: they change which
+	// checks run and how they score, and both are settled by resolution.
+	exceptionDecisions := s.applyExceptions()
+
+	resolvedPolicy, err := s.runPolicy()
+	if err != nil {
+		return nil, err
+	}
+
+	// UploadResourcesData delivers resource recordings inside the uploaded
+	// scan database only: under UploadResultsV2, s.services is the local
+	// sqlite-backed service (WithServices below), so this StoreResults
+	// writes into the scandb that gets uploaded — never an upstream RPC.
+	// Without v2 there is no delivery path, so nothing is stored. The old
+	// StoreResourcesData two-key gate (client feature + a
+	// ServerFeature_STORE_RESOURCES_DATA stamp on the resolved policy) and
+	// its legacy upstream StoreResults send are retired with it.
+	if feats.IsActive(mql.UploadResourcesData) && feats.IsActive(mql.UploadResultsV2) {
+		log.Info().Str("mrn", s.job.Asset.Mrn).Msg("store resources for asset")
+		recording := s.Runtime.Recording()
+		data, ok := recording.GetAssetData(s.job.Asset.Mrn)
+		if !ok {
+			log.Debug().Msg("not storing resource data for this asset, nothing available")
+		} else {
+			_, err = s.services.StoreResults(context.Background(), &policy.StoreResultsReq{
+				AssetMrn:  s.job.Asset.Mrn,
+				Resources: data,
+			})
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	ar := &AssetReport{
+		Mrn:                s.job.Asset.Mrn,
+		ResolvedPolicy:     resolvedPolicy,
+		ExceptionDecisions: exceptionDecisions,
+	}
+
+	report, err := s.getReport(resolvedPolicy)
+	if err != nil {
+		return ar, err
+	}
+	s.ProgressReporter.Score(report.Score.Rating().Text())
+
+	log.Debug().Str("asset", s.job.Asset.Mrn).Msg("scan complete")
+	ar.Report = report
+	return ar, nil
+}
+
+func filterPolicyMrns(b *policy.Bundle, filters []string) []string {
+	if len(filters) == 0 {
+		res := make([]string, len(b.Policies))
+		for i := range b.Policies {
+			res[i] = b.Policies[i].Mrn
+		}
+		return res
+	}
+
+	var res []string
+	for i := range b.Policies {
+		cur := b.Policies[i]
+		uid, _ := mrn.GetResource(cur.Mrn, policy.MRN_RESOURCE_POLICY)
+		if slices.Contains(filters, uid) || slices.Contains(filters, cur.Mrn) {
+			res = append(res, cur.Mrn)
+		}
+	}
+	return res
+}
+
+func (s *localAssetScanner) prepareAsset() error {
+	// if we are using upstream we get the bundle from there, no need to check for a bundle here
+	if !s.job.UpstreamConfig.Incognito {
+		return nil
+	}
+
+	// if we have a bundle we don't need to check for policies
+	// e.g. we passed in a bundle directly via a file
+	if s.job.Bundle == nil {
+		// fetch bundles for public registry
+		if err := s.fetchPublicRegistryBundle(); err != nil {
+			return err
+		}
+
+		// add asset bundle to the reporter
+		if s.job.Reporter != nil && s.job.Bundle != nil {
+			s.job.Reporter.AddBundle(s.job.Bundle)
+		}
+	}
+
+	if s.job.Bundle == nil {
+		return errors.New("no bundle provided to run")
+	}
+
+	// Every asset gets its own copy of the bundle. The job's bundle is one
+	// pointer shared by all assets, and the work below writes to it: CompileExt
+	// fills in MRNs and checksums on the policies and queries it walks, its
+	// RemoveFailing option deletes the queries that would not compile ("we do
+	// this to the original bundle, because the intent is to clean it up with
+	// this option"), and SetBundleMap goes on to replace ComputedFilters on
+	// every policy it stores. Sharing the bundle across concurrently scanning
+	// assets crashes the process outright with a concurrent map write.
+	//
+	// Cloning also keeps assets independent when they run one after another:
+	// the compiler schema is process-global and grows as providers load lazily,
+	// so a pruned bundle would otherwise carry an early asset's idea of what
+	// compiles into every asset that follows it.
+	bundle := s.job.Bundle.CloneVT()
+
+	// Ensure any required providers declared in the bundle are installed
+	// before we try to compile it. This handles bundles with Require metadata.
+	if bundle.HasRequirements() {
+		if err := bundle.EnsureRequirements(true); err != nil {
+			log.Warn().Err(err).Msg("failed to ensure some policy requirements, continuing with available providers")
+		}
+	}
+
+	// Compile the bundle tolerating queries for unavailable providers.
+	// The upstream bundle may contain queries for all providers in the space,
+	// but we only need the ones relevant to this asset's platform.
+	conf := s.services.NewCompilerConfig()
+	bundleMap, err := bundle.CompileExt(s.job.Ctx, policy.BundleCompileConf{
+		CompilerConfig: conf,
+		Library:        s.services.DataLake,
+		RemoveFailing:  true,
+	})
+	if err != nil {
+		return err
+	}
+	if err := s.services.SetBundleMap(s.job.Ctx, bundleMap); err != nil {
+		return err
+	}
+	s.compiledQueries = bundle.Queries
+
+	policyMrns := filterPolicyMrns(bundle, s.job.PolicyFilters)
+
+	frameworkMrns := make([]string, len(bundle.Frameworks))
+	for i := range bundle.Frameworks {
+		frameworkMrns[i] = bundle.Frameworks[i].Mrn
+	}
+
+	var resolver policy.PolicyResolver = s.services
+	_, err = resolver.Assign(s.job.Ctx, &policy.PolicyAssignment{
+		AssetMrn:      s.job.Asset.Mrn,
+		PolicyMrns:    policyMrns,
+		FrameworkMrns: frameworkMrns,
+		Action:        policy.Action_ACTIVATE,
+	})
+	if err != nil {
+		return err
+	}
+
+	if len(s.job.Props) != 0 {
+		propsReq, err := s.mapPropOverrides(bundle)
+		if err != nil {
+			return fmt.Errorf("failed to map property overrides: %w", err)
+		}
+
+		_, err = resolver.SetProps(s.job.Ctx, propsReq)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// mapPropOverrides reads the property MRNs off the compiled bundle, so it takes
+// the asset's own copy rather than the job's shared one: the MRNs it needs are
+// written during compilation, which no longer touches the shared bundle.
+func (s *localAssetScanner) mapPropOverrides(bundle *policy.Bundle) (*policy.PropsReq, error) {
+	exposedProps := make(map[string][]string, len(s.job.Props))
+	for _, pol := range bundle.Policies {
+		for _, prop := range pol.Props {
+			propUid, err := policy.GetPropName(prop.Mrn)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get property name for %s: %w", prop.Mrn, err)
+			}
+			exposedProps[propUid] = append(exposedProps[propUid], prop.Mrn)
+		}
+	}
+
+	propsReq := policy.PropsReq{
+		EntityMrn: s.job.Asset.Mrn,
+		Props:     make([]*policy.Property, 0, len(s.job.Props)),
+	}
+	for k, v := range s.job.Props {
+		newProp := &policy.Property{
+			Uid: k,
+			Mql: v,
+		}
+		forProps := exposedProps[k]
+		if len(forProps) == 0 {
+			continue
+		}
+		for _, propMrn := range forProps {
+			newProp.For = append(newProp.For, &policy.ObjectRef{
+				Mrn: propMrn,
+			})
+		}
+		if err := newProp.RefreshMRN(s.job.Asset.Mrn); err != nil {
+			return nil, fmt.Errorf("failed to refresh MRN for property %s: %w", newProp.Mrn, err)
+		}
+		propsReq.Props = append(propsReq.Props, newProp)
+	}
+
+	return &propsReq, nil
+}
+
+var (
+	assetDetectBundle     *llx.CodeBundle
+	assetDetectBundleOnce sync.Once
+)
+
+func getAssetDetectBundle() *llx.CodeBundle {
+	assetDetectBundleOnce.Do(func() {
+		assetDetectBundle = mustCompile("asset { kind platform runtime version family }")
+	})
+	return assetDetectBundle
+}
+
+func (s *localAssetScanner) fetchPublicRegistryBundle() error {
+	features := mql.GetFeatures(s.job.Ctx)
+	_, res, err := executor.ExecuteQuery(s.Runtime, getAssetDetectBundle(), nil, features)
+	if err != nil {
+		return errors.Wrap(err, "failed to run asset detection query")
+	}
+
+	// FIXME: remove hardcoded lookup and use embedded datastructures instead
+	data := res["IA0bVPKFxIh8Z735sqDh7bo/FNIYUQ/B4wLijN+YhiBZePu1x2sZCMcHoETmWM9jocdWbwGykKvNom/7QSm8ew=="].Data.Value.(map[string]any)
+	kind := data["1oxYPIhW1eZ+14s234VsQ0Q7p9JSmUaT/RTWBtDRG1ZwKr8YjMcXz76x10J9iu13AcMmGZd43M1NNqPXZtTuKQ=="].(*llx.RawData).Value.(string)
+	platform := data["W+8HW/v60Fx0nqrVz+yTIQjImy4ki4AiqxcedooTPP3jkbCESy77ptEhq9PlrKjgLafHFn8w4vrimU4bwCi6aQ=="].(*llx.RawData).Value.(string)
+	runtime := data["a3RMPjrhk+jqkeXIISqDSi7EEP8QybcXCeefqNJYVUNcaDGcVDdONFvcTM2Wts8qTRXL3akVxpskitXWuI/gdA=="].(*llx.RawData).Value.(string)
+	version := data["5d4FZxbPkZu02MQaHp3C356NJ9TeVsJBw8Enu+TDyBGdWlZM/AE+J5UT/TQ72AmDViKZe97Hxz1Jt3MjcEH/9Q=="].(*llx.RawData).Value.(string)
+	fraw := data["l/aGjrixdNHvCxu5ib4NwkYb0Qrh3sKzcrGTkm7VxNWfWaaVbOxOEoGEMnjGJTo31jhYNeRm39/zpepZaSbUIw=="].(*llx.RawData).Value.([]any)
+	family := make([]string, len(fraw))
+	for i := range fraw {
+		family[i] = fraw[i].(string)
+	}
+
+	var hub policy.PolicyHub = s.services
+	urls, err := hub.DefaultPolicies(s.job.Ctx, &policy.DefaultPoliciesReq{
+		Kind:     kind,
+		Platform: platform,
+		Runtime:  runtime,
+		Version:  version,
+		Family:   family,
+	})
+	if err != nil {
+		return err
+	}
+
+	if len(urls.Urls) == 0 {
+		return errors.New("cannot find any default policies for this asset (" + platform + ")")
+	}
+
+	conf := s.services.NewCompilerConfig()
+	s.job.Bundle, err = s.fetcher.fetchBundles(s.job.Ctx, conf, urls.Urls...)
+	return err
+}
+
+// retryUpstream runs fn under the scan's upstream retry when the asset's
+// services call the Mondoo Platform. Without an upstream, fn runs once: a local
+// error is not a network failure to wait out.
+func (s *localAssetScanner) retryUpstream(what string, fn func() error) error {
+	if s.services.Upstream == nil {
+		return fn()
+	}
+	return upstreamRetryFrom(s.job.Ctx).do(s.job.Ctx, what, fn)
+}
+
+func (s *localAssetScanner) runPolicy() (*policy.ResolvedPolicy, error) {
+	var hub policy.PolicyHub = s.services
+	var resolver policy.PolicyResolver = s.services
+
+	// If a scandump.Run is attached to ctx, fetch + dump the asset bundle.
+	// The fetch is an RPC, so we gate it on scandump.Active to avoid the
+	// round-trip when dumps are off.
+	if scandump.Active(s.job.Ctx) {
+		log.Debug().Str("asset", s.job.Asset.Mrn).Msg("client> request policies bundle for asset")
+		assetBundle, err := hub.GetBundle(s.job.Ctx, &policy.Mrn{Mrn: s.job.Asset.Mrn})
+		if err != nil {
+			return nil, err
+		}
+		log.Debug().Msg("client> got policy bundle")
+		logger.TraceJSON(assetBundle)
+		scandump.YAML(s.job.Ctx, "assetBundle", assetBundle)
+	}
+
+	var rawFilters *policy.Mqueries
+	err := s.retryUpstream("GetPolicyFilters", func() error {
+		var err error
+		rawFilters, err = hub.GetPolicyFilters(s.job.Ctx, &policy.Mrn{Mrn: s.job.Asset.Mrn})
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	log.Debug().Str("asset", s.job.Asset.Mrn).Msg("client> got policy filters")
+	logger.TraceJSON(rawFilters)
+	scandump.YAML(s.job.Ctx, "policyFilters", rawFilters)
+
+	filters, err := s.UpdateFilters(&policy.Mqueries{Items: rawFilters.Items}, 5*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	log.Debug().Str("asset", s.job.Asset.Mrn).Msg("client> shell update filters")
+	logger.DebugJSON(filters)
+	scandump.YAML(s.job.Ctx, "assetFilters", filters)
+
+	// Surface the filters to the datalake so persistent stores (e.g. the
+	// SQLite scandb) can record them. Server-side datalakes can no-op.
+	if err := s.services.DataLake.SetAssetFilters(s.job.Ctx, s.job.Asset.Mrn, &policy.Mqueries{Items: filters}); err != nil {
+		log.Warn().Err(err).Msg("failed to capture asset filters")
+	}
+
+	var resolvedPolicy *policy.ResolvedPolicy
+	err = s.retryUpstream("ResolveAndUpdateJobs", func() error {
+		var err error
+		resolvedPolicy, err = resolver.ResolveAndUpdateJobs(s.job.Ctx, &policy.UpdateAssetJobsReq{
+			AssetMrn:     s.job.Asset.Mrn,
+			AssetFilters: filters,
+		})
+		return err
+	})
+	if err != nil {
+		return resolvedPolicy, err
+	}
+	log.Debug().Str("asset", s.job.Asset.Mrn).Msg("client> got resolved policy bundle for asset")
+	scandump.JSON(s.job.Ctx, "resolvedPolicy", resolvedPolicy)
+
+	features := mql.GetFeatures(s.job.Ctx)
+	err = executor.ExecuteResolvedPolicy(s.job.Ctx, s.Runtime, resolver, s.job.Asset.Mrn, resolvedPolicy, features, s.ProgressReporter)
+	if err != nil {
+		return nil, err
+	}
+
+	return resolvedPolicy, nil
+}
+
+func (s *localAssetScanner) getReport(resolvedPolicy *policy.ResolvedPolicy) (*policy.Report, error) {
+	var resolver policy.PolicyResolver = s.services
+
+	// TODO: we do not needs this anymore since we receive updates already
+	log.Debug().Str("asset", s.job.Asset.Mrn).Msg("client> send all results")
+	done, err := policy.WaitUntilDone(resolver, s.job.Asset.Mrn, s.job.Asset.Mrn, 1*time.Second)
+	// handle error
+	if err != nil {
+		return &policy.Report{
+			EntityMrn:  s.job.Asset.Mrn,
+			ScoringMrn: s.job.Asset.Mrn,
+		}, err
+	}
+	// If the asset score has not reached full completion, individual check
+	// scores may still be in flight (the buffered collector flushes on an
+	// interval). Generating the report now can silently drop those late
+	// scores from the output, so surface it rather than failing quietly.
+	if !done {
+		log.Warn().
+			Str("asset", s.job.Asset.Mrn).
+			Msg("client> report generated before all scores reported completion; some check scores may be missing from the report")
+	}
+
+	log.Debug().Str("asset", s.job.Asset.Mrn).Msg("generate report")
+	report, err := resolver.GetReport(s.job.Ctx, &policy.EntityScoreReq{
+		// NOTE: we assign policies to the asset before we execute the tests, therefore this resolves all policies assigned to the asset
+		EntityMrn: s.job.Asset.Mrn,
+		ScoreMrn:  s.job.Asset.Mrn,
+	})
+	if err != nil {
+		return &policy.Report{
+			EntityMrn:  s.job.Asset.Mrn,
+			ScoringMrn: s.job.Asset.Mrn,
+		}, err
+	}
+
+	return report, nil
+}
+
+// FilterQueries returns all queries whose result is truthy
+func (s *localAssetScanner) FilterQueries(queries []*policy.Mquery, timeout time.Duration) ([]*policy.Mquery, []error) {
+	return executor.ExecuteFilterQueries(s.job.Ctx, s.Runtime, queries, timeout)
+}
+
+// UpdateFilters takes a list of test filters and runs them against the backend
+// to return the matching ones
+func (s *localAssetScanner) UpdateFilters(filters *policy.Mqueries, timeout time.Duration) ([]*policy.Mquery, error) {
+	queries, errs := s.FilterQueries(filters.Items, timeout)
+
+	var err error
+	if len(errs) != 0 {
+		w := strings.Builder{}
+		for i := range errs {
+			w.WriteString(errs[i].Error() + "\n")
+		}
+		err = errors.New("received multiple errors: " + w.String())
+	}
+
+	return queries, err
+}
+
+func sendErrorToMondooPlatform(serviceAccount *upstream.ServiceAccountCredentials, event *health.SendErrorReq) {
+	// 3. send error to mondoo platform
+	proxy, err := config.GetAPIProxy()
+	if err != nil {
+		log.Error().Err(err).Msg("failed to parse proxy setting")
+		return
+	}
+	httpClient := ranger.NewHttpClient(ranger.WithProxy(proxy))
+
+	plugins := []ranger.ClientPlugin{}
+	certAuth, err := upstream.NewServiceAccountRangerPlugin(serviceAccount)
+	if err != nil {
+		return
+	}
+	plugins = append(plugins, certAuth)
+
+	cl, err := health.NewErrorReportingClient(serviceAccount.ApiEndpoint, httpClient, plugins...)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to create error reporting client")
+		return
+	}
+
+	_, err = cl.SendError(context.Background(), event)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to send error to Mondoo Platform")
+		return
+	}
+}
+
+func WithServices(ctx context.Context, runtime llx.Runtime, asset *inventory.Asset, upstreamClient *upstream.UpstreamClient, f func(context.Context, *policy.LocalServices) error) error {
+	var withServicesFunc func(context.Context, llx.Runtime, *inventory.Asset, *upstream.UpstreamClient, func(context.Context, *policy.LocalServices) error) error
+	if mql.IsFeatureActive(ctx, mql.UploadResultsV2) {
+		withServicesFunc = sqlite.WithServices
+	} else {
+		withServicesFunc = inmemory.WithServices
+	}
+	return withServicesFunc(ctx, runtime, asset, upstreamClient, f)
+}
+
+func mustCompile(code string) *llx.CodeBundle {
+	codeBundle, err := mqlc.Compile(code, nil,
+		mqlc.NewConfig(providers.Coordinator.Schema(), mql.DefaultFeatures))
+	if err != nil {
+		panic(err)
+	}
+	return codeBundle
+}
+
+func createProgressBar(disableProgressBar bool) (progress.MultiProgress, error) {
+	if isatty.IsTerminal(os.Stdout.Fd()) && !disableProgressBar && !strings.EqualFold(logger.GetLevel(), "debug") && !strings.EqualFold(logger.GetLevel(), "trace") {
+		return progress.NewTodoList(progress.WithScore())
+	}
+	return progress.NoopMultiProgress{}, nil
+}

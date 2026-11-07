@@ -1,0 +1,1881 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+policies:
+  - uid: mondoo-tailscale-security
+    name: Mondoo Tailscale Security
+    version: 1.3.5
+    license: BUSL-1.1
+    tags:
+      mondoo.com/category: security
+      mondoo.com/platform: tailscale,saas
+      mondoo.com/icon: tailscale
+    require:
+      - provider: tailscale
+    authors:
+      - name: Mondoo, Inc.
+        email: hello@mondoo.com
+    summary: Secure Tailscale tailnet ACLs and device settings
+    docs:
+      desc: |
+        The Mondoo Tailscale Security policy identifies critical misconfigurations in Tailscale tailnets that could weaken your zero-trust network posture. This policy helps organizations detect and remediate weaknesses before they can be exploited, reducing the likelihood of unauthorized device access, stale credentials granting persistent network entry, and exposure of services that should remain private to authorized members.
+
+        This policy provides security checks across key Tailscale areas:
+
+        - Device authorization and tagging
+        - Auth key and OAuth client lifecycle
+        - Tailscale client software updates
+        - User access controls and ACL configuration
+        - Key expiry and rotation
+
+        **A note on API authentication**
+
+        The audit and command-line examples in this policy authenticate to the Tailscale API with a personal API key passed through HTTP basic auth, written as `curl -u "$TAILSCALE_API_KEY:"`. This is the simplest way to run a check interactively. Personal API keys are capped at a maximum lifetime of 90 days and must be rotated by hand, so they are a poor fit for unattended automation. For scheduled jobs and pipelines, Tailscale recommends an OAuth client instead. An OAuth client exchanges its credentials for a short-lived access token that you pass as a Bearer token, written as `curl -H "Authorization: Bearer $TAILSCALE_ACCESS_TOKEN"`, and each client is scoped to only the API capabilities it needs. Substitute Bearer-token authentication for the basic-auth examples below when wiring these commands into automation.
+
+        Learn more about scanning Tailscale in the [cnspec Tailscale documentation](https://mondoo.com/docs/cnspec/saas/tailscale).
+
+        Have suggestions for new checks in this policy? Visit our [cnspec repository](https://github.com/mondoohq/cnspec).
+    groups:
+      - title: Tailscale Devices
+        checks:
+          - uid: mondoo-tailscale-security-devices-authorized
+          - uid: mondoo-tailscale-security-devices-key-expiry-enabled
+          - uid: mondoo-tailscale-security-devices-client-up-to-date
+          - uid: mondoo-tailscale-security-devices-no-tailnet-lock-errors
+          - uid: mondoo-tailscale-security-device-approval-required
+          - uid: mondoo-tailscale-security-devices-auto-updates-enabled
+          - uid: mondoo-tailscale-security-devices-key-duration-capped
+      - title: Tailscale Users
+        checks:
+          - uid: mondoo-tailscale-security-no-users-pending-approval
+          - uid: mondoo-tailscale-security-admin-owner-roles-limited
+          - uid: mondoo-tailscale-security-no-idle-users
+          - uid: mondoo-tailscale-security-user-approval-required
+      - title: Tailscale ACL Policy
+        checks:
+          - uid: mondoo-tailscale-security-acl-no-allow-all
+      - title: Tailscale Authentication Keys
+        checks:
+          - uid: mondoo-tailscale-security-authkeys-have-expiration
+          - uid: mondoo-tailscale-security-authkeys-not-reusable
+      - title: Tailscale Audit Logging
+        checks:
+          - uid: mondoo-tailscale-security-configuration-logstream-configured
+      - title: Tailscale Webhooks
+        checks:
+          - uid: mondoo-tailscale-security-webhooks-use-https
+    scoring_system: highest impact
+queries:
+  - uid: mondoo-tailscale-security-devices-authorized
+    title: Ensure all devices are authorized to join the tailnet
+    impact: 90
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-16
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-1
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-1
+    variants:
+      - uid: mondoo-tailscale-security-devices-authorized-device
+        tags:
+          mondoo.com/filter-title: Tailscale Device
+          mondoo.com/filter-icon: tailscale
+      - uid: mondoo-tailscale-security-devices-authorized-tailnet
+        tags:
+          mondoo.com/filter-title: Tailscale Tailnet
+          mondoo.com/filter-icon: tailscale
+      - uid: mondoo-tailscale-security-devices-authorized-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-tailscale-security-devices-authorized-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-tailscale-security-devices-authorized-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+          mondoo.com/filter-icon: terraform
+    docs:
+      desc: |
+        This check verifies that every machine on the tailnet has been explicitly authorized, so that no device carries traffic before an administrator has approved it.
+
+        Device authorization is the state Tailscale records for each machine after it signs in. On a tailnet with device approval turned on, a newly enrolled machine sits in a pending state and cannot exchange traffic with peers until an administrator marks it authorized. Administrators see and change that state on the **Machines** page of the Tailscale admin console, and infrastructure code sets it through the `tailscale_device_authorization` resource. This check requires the authorized state on every machine.
+
+        **Why this matters**
+
+        An unauthorized machine sitting on the tailnet is a machine nobody decided to trust. An attacker who phishes one set of employee credentials signs in the Tailscale client on their own laptop and, on a tailnet that never enforces the authorization decision, immediately holds a routable address alongside every production server, database, and workstation the ACL policy permits. The mesh has no perimeter to cross afterward, so enrollment is the whole attack.
+
+        Unauthorized machines also accumulate from ordinary churn. A contractor rebuilds a laptop, an engineer enrolls a personal phone to test something, a decommissioned build agent re-registers from a recycled image. Each one appears in the machine list, and each one that quietly ends up on the network without review extends the tailnet to hardware that no longer has an owner.
+
+        Leaving machines pending indefinitely has its own cost. Operators learn to ignore the list, and a genuinely hostile enrollment blends into a backlog of stale requests nobody works through.
+
+        On a tailnet that has never turned on device approval, Tailscale marks each machine authorized as it enrolls, so this check passes without anyone having reviewed anything. Read it alongside the companion check in this policy that requires device approval at the tailnet level, so that the decision is both recorded and deliberately made.
+      audit: |
+        ### Audit via Admin Console
+
+        1. Sign in to the Tailscale admin console at login.tailscale.com/admin.
+        2. Open the **Machines** tab.
+        3. Review the authorization status shown next to each device.
+
+        A passing result shows every device marked as authorized; a failing result shows one or more devices flagged as not authorized or awaiting approval.
+
+        ### Audit via API
+
+        Query the Tailscale API and inspect the result. The example uses a personal API key for interactive use; for automation, authenticate with an OAuth client Bearer token as described in the policy overview.
+
+        ```bash
+        curl -s -u "$TAILSCALE_API_KEY:" \
+          "https://api.tailscale.com/api/v2/tailnet/<tailnet>/devices"
+        ```
+
+        A passing response shows `"authorized": true` for every device in the list; a failing response includes at least one device with `"authorized": false`.
+      remediation:
+        - id: console
+          desc: |
+            **Using Tailscale Admin Console**
+
+            1. Go to the [Tailscale admin console](https://login.tailscale.com/admin/machines).
+            2. Review devices that are not authorized.
+            3. For each legitimate device, open the device menu and select **Approve**.
+            4. Remove any device you do not recognize: open the device menu and select **Remove**.
+
+            To require device authorization for all new devices:
+
+            1. Go to [Settings > Device management](https://login.tailscale.com/admin/settings/device-management).
+            2. Enable **Device approval**.
+        - id: cli
+          desc: |
+            To authorize a device via the Tailscale API:
+
+            ```bash
+            curl -s -u "$TAILSCALE_API_KEY:" \
+              -H "Content-Type: application/json" \
+              -X POST "https://api.tailscale.com/api/v2/device/<device-id>/authorized" \
+              --data '{ "authorized": true }'
+            ```
+
+            To remove a device that should not be on the tailnet:
+
+            ```bash
+            curl -s -u "$TAILSCALE_API_KEY:" \
+              -X DELETE "https://api.tailscale.com/api/v2/device/<device-id>"
+            ```
+        - id: terraform
+          desc: |
+            To authorize a device in Terraform, declare a `tailscale_device_authorization` resource with `authorized = true`. This covers devices managed through Terraform; devices added directly through the admin console or via auth keys remain governed by the tailnet-wide device approval setting:
+
+            ```hcl
+            resource "tailscale_device_authorization" "example" {
+              device_id  = data.tailscale_device.example.id
+              authorized = true
+            }
+            ```
+    refs:
+      - url: https://tailscale.com/docs/features/access-control/device-management/device-approval
+        title: Tailscale device authorization documentation
+  - uid: mondoo-tailscale-security-devices-authorized-device
+    filters: asset.platform == 'tailscale-device'
+    mql: |
+      tailscale.device.authorized == true
+  - uid: mondoo-tailscale-security-devices-authorized-tailnet
+    filters: asset.platform == 'tailscale'
+    mql: |
+      tailscale.devices.all(authorized == true)
+  - uid: mondoo-tailscale-security-devices-authorized-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "tailscale_device_authorization")
+    mql: |
+      terraform.resources("tailscale_device_authorization").all(arguments["authorized"] == true)
+  - uid: mondoo-tailscale-security-devices-authorized-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "tailscale_device_authorization")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "tailscale_device_authorization").all(change.after.authorized == true)
+  - uid: mondoo-tailscale-security-devices-authorized-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "tailscale_device_authorization")
+    mql: |
+      terraform.state.resources.where(type == "tailscale_device_authorization").all(values.authorized == true)
+  - uid: mondoo-tailscale-security-devices-key-expiry-enabled
+    title: Ensure device key expiry is not disabled
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-17
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-5-17
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-12
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-1-9
+      compliance/vda-isa-5: vda-isa-5-4-1-1
+    variants:
+      - uid: mondoo-tailscale-security-devices-key-expiry-enabled-device
+        tags:
+          mondoo.com/filter-title: Tailscale Device
+          mondoo.com/filter-icon: tailscale
+      - uid: mondoo-tailscale-security-devices-key-expiry-enabled-tailnet
+        tags:
+          mondoo.com/filter-title: Tailscale Tailnet
+          mondoo.com/filter-icon: tailscale
+      - uid: mondoo-tailscale-security-devices-key-expiry-enabled-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-tailscale-security-devices-key-expiry-enabled-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-tailscale-security-devices-key-expiry-enabled-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+          mondoo.com/filter-icon: terraform
+    docs:
+      desc: |
+        This check verifies that node key expiry remains in force on every machine, so that each one must re-authenticate on a schedule rather than holding tailnet access permanently.
+
+        Every Tailscale machine holds a node key that proves its membership, and by default that key expires after the tailnet's configured key duration, at which point the machine must sign in again through the identity provider. An administrator can waive that for an individual machine using **Disable key expiry** on the **Machines** page of the admin console, expressed as `key_expiry_disabled` in the `tailscale_device_key` resource. This check requires that no machine has expiry disabled.
+
+        **Why this matters**
+
+        Disabling key expiry converts a renewable credential into a permanent one. A laptop stolen from a car, a phone left in a taxi, or a server image handed to a departing contractor keeps a working node key and stays reachable on the tailnet indefinitely, because nothing ever forces it back through the login flow where the account could have been suspended. Offboarding a person in the identity provider does not evict their machines. Expiry is what makes the identity provider's decision take effect on the network.
+
+        The setting is also useful to an attacker who already holds admin access. Turning key expiry off on a node they control converts a foothold that would have lapsed in weeks into indefinite persistence, and it does so through a supported configuration change rather than through malware that endpoint tooling would flag.
+
+        Operators usually disable expiry to stop something from breaking, such as a subnet router that drops the office network when its key lapses, or a CI runner with no interactive login. Those cases are real, and the answer is tagged or ephemeral nodes, whose keys are governed by `tagOwners` and short-lived auth keys rather than by a user session, instead of blanket exemptions on ordinary user machines. Expect tagged devices to surface here for that reason. Pair this with the companion check in this policy that caps the tailnet-wide key duration, since expiry that is enabled but measured in years buys very little.
+      audit: |
+        ### Audit via Admin Console
+
+        1. Sign in to the Tailscale admin console at login.tailscale.com/admin.
+        2. Open the **Machines** tab.
+        3. Review each device for a "Key expiry disabled" indicator.
+
+        A passing result shows no devices with key expiry disabled; a failing result shows one or more devices marked as having key expiry disabled.
+
+        ### Audit via API
+
+        Query the Tailscale API and inspect the result. The example uses a personal API key for interactive use; for automation, authenticate with an OAuth client Bearer token as described in the policy overview.
+
+        ```bash
+        curl -s -u "$TAILSCALE_API_KEY:" \
+          "https://api.tailscale.com/api/v2/tailnet/<tailnet>/devices"
+        ```
+
+        A passing response shows `"keyExpiryDisabled": false` for every device; a failing response includes at least one device with `"keyExpiryDisabled": true`.
+      remediation:
+        - id: console
+          desc: |
+            **Using Tailscale Admin Console**
+
+            1. Go to the [Tailscale admin console](https://login.tailscale.com/admin/machines).
+            2. Find devices labeled "Key expiry disabled".
+            3. Open the device menu and select **Enable key expiry**.
+        - id: cli
+          desc: |
+            To re-enable key expiry for a device via the Tailscale API:
+
+            ```bash
+            curl -s -u "$TAILSCALE_API_KEY:" \
+              -H "Content-Type: application/json" \
+              -X POST "https://api.tailscale.com/api/v2/device/<device-id>/key" \
+              --data '{ "keyExpiryDisabled": false }'
+            ```
+
+            The device keeps its current key until it reaches the tailnet key expiry window, after which the device owner must re-authenticate.
+        - id: terraform
+          desc: |
+            To keep key expiry enabled in Terraform, leave `key_expiry_disabled` unset, which defaults to `false`, or set it to `false` explicitly on any `tailscale_device_key` resource:
+
+            ```hcl
+            resource "tailscale_device_key" "example" {
+              device_id           = data.tailscale_device.example.id
+              key_expiry_disabled = false
+            }
+            ```
+    refs:
+      - url: https://tailscale.com/docs/features/access-control/key-expiry
+        title: Tailscale key expiry documentation
+  - uid: mondoo-tailscale-security-devices-key-expiry-enabled-device
+    filters: asset.platform == 'tailscale-device'
+    mql: |
+      tailscale.device.keyExpiryDisabled == false
+  - uid: mondoo-tailscale-security-devices-key-expiry-enabled-tailnet
+    filters: asset.platform == 'tailscale'
+    mql: |
+      tailscale.devices.all(keyExpiryDisabled == false)
+  - uid: mondoo-tailscale-security-devices-key-expiry-enabled-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "tailscale_device_key")
+    mql: |
+      terraform.resources("tailscale_device_key").all(arguments["key_expiry_disabled"] != true)
+  - uid: mondoo-tailscale-security-devices-key-expiry-enabled-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "tailscale_device_key")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "tailscale_device_key").all(change.after.key_expiry_disabled != true)
+  - uid: mondoo-tailscale-security-devices-key-expiry-enabled-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "tailscale_device_key")
+    mql: |
+      terraform.state.resources.where(type == "tailscale_device_key").all(values.key_expiry_disabled != true)
+  # No Terraform variants: client update-availability is runtime telemetry surfaced by the
+  # Tailscale API per device. It is not a configuration field — there is no field in
+  # tailscale_device_authorization, tailscale_device_key, or tailscale_tailnet_settings that
+  # expresses or constrains the installed client version.
+  - uid: mondoo-tailscale-security-devices-client-up-to-date
+    title: Ensure devices are running up-to-date Tailscale client software
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-308-a-1-ii-b-security-management-process-risk-management
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-id-ra-1
+      compliance/nist-csf-2: nist-csf-2-pr-ps-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a03
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: soc2-control-cc7-1-2
+      compliance/vda-isa-5: vda-isa-5-5-2-5
+    variants:
+      - uid: mondoo-tailscale-security-devices-client-up-to-date-device
+        tags:
+          mondoo.com/filter-title: Tailscale Device
+          mondoo.com/filter-icon: tailscale
+      - uid: mondoo-tailscale-security-devices-client-up-to-date-tailnet
+        tags:
+          mondoo.com/filter-title: Tailscale Tailnet
+          mondoo.com/filter-icon: tailscale
+    docs:
+      desc: |
+        This check verifies that machines on the tailnet are running a current Tailscale client, with no update waiting to be installed.
+
+        Tailscale reports per machine whether a newer client release is available, and the admin console shows that as an update badge next to the machine on the **Machines** page. The client terminates the WireGuard tunnel, enforces the packet filter that the coordination server distributes, and, on nodes that use it, answers Tailscale SSH, so it is privileged software on every endpoint. This check requires that no machine reports a pending update, and it skips machines shared in from other tailnets, which the owning tailnet patches.
+
+        **Why this matters**
+
+        The Tailscale client runs with elevated privileges and listens on the network by design, so a defect in it is directly reachable by any peer the ACL policy lets talk to the machine. Once a fix ships, the corresponding weakness is public. An attacker who already holds one node on the tailnet then has a catalog of unpatched peers to work through, and the mesh gives them a direct path to each one without crossing a firewall or a jump host.
+
+        Version drift is rarely uniform. The laptops people use daily update quickly. The machines that fall behind are the headless ones that matter most, such as subnet routers bridging an on-premises range and long-lived cloud instances nobody logs into, and those are exactly the nodes whose compromise reaches past the tailnet into a physical network.
+
+        A short lag after a release is normal and is not by itself an incident. Treat this as a fleet hygiene signal and pair it with the companion check in this policy that turns on automatic client updates for the tailnet, which is what keeps the count from climbing again after a manual sweep.
+      audit: |
+        ### Audit via Admin Console
+
+        1. Sign in to the Tailscale admin console at login.tailscale.com/admin.
+        2. Open the **Machines** tab.
+        3. Look for devices flagged with an available update.
+
+        A passing result shows no devices with an update available; a failing result shows one or more devices flagged as needing a client update.
+
+        ### Audit via API
+
+        Query the Tailscale API and inspect the result:
+
+        ```bash
+        curl -s -u "$TAILSCALE_API_KEY:" \
+          "https://api.tailscale.com/api/v2/tailnet/<tailnet>/devices"
+        ```
+
+        A passing response shows `"updateAvailable": false` for every device; a failing response includes at least one device with `"updateAvailable": true`.
+      remediation:
+        - id: console
+          desc: |
+            **Using Tailscale Admin Console**
+
+            1. Go to the [Tailscale admin console](https://login.tailscale.com/admin/machines).
+            2. Devices with available updates are flagged with an update badge.
+            3. Notify device owners to update their clients, or enable tailnet-wide auto-updates under [Settings > Device management](https://login.tailscale.com/admin/settings/device-management).
+        - id: cli
+          desc: |
+            On platforms where the Tailscale client ships its own updater, update directly:
+
+            ```bash
+            sudo tailscale update
+            ```
+
+            Enable automatic updates on the device so future releases install without manual action:
+
+            ```bash
+            sudo tailscale set --auto-update=true
+            ```
+
+            Auto-update is not available on every install. It is unsupported on Tailscale clients installed through some Linux package managers and on static or musl builds, where the binary cannot replace itself. On those systems, keep the client current through the package manager or your patch management process instead.
+
+            Where the client was installed through a package manager or app store, update through that channel instead:
+
+            - **macOS**: Update through the Mac App Store, run `brew upgrade --cask tailscale-app` for the Homebrew GUI app, or `brew upgrade tailscale` for the Homebrew formula.
+            - **Windows**: Update through the Microsoft Store or download the installer from tailscale.com.
+            - **Linux**: Run `sudo apt-get update && sudo apt-get install --only-upgrade tailscale` on Debian and Ubuntu, or `sudo dnf upgrade tailscale` on Fedora and RHEL.
+    refs:
+      - url: https://tailscale.com/download
+        title: Tailscale download and update
+  - uid: mondoo-tailscale-security-devices-client-up-to-date-device
+    filters: asset.platform == 'tailscale-device' && tailscale.device.isExternal == false
+    mql: |
+      tailscale.device.updateAvailable == false
+  - uid: mondoo-tailscale-security-devices-client-up-to-date-tailnet
+    filters: asset.platform == 'tailscale'
+    mql: |
+      tailscale.devices.where(isExternal == false).all(updateAvailable == false)
+  # No Terraform variants: tailnet lock errors are runtime state from the Tailscale API
+  # (whether a device has unresolved signature/key issues with the tailnet lock). It is not
+  # a configuration field, so there is no HCL/plan/state shape to evaluate.
+  - uid: mondoo-tailscale-security-devices-no-tailnet-lock-errors
+    title: Ensure no devices have tailnet lock errors
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-16
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a08
+      compliance/pci-dss-4: pcidss-requirement-7-2-1
+      compliance/soc2-2017: soc2-control-cc6-1-4
+      compliance/vda-isa-5: vda-isa-5-4-1-1
+    variants:
+      - uid: mondoo-tailscale-security-devices-no-tailnet-lock-errors-device
+        tags:
+          mondoo.com/filter-title: Tailscale Device
+          mondoo.com/filter-icon: tailscale
+      - uid: mondoo-tailscale-security-devices-no-tailnet-lock-errors-tailnet
+        tags:
+          mondoo.com/filter-title: Tailscale Tailnet
+          mondoo.com/filter-icon: tailscale
+    docs:
+      desc: |
+        This check verifies that no machine reports a tailnet lock signature error, meaning every node key on the tailnet carries a valid signature from a trusted signing node.
+
+        Tailnet lock is Tailscale's defense against a compromised coordination plane. With it enabled, a machine may only join once one of the tailnet's designated signing nodes has cryptographically signed its node key, and every other machine independently verifies that signature before exchanging traffic. Administrators manage signing nodes and review each machine's state under **Tailnet lock** in the admin console, and a machine whose signature is missing, invalid, or unverifiable is shown with a lock error. This check requires an empty error on every machine.
+
+        **Why this matters**
+
+        Without tailnet lock, the coordination plane is trusted to state which public keys belong to the tailnet. Anyone who controls or successfully impersonates that plane can hand your machines a key of their choosing and become a peer that every node accepts, with no signature for the endpoints to check. Tailnet lock removes that trust by requiring a signature the coordination plane cannot produce, so a lock error is the alarm firing: a key is circulating that no trusted node vouched for.
+
+        A lock error also breaks connectivity in a way that pushes operators toward the wrong fix. The affected machine cannot talk to locked peers, someone is under pressure to restore service, and the fastest path looks like disabling tailnet lock for the whole tailnet. That trades one unverified node for a tailnet with no key verification at all, which is precisely what an attacker who planted the node wants.
+
+        Errors arise from mundane causes too. A machine re-keys while every signing node is offline, a signing node is removed without a replacement being nominated, or a client too old to support lock enrolls. Each of these is resolved by signing the key from a trusted node or by removing the machine, and none of them is a reason to leave the error standing.
+
+        On a tailnet that has not enabled tailnet lock at all, no machine reports an error and this check passes trivially. Enabling lock is the prerequisite that gives the result meaning, and it is worth the operational weight mainly for tailnets whose threat model includes the coordination plane itself.
+      audit: |
+        ### Audit via Admin Console
+
+        1. Sign in to the Tailscale admin console at login.tailscale.com/admin.
+        2. Open the **Machines** tab.
+        3. Review each device for a tailnet lock error indicator.
+
+        A passing result shows no devices reporting tailnet lock errors; a failing result shows one or more devices flagged with a lock signature error.
+
+        ### Audit via API
+
+        Query the Tailscale API and inspect the result:
+
+        ```bash
+        curl -s -u "$TAILSCALE_API_KEY:" \
+          "https://api.tailscale.com/api/v2/tailnet/<tailnet>/devices"
+        ```
+
+        A passing response shows an empty `"tailnetLockError"` string for every device; a failing response includes at least one device with a non-empty `"tailnetLockError"` value.
+      remediation:
+        - id: console
+          desc: |
+            **Using Tailscale Admin Console**
+
+            1. Go to the [Tailscale admin console](https://login.tailscale.com/admin/machines).
+            2. Review devices showing tailnet lock errors and decide whether each device belongs on the tailnet.
+            3. Remove any device that should not be on the tailnet.
+        - id: cli
+          desc: |
+            To sign a legitimate device, run the following on a device that holds a trusted tailnet lock signing key:
+
+            ```bash
+            # List devices whose node keys are not yet signed
+            tailscale lock status
+
+            # Sign the device's node key
+            tailscale lock sign nodekey:<node-key-hex>
+            ```
+
+            The node key also appears on the device's detail page in the admin console.
+    refs:
+      - url: https://tailscale.com/docs/features/tailnet-lock
+        title: Tailscale tailnet lock documentation
+  - uid: mondoo-tailscale-security-devices-no-tailnet-lock-errors-device
+    filters: asset.platform == 'tailscale-device'
+    mql: |
+      tailscale.device.tailnetLockError == ""
+  - uid: mondoo-tailscale-security-devices-no-tailnet-lock-errors-tailnet
+    filters: asset.platform == 'tailscale'
+    mql: |
+      tailscale.devices.all(tailnetLockError == "")
+  # No Terraform variants: user approval status ("needs-approval") is runtime state set by
+  # the Tailscale API as a result of admin actions. The tailscale provider has no resource
+  # that models a user's approval state — users themselves are not Terraform-managed (there
+  # is no tailscale_user resource), only the tailnet-wide users_approval_on toggle. See the
+  # user-approval-required check for the variant-covered control.
+  - uid: mondoo-tailscale-security-no-users-pending-approval
+    title: Ensure no users are pending approval to join the tailnet
+    impact: 70
+    filters: asset.platform == 'tailscale'
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-308-a-4-ii-b-information-access-management-access-authorization
+      compliance/iso-27001-2022: iso-27001-2022-a-5-18
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-1
+      compliance/soc2-2017: soc2-control-cc6-3-1
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      tailscale.users.none(status == "needs-approval")
+    docs:
+      desc: |
+        This check verifies that no user account is sitting unreviewed in the needs-approval state, so that every pending request to join the tailnet has been decided.
+
+        On a tailnet with user approval turned on, a person who signs in through the identity provider is created as a user in the **Needs approval** state and cannot use the tailnet until an administrator approves them. Administrators work that queue on the **Users** page of the Tailscale admin console. This check requires the queue to be empty, meaning every request has been either approved or denied.
+
+        **Why this matters**
+
+        A standing backlog is how a real access-control gate degrades into a rubber stamp. When ten requests are waiting and nine are obviously colleagues, the tenth is approved in the same click-through and the administrator retains no memory of having looked at it. An attacker relies on exactly that: a signup from a look-alike address, or from an identity-provider account that should have been deprovisioned, is far more likely to be waved through in a batch than examined on its own.
+
+        The backlog also buries the signal that matters. A pending request from an account nobody recognizes is strong evidence that the identity provider is admitting people it should not, whether through an over-broad domain allowlist, a stale guest account, or a self-service signup path someone forgot about. That evidence is only useful while the queue is short enough to read.
+
+        There is a productivity cost as well, and it is what erodes the control in practice. Colleagues blocked for days learn to route around the tailnet, and pressure builds to switch user approval off entirely.
+
+        The remedy is to work the queue rather than to widen the gate: approve the people you expect, deny the ones you do not, and configure notifications so requests reach an administrator instead of waiting to be noticed. Pair this with the companion check in this policy that requires user approval to be enabled, since an empty queue on a tailnet that never asks for approval means nothing.
+      audit: |
+        ### Audit via Admin Console
+
+        1. Sign in to the Tailscale admin console at login.tailscale.com/admin.
+        2. Open the **Users** tab.
+        3. Review the status column for users marked as needing approval.
+
+        A passing result shows no users with a "Needs approval" status; a failing result shows one or more users awaiting approval.
+
+        ### Audit via API
+
+        Query the Tailscale API and inspect the result:
+
+        ```bash
+        curl -s -u "$TAILSCALE_API_KEY:" \
+          "https://api.tailscale.com/api/v2/tailnet/<tailnet>/users"
+        ```
+
+        A passing response shows no user with `"status": "needs-approval"`; a failing response includes at least one user in the `needs-approval` status.
+      remediation:
+        - id: console
+          desc: |
+            **Using Tailscale Admin Console**
+
+            1. Go to the [Tailscale admin console](https://login.tailscale.com/admin/users).
+            2. Review users with "Needs approval" status.
+            3. For each expected user, open the user menu and select **Approve**.
+            4. For unknown or unexpected requests, deny the request and investigate how it was made.
+        - id: cli
+          desc: |
+            To approve a pending user via the Tailscale API:
+
+            ```bash
+            curl -s -u "$TAILSCALE_API_KEY:" \
+              -X POST "https://api.tailscale.com/api/v2/users/<user-id>/approve"
+            ```
+    refs:
+      - url: https://tailscale.com/docs/reference/user-roles
+        title: User roles
+  # No Terraform variants: the tailscale provider does not expose a per-user role-assignment
+  # resource. As of provider v0.29.x there is no tailscale_user_role (only the tailnet-wide
+  # users_role_allowed_to_join_external_tailnet setting), so role membership for owners and
+  # admins cannot be evaluated from HCL/plan/state. This may become possible if a future
+  # provider release adds a user-role resource.
+  - uid: mondoo-tailscale-security-admin-owner-roles-limited
+    title: Ensure admin and owner roles are limited to a small number of users
+    impact: 70
+    filters: asset.platform == 'tailscale'
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-05
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-308-a-4-ii-c-information-access-management-access-establishment-and-modification
+      compliance/iso-27001-2022: iso-27001-2022-a-8-2
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-5
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-2
+      compliance/soc2-2017: soc2-control-cc6-3-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    mql: |
+      tailscale.users.where(role == "owner").length <= 2
+      tailscale.users.where(role == "admin").length <= 3
+    docs:
+      desc: |
+        This check verifies that full control of the tailnet is concentrated in a small number of accounts, with at most two Owners and three Admins.
+
+        Tailscale assigns each person a role on the **Users** page of the admin console. Owners and Admins can rewrite the ACL policy file, approve devices and users, issue and revoke auth keys, change key expiry, and alter tailnet lock. The Member role, by contrast, grants connectivity and nothing administrative. This check counts the accounts holding each privileged role and requires the totals to stay at or below two Owners and three Admins.
+
+        **Why this matters**
+
+        Every privileged account is a complete path to the tailnet. An attacker who phishes one Admin does not need to move laterally at all. They edit the ACL policy file to grant themselves reach, issue a reusable auth key, enroll a node of their own, and disable key expiry on it so the access survives the password reset. All of that is supported administrative activity, so none of it looks like an intrusion in isolation, and the number of privileged accounts is the number of chances that attack has to succeed once.
+
+        Privileged roles spread through ordinary convenience. Someone needs to approve a device while the usual administrator is on vacation, a platform engineer needs to edit one ACL rule for a project, a contractor is elevated for a migration. Each grant is defensible and none is ever revisited, which is how a tailnet arrives at a dozen Admins nobody can account for.
+
+        A small privileged set also makes the audit trail usable. When five accounts can change the ACL policy, an unexpected change has five plausible explanations and can be resolved with five conversations. When thirty can, the configuration audit log still records who acted but no longer supports any judgment about whether the action was expected.
+
+        These thresholds are a conservative default rather than a universal rule, and a large organization with genuinely separated duties may justify more. Where that is the case, the number should be a decision with names attached rather than the residue of past convenience, and every privileged account should be covered by strong multi-factor authentication at the identity provider.
+      audit: |
+        ### Audit via Admin Console
+
+        1. Sign in to the Tailscale admin console at login.tailscale.com/admin.
+        2. Open the **Users** tab.
+        3. Count the users assigned the Owner and Admin roles.
+
+        A passing result shows a small number of privileged users, with at most two owners and three admins; a failing result shows more privileged users than expected.
+
+        ### Audit via API
+
+        Query the Tailscale API and inspect the result:
+
+        ```bash
+        curl -s -u "$TAILSCALE_API_KEY:" \
+          "https://api.tailscale.com/api/v2/tailnet/<tailnet>/users"
+        ```
+
+        A passing response shows few users with `"role": "owner"` or `"role": "admin"`; a failing response shows more privileged users than the agreed limit.
+      remediation:
+        - id: console
+          desc: |
+            **Using Tailscale Admin Console**
+
+            1. Go to the [Tailscale admin console](https://login.tailscale.com/admin/users).
+            2. Review users with "Admin" and "Owner" roles.
+            3. For each user who does not need elevated privileges, open the user menu, select **Edit role**, and assign **Member**.
+
+            Keep at least one owner at all times. Tailscale prevents removing the last owner, so plan owner changes while a second owner exists.
+        - id: cli
+          desc: |
+            To downgrade a user to the member role via the Tailscale API:
+
+            ```bash
+            curl -s -u "$TAILSCALE_API_KEY:" \
+              -H "Content-Type: application/json" \
+              -X POST "https://api.tailscale.com/api/v2/users/<user-id>/role" \
+              --data '{ "role": "member" }'
+            ```
+    refs:
+      - url: https://tailscale.com/docs/reference/user-roles
+        title: User roles
+  # No Terraform variants: user idle status ("idle") is runtime activity telemetry from the
+  # Tailscale API based on last-seen timestamps. It is not a configuration field — there is
+  # no tailscale_user resource and no HCL argument that expresses or constrains user activity.
+  - uid: mondoo-tailscale-security-no-idle-users
+    title: Ensure no users have been idle for an extended period
+    impact: 50
+    filters: asset.platform == 'tailscale'
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-07
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-308-a-4-ii-c-information-access-management-access-establishment-and-modification
+      compliance/iso-27001-2022: iso-27001-2022-a-5-18
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-4
+      compliance/soc2-2017: soc2-control-cc6-2-2
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    mql: |
+      tailscale.users.none(status == "idle")
+    docs:
+      desc: |
+        This check verifies that the tailnet carries no dormant user accounts, meaning no account that Tailscale has marked idle after a prolonged period without activity.
+
+        Tailscale tracks when each person was last seen and marks an account **Idle** once it has gone unused for an extended stretch, currently 28 days. The status appears alongside the account on the **Users** page of the admin console. An idle account is still a full member of the tailnet: its devices remain enrolled, its role remains in force, and the ACL policy still grants it whatever access it had. This check requires that no account is in the idle state.
+
+        **Why this matters**
+
+        Dormant accounts are how offboarding failures become durable. A contractor's engagement ends, an employee moves to a role that no longer needs the network, a team is reorganized, and in each case the person stops using Tailscale long before anyone remembers to remove them. The account keeps its access throughout, and if the underlying identity is ever compromised, whether through credential reuse disclosed in an unrelated breach or through a personal account that corporate controls never covered, the attacker inherits a live path onto the tailnet.
+
+        Unused accounts are attractive precisely because they are unused. Nobody notices an unfamiliar sign-in on an account whose owner is not there to be surprised by it, and nobody questions traffic from a machine that has been quiet for a month. The account provides the same reach as an active one while generating none of the ambient activity that would make an intrusion stand out.
+
+        The idle status is also a cross-check on the identity provider. An account still active in Tailscale but idle for months usually means someone left and the deprovisioning path did not reach every system, which is worth knowing beyond this one tailnet.
+
+        Idleness is not by itself proof that access should end. Seasonal staff, people returning from extended leave, and break-glass accounts that are deliberately kept unused all appear here. The requirement is that each one is a decision somebody made rather than an account nobody has looked at, so review the idle list on a routine cadence and suspend or delete what is no longer needed.
+      audit: |
+        ### Audit via Admin Console
+
+        1. Sign in to the Tailscale admin console at login.tailscale.com/admin.
+        2. Open the **Users** tab.
+        3. Review the status and last seen columns for users marked as idle.
+
+        A passing result shows no users with an "Idle" status; a failing result shows one or more users inactive for more than 28 days.
+
+        ### Audit via API
+
+        Query the Tailscale API and inspect the result:
+
+        ```bash
+        curl -s -u "$TAILSCALE_API_KEY:" \
+          "https://api.tailscale.com/api/v2/tailnet/<tailnet>/users"
+        ```
+
+        A passing response shows no user with `"status": "idle"`; a failing response includes at least one user in the `idle` status.
+      remediation:
+        - id: console
+          desc: |
+            **Using Tailscale Admin Console**
+
+            1. Go to the [Tailscale admin console](https://login.tailscale.com/admin/users).
+            2. Review users with "Idle" status, meaning inactive for more than 28 days.
+            3. Contact idle users to verify they still need access.
+            4. Suspend users who no longer require tailnet access: open the user menu and select **Suspend**. Suspension is reversible and blocks the user's devices without deleting them.
+            5. Delete a user only after confirming the account is permanently unneeded. Deleting a user also removes every device the user owns from the tailnet, including any servers registered under that account.
+        - id: cli
+          desc: |
+            To suspend an idle user via the Tailscale API:
+
+            ```bash
+            curl -s -u "$TAILSCALE_API_KEY:" \
+              -X POST "https://api.tailscale.com/api/v2/users/<user-id>/suspend"
+            ```
+
+            To delete the user once the account is confirmed permanently unneeded:
+
+            ```bash
+            curl -s -u "$TAILSCALE_API_KEY:" \
+              -X POST "https://api.tailscale.com/api/v2/users/<user-id>/delete"
+            ```
+    refs:
+      - url: https://tailscale.com/docs/reference/user-roles
+        title: User roles
+  - uid: mondoo-tailscale-security-device-approval-required
+    title: Ensure new devices require admin approval to join the tailnet
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-16
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-308-a-4-ii-b-information-access-management-access-authorization
+      compliance/iso-27001-2022: iso-27001-2022-a-8-1
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-1
+      compliance/soc2-2017: soc2-control-cc6-3-1
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    variants:
+      - uid: mondoo-tailscale-security-device-approval-required-tailscale
+        tags:
+          mondoo.com/filter-title: Tailscale Tailnet
+          mondoo.com/filter-icon: tailscale
+      - uid: mondoo-tailscale-security-device-approval-required-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-tailscale-security-device-approval-required-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-tailscale-security-device-approval-required-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+          mondoo.com/filter-icon: terraform
+    docs:
+      desc: |
+        This check verifies that the tailnet requires an administrator to approve each new machine before it can carry traffic.
+
+        Device approval is a tailnet-wide setting under **Settings > Device management** in the Tailscale admin console, expressed as `devices_approval_on` in the `tailscale_tailnet_settings` resource. With it on, a machine that completes sign-in is enrolled but held in a pending state and cannot reach peers until an administrator authorizes it. With it off, authentication alone puts a working node on the network. This check requires the setting to be enabled.
+
+        **Why this matters**
+
+        Without device approval, a stolen credential becomes network access in one step. An attacker who phishes a password and defeats or bypasses the second factor installs the Tailscale client on hardware they control, signs in, and holds a tailnet address next to production. There is no concentrator to reach, no jump host to authenticate to, and no allowlisted source address to spoof. The coordination plane routes them straight to whatever the ACL policy permits for that person.
+
+        Approval inserts a human at the one moment when the anomaly is most visible. A new machine carries a name, an operating system, and a first-seen time, and a Windows desktop appearing for an engineer who has only ever used a Mac is the kind of thing a person recognizes in seconds and a rule never will. It is also the only point in the lifecycle where the decision is cheap, because once the node is on the mesh, removing it competes with whatever work it appears to be doing.
+
+        The setting matters just as much for machines that are not anyone's laptop. Personal phones, home lab servers, and forgotten cloud instances all enroll through the same path, and approval is what keeps a corporate tailnet from silently absorbing them.
+
+        Approval does add friction, and on tailnets that enroll machines continuously through automation the answer is not to turn it off but to enroll those machines with tagged, pre-approved auth keys governed by `tagOwners`, so scripted enrollment has an explicit owner while human enrollment still stops for review. Pair this with the companion check in this policy that requires every machine to be in the authorized state.
+      audit: |
+        ### Audit via Admin Console
+
+        1. Sign in to the Tailscale admin console at login.tailscale.com/admin.
+        2. Open **Settings > Device management**.
+        3. Review the device approval setting.
+
+        A passing result shows that manual approval for new devices is enabled; a failing result shows device approval turned off.
+
+        ### Audit via API
+
+        Query the Tailscale API and inspect the result:
+
+        ```bash
+        curl -s -u "$TAILSCALE_API_KEY:" \
+          "https://api.tailscale.com/api/v2/tailnet/<tailnet>/settings"
+        ```
+
+        A passing response shows `"devicesApprovalOn": true`; a failing response shows `"devicesApprovalOn": false`.
+      remediation:
+        - id: console
+          desc: |
+            **Using Tailscale Admin Console**
+
+            1. Go to [Settings > Device management](https://login.tailscale.com/admin/settings/device-management) in the Tailscale admin console.
+            2. Locate the **Device approval** setting.
+            3. Enable **Manually approve new devices**.
+
+            Devices already on the tailnet are unaffected; only newly joining devices wait for approval.
+        - id: cli
+          desc: |
+            To enable device approval via the Tailscale API:
+
+            ```bash
+            curl -s -u "$TAILSCALE_API_KEY:" \
+              -H "Content-Type: application/json" \
+              -X PATCH "https://api.tailscale.com/api/v2/tailnet/<tailnet>/settings" \
+              --data '{ "devicesApprovalOn": true }'
+            ```
+        - id: terraform
+          desc: |
+            To enforce device approval in Terraform, set `devices_approval_on = true` on the `tailscale_tailnet_settings` resource:
+
+            ```hcl
+            resource "tailscale_tailnet_settings" "example" {
+              devices_approval_on = true
+            }
+            ```
+    refs:
+      - url: https://tailscale.com/docs/features/access-control/device-management/device-approval
+        title: Tailscale device approval documentation
+  - uid: mondoo-tailscale-security-device-approval-required-tailscale
+    filters: asset.platform == 'tailscale'
+    mql: |
+      tailscale.deviceApprovalRequired == true
+  - uid: mondoo-tailscale-security-device-approval-required-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "tailscale_tailnet_settings")
+    mql: |
+      terraform.resources("tailscale_tailnet_settings").all(arguments["devices_approval_on"] == true)
+  - uid: mondoo-tailscale-security-device-approval-required-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "tailscale_tailnet_settings")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "tailscale_tailnet_settings").all(change.after.devices_approval_on == true)
+  - uid: mondoo-tailscale-security-device-approval-required-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "tailscale_tailnet_settings")
+    mql: |
+      terraform.state.resources.where(type == "tailscale_tailnet_settings").all(values.devices_approval_on == true)
+  - uid: mondoo-tailscale-security-user-approval-required
+    title: Ensure new users require admin approval to join the tailnet
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-06
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-308-a-4-ii-b-information-access-management-access-authorization
+      compliance/iso-27001-2022: iso-27001-2022-a-5-18
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-3
+      compliance/soc2-2017: soc2-control-cc6-3-1
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    variants:
+      - uid: mondoo-tailscale-security-user-approval-required-tailscale
+        tags:
+          mondoo.com/filter-title: Tailscale Tailnet
+          mondoo.com/filter-icon: tailscale
+      - uid: mondoo-tailscale-security-user-approval-required-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-tailscale-security-user-approval-required-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-tailscale-security-user-approval-required-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+          mondoo.com/filter-icon: terraform
+    docs:
+      desc: |
+        This check verifies that the tailnet requires an administrator to approve each new person before they can join.
+
+        User approval is a tailnet-wide setting under **Settings > User management** in the Tailscale admin console, expressed as `users_approval_on` in the `tailscale_tailnet_settings` resource. With it on, a person who authenticates through the connected identity provider is created in a pending state and gains no access until an administrator approves the account. This check requires the setting to be enabled.
+
+        **Why this matters**
+
+        Without user approval, membership of the tailnet is exactly whatever the identity provider says it is, and that boundary is usually looser than anyone intends. A domain-wide allowlist admits every account in the directory, including service accounts, shared mailboxes, and the guest identities issued to partners and vendors. A self-service signup path enabled during a trial admits anyone who can receive mail at the domain. In each case the first person to notice the gap is whoever walks through it.
+
+        Approval also compensates for the lag in deprovisioning. Directories retain departed employees as disabled or converted accounts for legal and archival reasons, and every one of those is an identity that might still complete a sign-in. Requiring an administrator to admit each new person means an identity that should not be there stops at a human decision rather than landing on the network.
+
+        The queue itself is a detection surface. A request from an account nobody recognizes is direct evidence that the identity provider is admitting more than it should, and that signal exists only if the tailnet asks the question.
+
+        The trade-off is delay for new joiners, so configure notifications that route requests to an administrator promptly and write down the standard reviewers apply. Pair this with the companion check in this policy that requires the pending-approval queue to be empty, since a gate nobody attends is a gate that eventually gets switched off.
+      audit: |
+        ### Audit via Admin Console
+
+        1. Sign in to the Tailscale admin console at login.tailscale.com/admin.
+        2. Open **Settings > User management**.
+        3. Review the user approval setting.
+
+        A passing result shows that manual approval for new users is enabled; a failing result shows user approval turned off.
+
+        ### Audit via API
+
+        Query the Tailscale API and inspect the result:
+
+        ```bash
+        curl -s -u "$TAILSCALE_API_KEY:" \
+          "https://api.tailscale.com/api/v2/tailnet/<tailnet>/settings"
+        ```
+
+        A passing response shows `"usersApprovalOn": true`; a failing response shows `"usersApprovalOn": false`.
+      remediation:
+        - id: console
+          desc: |
+            **Using Tailscale Admin Console**
+
+            1. Go to [Settings > User management](https://login.tailscale.com/admin/settings/user-management) in the Tailscale admin console.
+            2. Locate the **User approval** setting.
+            3. Enable **Manually approve new users**.
+
+            Existing users are unaffected; only newly joining users wait for approval.
+        - id: cli
+          desc: |
+            To enable user approval via the Tailscale API:
+
+            ```bash
+            curl -s -u "$TAILSCALE_API_KEY:" \
+              -H "Content-Type: application/json" \
+              -X PATCH "https://api.tailscale.com/api/v2/tailnet/<tailnet>/settings" \
+              --data '{ "usersApprovalOn": true }'
+            ```
+        - id: terraform
+          desc: |
+            To enforce user approval in Terraform, set `users_approval_on = true` on the `tailscale_tailnet_settings` resource:
+
+            ```hcl
+            resource "tailscale_tailnet_settings" "example" {
+              users_approval_on = true
+            }
+            ```
+    refs:
+      - url: https://tailscale.com/docs/features/access-control/user-approval
+        title: Tailscale user approval documentation
+  - uid: mondoo-tailscale-security-user-approval-required-tailscale
+    filters: asset.platform == 'tailscale'
+    mql: |
+      tailscale.userApprovalRequired == true
+  - uid: mondoo-tailscale-security-user-approval-required-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "tailscale_tailnet_settings")
+    mql: |
+      terraform.resources("tailscale_tailnet_settings").all(arguments["users_approval_on"] == true)
+  - uid: mondoo-tailscale-security-user-approval-required-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "tailscale_tailnet_settings")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "tailscale_tailnet_settings").all(change.after.users_approval_on == true)
+  - uid: mondoo-tailscale-security-user-approval-required-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "tailscale_tailnet_settings")
+    mql: |
+      terraform.state.resources.where(type == "tailscale_tailnet_settings").all(values.users_approval_on == true)
+  - uid: mondoo-tailscale-security-devices-auto-updates-enabled
+    title: Ensure devices have automatic Tailscale client updates enabled
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-tvm-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-308-a-1-ii-b-security-management-process-risk-management
+      compliance/iso-27001-2022: iso-27001-2022-a-8-8
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ip-12
+      compliance/nist-csf-2: nist-csf-2-pr-ps-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-si-2
+      compliance/nist-sp-800-171: nist-sp-800-171--3-14-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a03
+      compliance/pci-dss-4: pcidss-requirement-6-3-3
+      compliance/soc2-2017: soc2-control-cc7-1-2
+      compliance/vda-isa-5: vda-isa-5-5-2-5
+    variants:
+      - uid: mondoo-tailscale-security-devices-auto-updates-enabled-tailscale
+        tags:
+          mondoo.com/filter-title: Tailscale Tailnet
+          mondoo.com/filter-icon: tailscale
+      - uid: mondoo-tailscale-security-devices-auto-updates-enabled-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-tailscale-security-devices-auto-updates-enabled-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-tailscale-security-devices-auto-updates-enabled-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+          mondoo.com/filter-icon: terraform
+    docs:
+      desc: |
+        This check verifies that the tailnet turns on automatic Tailscale client updates for the machines that support them.
+
+        Automatic updates are a tailnet-wide default under **Settings > Device management** in the Tailscale admin console, recorded as `devices_auto_updates_on` in the `tailscale_tailnet_settings` resource. When it is on, eligible machines install new Tailscale client releases themselves rather than waiting for someone to push them. This check requires the setting to be enabled.
+
+        **Why this matters**
+
+        The interval between a client release that fixes a security defect and the moment the last machine installs it is a window in which the weakness is public and the fleet is still exposed. Manual patching stretches that window to the length of the slowest team's change process, and on a mesh network the slowest node is the one that counts, because every peer the ACL policy allows can reach it directly without crossing a firewall or a bastion where compensating controls might apply.
+
+        Manual updating also fails unevenly, and it fails in the worst places. Interactive workstations get attention because people see the prompts. Headless machines do not, so subnet routers, exit nodes, and long-lived cloud instances drift furthest behind, and those are precisely the nodes whose compromise reaches past the tailnet into an on-premises range or a cloud account.
+
+        Turning updates on shifts the default from opt-in patching to opt-out, which is what keeps the fleet current after the one-time sweep that follows an advisory.
+
+        Machines whose Tailscale client comes from a distribution package manager or a golden image do not update themselves through this mechanism, so pair this setting with the companion check in this policy that flags machines with a pending client update, which is what shows whether the policy is actually reaching them.
+      audit: |
+        ### Audit via Admin Console
+
+        1. Sign in to the Tailscale admin console at login.tailscale.com/admin.
+        2. Open **Settings > Device management**.
+        3. Review the auto-updates setting for the tailnet.
+
+        A passing result shows automatic client updates enabled for the tailnet; a failing result shows auto-updates turned off.
+
+        ### Audit via API
+
+        Query the Tailscale API and inspect the result:
+
+        ```bash
+        curl -s -u "$TAILSCALE_API_KEY:" \
+          "https://api.tailscale.com/api/v2/tailnet/<tailnet>/settings"
+        ```
+
+        A passing response shows `"devicesAutoUpdatesOn": true`; a failing response shows `"devicesAutoUpdatesOn": false`.
+      remediation:
+        - id: console
+          desc: |
+            **Using Tailscale Admin Console**
+
+            1. Go to [Settings > Device management](https://login.tailscale.com/admin/settings/device-management) in the Tailscale admin console.
+            2. Locate the **Auto-updates** setting.
+            3. Enable automatic updates. When offered, apply the setting to existing devices as well as new ones so the whole fleet converges.
+        - id: cli
+          desc: |
+            To enable tailnet-wide automatic client updates via the Tailscale API:
+
+            ```bash
+            curl -s -u "$TAILSCALE_API_KEY:" \
+              -H "Content-Type: application/json" \
+              -X PATCH "https://api.tailscale.com/api/v2/tailnet/<tailnet>/settings" \
+              --data '{ "devicesAutoUpdatesOn": true }'
+            ```
+        - id: terraform
+          desc: |
+            To enable tailnet-wide automatic client updates in Terraform, set `devices_auto_updates_on = true` on the `tailscale_tailnet_settings` resource:
+
+            ```hcl
+            resource "tailscale_tailnet_settings" "example" {
+              devices_auto_updates_on = true
+            }
+            ```
+    refs:
+      - url: https://tailscale.com/docs/features/client/update
+        title: Tailscale client auto-update documentation
+  - uid: mondoo-tailscale-security-devices-auto-updates-enabled-tailscale
+    filters: asset.platform == 'tailscale'
+    mql: |
+      tailscale.devicesAutoUpdatesEnabled == true
+  - uid: mondoo-tailscale-security-devices-auto-updates-enabled-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "tailscale_tailnet_settings")
+    mql: |
+      terraform.resources("tailscale_tailnet_settings").all(arguments["devices_auto_updates_on"] == true)
+  - uid: mondoo-tailscale-security-devices-auto-updates-enabled-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "tailscale_tailnet_settings")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "tailscale_tailnet_settings").all(change.after.devices_auto_updates_on == true)
+  - uid: mondoo-tailscale-security-devices-auto-updates-enabled-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "tailscale_tailnet_settings")
+    mql: |
+      terraform.state.resources.where(type == "tailscale_tailnet_settings").all(values.devices_auto_updates_on == true)
+  - uid: mondoo-tailscale-security-devices-key-duration-capped
+    title: Ensure tailnet device key duration is set to 180 days or less
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-12
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-5-17
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-12
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-1-9
+      compliance/vda-isa-5: vda-isa-5-4-1-1
+    variants:
+      - uid: mondoo-tailscale-security-devices-key-duration-capped-tailscale
+        tags:
+          mondoo.com/filter-title: Tailscale Tailnet
+          mondoo.com/filter-icon: tailscale
+      - uid: mondoo-tailscale-security-devices-key-duration-capped-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-tailscale-security-devices-key-duration-capped-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-tailscale-security-devices-key-duration-capped-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+          mondoo.com/filter-icon: terraform
+    docs:
+      desc: |
+        This check verifies that node keys on the tailnet expire on a bounded schedule, with the tailnet-wide key duration set to a finite value of 180 days or less.
+
+        The key duration is set under **Settings > Device management** in the Tailscale admin console and appears as `devices_key_duration_days` in the `tailscale_tailnet_settings` resource. It governs how long a machine's node key stays valid before the machine must sign in again through the identity provider, and a value of `0` means keys never expire. This check requires a duration greater than zero and no more than 180 days.
+
+        **Why this matters**
+
+        The key duration is the ceiling on how long a compromised or abandoned machine keeps its place on the tailnet. A node key is a bearer credential, so whoever holds it is that machine, and no password prompt stands between the key and the network. Extracted from a stolen laptop, recovered from a disk image, or lifted from a backup of a server's state directory, it keeps working until it expires. Setting the duration to a year, or leaving it at `0`, makes the answer to how long a leaked key works "until somebody happens to notice", which is not a control.
+
+        Expiry is also what gives identity-provider decisions teeth. Suspending an account stops new sign-ins but does not reach out and disconnect machines already holding valid keys. Re-authentication is the moment the suspension is enforced, so the key duration sets how long an offboarded person's devices stay on the network after their account is closed.
+
+        Shorter is not free. Every expiry is an interactive sign-in, and the machines with nobody sitting at them, such as subnet routers and CI runners, are the ones that break when a key lapses. The fix for those is tagged and ephemeral nodes, whose lifecycle is governed by `tagOwners` and short-lived auth keys, rather than raising the duration for the whole tailnet. Pair this with the companion check in this policy that flags individual machines with key expiry disabled, since a well-chosen duration does nothing for machines exempted from it.
+      audit: |
+        ### Audit via Admin Console
+
+        1. Sign in to the Tailscale admin console at login.tailscale.com/admin.
+        2. Open **Settings > Device management**.
+        3. Review the device key duration setting.
+
+        A passing result shows a device key duration of 180 days or less and greater than zero; a failing result shows a longer duration or expiry disabled.
+
+        ### Audit via API
+
+        Query the Tailscale API and inspect the result:
+
+        ```bash
+        curl -s -u "$TAILSCALE_API_KEY:" \
+          "https://api.tailscale.com/api/v2/tailnet/<tailnet>/settings"
+        ```
+
+        A passing response shows `"devicesKeyDurationDays"` set to a value between 1 and 180; a failing response shows a value above 180 or 0.
+      remediation:
+        - id: console
+          desc: |
+            **Using Tailscale Admin Console**
+
+            1. Go to [Settings > Device management](https://login.tailscale.com/admin/settings/device-management) in the Tailscale admin console.
+            2. Locate the **Key expiry** setting.
+            3. Set the expiry period to 180 days or less.
+
+            The new period applies to existing device keys. Devices whose keys are already older than the new period expire immediately and their owners must re-authenticate, so announce the change before applying it.
+        - id: cli
+          desc: |
+            To set the device key duration via the Tailscale API:
+
+            ```bash
+            curl -s -u "$TAILSCALE_API_KEY:" \
+              -H "Content-Type: application/json" \
+              -X PATCH "https://api.tailscale.com/api/v2/tailnet/<tailnet>/settings" \
+              --data '{ "devicesKeyDurationDays": 90 }'
+            ```
+        - id: terraform
+          desc: |
+            To cap the device key duration in Terraform, set `devices_key_duration_days` on the `tailscale_tailnet_settings` resource to a value between 1 and 180:
+
+            ```hcl
+            resource "tailscale_tailnet_settings" "example" {
+              devices_key_duration_days = 90
+            }
+            ```
+    refs:
+      - url: https://tailscale.com/docs/features/access-control/key-expiry
+        title: Tailscale key expiry documentation
+  - uid: mondoo-tailscale-security-devices-key-duration-capped-tailscale
+    filters: asset.platform == 'tailscale'
+    mql: |
+      tailscale.devicesKeyDurationDays > 0 && tailscale.devicesKeyDurationDays <= 180
+  - uid: mondoo-tailscale-security-devices-key-duration-capped-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "tailscale_tailnet_settings")
+    mql: |
+      terraform.resources("tailscale_tailnet_settings").all(
+        arguments["devices_key_duration_days"] > 0 && arguments["devices_key_duration_days"] <= 180
+      )
+  - uid: mondoo-tailscale-security-devices-key-duration-capped-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "tailscale_tailnet_settings")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "tailscale_tailnet_settings").all(
+        change.after.devices_key_duration_days > 0 && change.after.devices_key_duration_days <= 180
+      )
+  - uid: mondoo-tailscale-security-devices-key-duration-capped-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "tailscale_tailnet_settings")
+    mql: |
+      terraform.state.resources.where(type == "tailscale_tailnet_settings").all(
+        values.devices_key_duration_days > 0 && values.devices_key_duration_days <= 180
+      )
+  # No Terraform variants: the ACL policy is a HuJSON/JSON string in tailscale_acl.acl.
+  # Asserting "no rule with src ['*'] and dst ['*:*'] and action 'accept'" requires parsing
+  # the string body and is highly sensitive to formatting, comments, variable interpolation,
+  # heredoc vs jsonencode(), and module references. Inspecting the raw string risks false
+  # positives and false negatives, so this check stays runtime-only. The terraform remediation
+  # below still shows the safe shape.
+  - uid: mondoo-tailscale-security-acl-no-allow-all
+    title: Ensure tailnet ACL policy does not contain blanket allow-all rules
+    impact: 90
+    filters: asset.platform == 'tailscale'
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-1-transmission
+      compliance/iso-27001-2022: iso-27001-2022-a-8-22
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-5
+      compliance/nist-csf-2: nist-csf-2-pr-ir-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-4
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-1-3-1
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-5-2-7
+    mql: |
+      tailscale.aclPolicy.acls.none(
+        _['action'] == "accept" &&
+        _['src'].contains("*") &&
+        _['dst'].contains("*:*")
+      )
+    docs:
+      desc: |
+        This check verifies that the tailnet ACL policy provides real segmentation, by requiring that no rule accepts traffic from every source to every destination and port.
+
+        The ACL policy file, edited under **Access controls** in the Tailscale admin console, is the only thing that limits which machines on a tailnet can talk to which. Tailscale ships a starter policy containing a single rule with a `src` of `*` and a `dst` of `*:*`, which lets everything reach everything, and it is meant to be replaced as soon as the tailnet holds more than a handful of machines. This check requires that no `accept` rule combines a wildcard source with a wildcard destination and port.
+
+        **Why this matters**
+
+        With a catch-all accept rule in place, the tailnet is one flat network in which every machine can reach every port of every other machine. One phished laptop, one compromised CI runner, or one vulnerable device in a branch office, and the attacker's next hop is the database, the Kubernetes API, the SSH port on every server, and the management interface of anything a subnet router advertises. There is no internal firewall to negotiate, because the tailnet's packet filter is the internal firewall and it has been told to allow everything.
+
+        The failure mode is quiet in a way that is easy to miss. The catch-all does not conflict with the specific rules a team adds later. It simply makes them redundant. An operator can spend a quarter building careful tag-based and group-based rules, confirm each one works, and never notice that deleting them would change nothing, because the wildcard rule already permitted the traffic. Least-privilege intent and least-privilege enforcement diverge without a single error appearing anywhere.
+
+        Wildcards remain useful in narrower positions. A destination of `*:*` restricted to a small administrative group, or a wildcard source restricted to one service port, is a deliberate rule with bounded reach, and this check does not object to either. What it rejects is the combination that removes every boundary at once. Replace it with rules that name specific sources, destinations, and ports, and use Tailscale's policy tests to confirm intended access still works before the change lands.
+      audit: |
+        ### Audit via Admin Console
+
+        1. Sign in to the Tailscale admin console at login.tailscale.com/admin.
+        2. Open the **Access controls** page and the policy file editor.
+        3. Inspect the `acls` section for any entry with `src` of `["*"]`, `dst` of `["*:*"]`, and `action` of `"accept"`.
+
+        A passing result shows no blanket allow-all entry in the policy file; a failing result shows at least one catch-all accept rule.
+
+        ### Audit via API
+
+        Query the Tailscale API and inspect the result:
+
+        ```bash
+        curl -s -u "$TAILSCALE_API_KEY:" \
+          "https://api.tailscale.com/api/v2/tailnet/<tailnet>/acl"
+        ```
+
+        A passing response shows no `acls` entry combining `"action": "accept"` with a `*` source and a `*:*` destination; a failing response includes such a catch-all rule.
+      remediation:
+        - id: console
+          desc: |
+            **Using Tailscale Admin Console**
+
+            1. Go to the [Tailscale admin console access controls](https://login.tailscale.com/admin/acls/file).
+            2. Open the policy file editor.
+            3. Before removing the catch-all, add explicit per-group, per-tag, or per-service rules that grant the access each group needs, including a rule preserving administrator access to managed machines.
+            4. Remove or scope down any `acls` entry whose `src` is `["*"]`, `dst` is `["*:*"]`, and `action` is `"accept"`.
+            5. Use the **Preview** feature and the policy `tests` block to confirm the intended access still works. ACL changes take effect immediately on every device, and an over-tightened policy can cut off the operators applying it.
+            6. Save the policy.
+        - id: cli
+          desc: |
+            To update the ACL policy via the Tailscale API:
+
+            ```bash
+            # Fetch the current policy; the ETag response header carries the version
+            curl -s -i -u "$TAILSCALE_API_KEY:" \
+              "https://api.tailscale.com/api/v2/tailnet/<tailnet>/acl"
+
+            # Validate the edited policy without applying it
+            curl -s -u "$TAILSCALE_API_KEY:" \
+              -H "Content-Type: application/hujson" \
+              -X POST "https://api.tailscale.com/api/v2/tailnet/<tailnet>/acl/validate" \
+              --data-binary @policy.hujson
+
+            # Apply it; If-Match prevents overwriting a concurrent edit
+            curl -s -u "$TAILSCALE_API_KEY:" \
+              -H "Content-Type: application/hujson" \
+              -H 'If-Match: "<etag>"' \
+              -X POST "https://api.tailscale.com/api/v2/tailnet/<tailnet>/acl" \
+              --data-binary @policy.hujson
+            ```
+        - id: terraform
+          desc: |
+            To manage the tailnet ACL in Terraform, declare a `tailscale_acl` resource whose `acl` argument is least-privilege HuJSON with no `src = ["*"]` paired with `dst = ["*:*"]` at `action = "accept"`. Use `jsonencode` so the structure is easy to review in diffs:
+
+            ```hcl
+            resource "tailscale_acl" "policy" {
+              acl = jsonencode({
+                tagOwners = {
+                  "tag:web" = ["group:platform"]
+                  "tag:db"  = ["group:platform"]
+                }
+                acls = [
+                  {
+                    action = "accept"
+                    src    = ["group:platform"]
+                    dst    = ["tag:web:443"]
+                  },
+                  {
+                    action = "accept"
+                    src    = ["tag:web"]
+                    dst    = ["tag:db:5432"]
+                  },
+                ]
+              })
+            }
+            ```
+    refs:
+      - url: https://tailscale.com/docs/features/access-control/acls
+        title: Tailscale ACL policy documentation
+      - url: https://tailscale.com/docs/reference/examples/acls
+        title: ACL policy examples
+  - uid: mondoo-tailscale-security-authkeys-have-expiration
+    title: Ensure active pre-auth keys have an expiration set
+    impact: 90
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-10
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-5-17
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-12
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-6-3
+      compliance/soc2-2017: soc2-control-cc6-1-9
+      compliance/vda-isa-5: vda-isa-5-4-1-1
+    variants:
+      - uid: mondoo-tailscale-security-authkeys-have-expiration-tailscale
+        tags:
+          mondoo.com/filter-title: Tailscale Tailnet
+          mondoo.com/filter-icon: tailscale
+      - uid: mondoo-tailscale-security-authkeys-have-expiration-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-tailscale-security-authkeys-have-expiration-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-tailscale-security-authkeys-have-expiration-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+          mondoo.com/filter-icon: terraform
+    docs:
+      desc: |
+        This check verifies that every active pre-auth key has a finite expiration, so that no credential capable of enrolling machines onto the tailnet stays valid forever.
+
+        Pre-auth keys are issued under **Settings > Keys** in the admin console, or through the `tailscale_tailnet_key` resource, and they exist so machines can join without an interactive login. Anyone holding one can enroll a node, which makes the key a bearer credential for network membership. Tailscale records an expiration on each key, and a key created without one carries a zero timestamp and never lapses. This check requires a finite expiration on every key that is still valid and not revoked.
+
+        **Why this matters**
+
+        A pre-auth key with no expiration is a permanent key to the network, living wherever the automation that used it left it. That is typically a CI secret store, a cloud-init script, a container image layer, a Terraform state file, or a wiki page written the week the pipeline was built. An attacker who reaches any one of those copies, months or years later, enrolls a machine of their own as a legitimate node and starts from inside the mesh rather than outside it.
+
+        Non-expiring keys are also the ones least likely to be noticed. Expired keys drop out of the active list on their own, so the list an administrator reviews fills steadily with exactly the credentials that never age out, and nothing draws attention to a key whose expiry is never. The credential outlives the pipeline it was created for, the team that owned it, and often the last person who could say what it was for.
+
+        Rotation discipline follows from the expiry date. A finite lifetime forces someone to reissue the key on a schedule, and that recurring moment is when unused automation gets discovered and retired. Without it, nobody ever has a reason to look.
+
+        Long-lived automation is the usual justification for a key that never expires, and the better answer is an OAuth client that mints short-lived keys on demand, or ephemeral nodes that clean themselves up when the job ends. Pair this with the companion check in this policy that rejects reusable keys, since expiry bounds how long a leaked key works and reusability bounds how many machines it can enroll in that time.
+      audit: |
+        ### Audit via Admin Console
+
+        1. Sign in to the [Tailscale admin console](https://login.tailscale.com/admin).
+        2. Open the **Keys** tab and review the **Auth keys** section.
+        3. For each key whose **Revoked** column is empty, confirm the **Expires** column shows a future date.
+
+        A passing tailnet shows a finite expiration on every active key. A failing tailnet shows at least one active key with **Expires: never**.
+
+        ### Audit via API
+
+        1. List active auth keys via the Tailscale API:
+
+        ```bash
+        curl -s -u "$TAILSCALE_API_KEY:" \
+          "https://api.tailscale.com/api/v2/tailnet/<tailnet>/keys?all=true"
+        ```
+
+        2. Then retrieve each individual key:
+
+        ```bash
+        curl -s -u "$TAILSCALE_API_KEY:" \
+          "https://api.tailscale.com/api/v2/tailnet/<tailnet>/keys/<key-id>"
+        ```
+
+        A passing key has `revoked` set or `expires` set to a future RFC 3339 timestamp. A failing key has `revoked` empty and `expires` equal to the zero value (`"0001-01-01T00:00:00Z"`).
+      remediation:
+        - id: console
+          desc: |
+            To replace a non-expiring pre-auth key from the admin console:
+
+            1. Sign in to the [Tailscale admin console](https://login.tailscale.com/admin) and open **Settings** > **Keys**.
+            2. Generate a replacement key with an explicit expiration. The **Expires** picker offers fixed windows up to 90 days; pick the shortest that satisfies the automation that consumes it.
+            3. Match the **Reusable**, **Ephemeral**, and **Pre-approved** options to the key being replaced so enrolled devices keep the same lifecycle behavior.
+            4. Update every consumer of the old key to use the new value.
+            5. Revoke the old non-expiring key on the same page.
+        - id: cli
+          desc: |
+            To replace a non-expiring pre-auth key via the Tailscale API, create a key with an explicit expiration and the same capability flags as the key it replaces. Devices enrolled with an ephemeral key are removed automatically when they go offline, so set `ephemeral` to `true` only when the old key behaved that way:
+
+            ```bash
+            # Create a replacement key with an explicit 90-day expiration in seconds
+            curl -s -u "$TAILSCALE_API_KEY:" \
+              -H "Content-Type: application/json" \
+              -X POST "https://api.tailscale.com/api/v2/tailnet/<tailnet>/keys" \
+              --data '{
+                "capabilities": {
+                  "devices": { "create": { "reusable": false, "ephemeral": false, "preauthorized": true, "tags": ["tag:ci"] } }
+                },
+                "expirySeconds": 7776000
+              }'
+
+            # Update consumers, then revoke the old key
+            curl -s -u "$TAILSCALE_API_KEY:" \
+              -X DELETE "https://api.tailscale.com/api/v2/tailnet/<tailnet>/keys/<old-key-id>"
+            ```
+        - id: terraform
+          desc: |
+            To ensure a pre-auth key has a finite expiration in Terraform, leave `expiry` at its default of 7776000 seconds, which is 90 days, or set it to an explicit positive integer on `tailscale_tailnet_key`. Setting `expiry = 0` disables expiry and is the failure case. Set `ephemeral` to match how the enrolled devices should behave; ephemeral devices are removed automatically when they go offline:
+
+            ```hcl
+            resource "tailscale_tailnet_key" "ci" {
+              reusable      = false
+              ephemeral     = true
+              preauthorized = true
+              expiry        = 7776000
+              description   = "CI bootstrap"
+              tags          = ["tag:ci"]
+            }
+            ```
+    refs:
+      - url: https://tailscale.com/docs/features/access-control/auth-keys
+        title: Tailscale auth keys
+  - uid: mondoo-tailscale-security-authkeys-have-expiration-tailscale
+    filters: asset.platform == 'tailscale'
+    mql: |
+      tailscale.authKeys.where(invalid == false && isRevoked == false).all(hasExpiration)
+  - uid: mondoo-tailscale-security-authkeys-have-expiration-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "tailscale_tailnet_key")
+    mql: |
+      terraform.resources("tailscale_tailnet_key").all(arguments["expiry"] != 0)
+  - uid: mondoo-tailscale-security-authkeys-have-expiration-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "tailscale_tailnet_key")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "tailscale_tailnet_key").all(change.after.expiry != 0)
+  - uid: mondoo-tailscale-security-authkeys-have-expiration-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "tailscale_tailnet_key")
+    mql: |
+      terraform.state.resources.where(type == "tailscale_tailnet_key").all(values.expiry != 0)
+  - uid: mondoo-tailscale-security-authkeys-not-reusable
+    title: Ensure active pre-auth keys are not marked reusable
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-10
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-5-17
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-12
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-1-9
+      compliance/vda-isa-5: vda-isa-5-4-1-1
+    variants:
+      - uid: mondoo-tailscale-security-authkeys-not-reusable-tailscale
+        tags:
+          mondoo.com/filter-title: Tailscale Tailnet
+          mondoo.com/filter-icon: tailscale
+      - uid: mondoo-tailscale-security-authkeys-not-reusable-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-tailscale-security-authkeys-not-reusable-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-tailscale-security-authkeys-not-reusable-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+          mondoo.com/filter-icon: terraform
+    docs:
+      desc: |
+        This check verifies that pre-auth keys enroll one machine each, by requiring that no active key is marked reusable.
+
+        A pre-auth key created under **Settings > Keys** in the admin console, or through the `tailscale_tailnet_key` resource, can be marked **Reusable**, which lets it enroll any number of machines until it expires or is revoked. A single-use key is consumed by the first machine that presents it. This check requires that no key which is still valid and unrevoked carries the reusable flag.
+
+        **Why this matters**
+
+        Reusability decides what a leak is worth. A single-use key that ends up in a build log or a public repository buys an attacker one node on the tailnet, and if the legitimate machine already claimed it, none at all. A reusable key in the same place buys as many nodes as the attacker cares to enroll, for as long as the key stays valid, and each one arrives as an ordinary member of the network rather than as an intrusion attempt against its edge.
+
+        The multiplication also defeats containment. Revoking a single-use key after an incident costs nothing, because it was already spent. Revoking a reusable key means first finding every legitimate pipeline that depends on it, which is why the revocation gets postponed while the exposure continues.
+
+        Shared keys erase provenance as well. When twenty machines enrolled with the same credential, the enrollment record cannot distinguish the one that was not supposed to be there, and the investigation falls back to correlating timestamps and hostnames from whatever the machines themselves report.
+
+        Reusable keys are usually reached for when many machines must join unattended. The pattern that solves the same problem safely is an OAuth client that mints a fresh single-use key per enrollment, combined with tagged, ephemeral nodes that remove themselves when the workload ends. Pair this with the companion check in this policy that requires every active key to carry a finite expiration.
+      audit: |
+        ### Audit via Admin Console
+
+        1. Sign in to the [Tailscale admin console](https://login.tailscale.com/admin) and open **Settings** > **Keys**.
+        2. For each active key (not revoked, not invalid), inspect the **Reusable** column.
+
+        A passing tailnet shows **Reusable: No** on every active key. A failing tailnet shows at least one active key marked **Reusable: Yes**.
+
+        ### Audit via API
+
+        1. Pull each key's metadata:
+
+        ```bash
+        curl -s -u "$TAILSCALE_API_KEY:" \
+          "https://api.tailscale.com/api/v2/tailnet/<tailnet>/keys/<key-id>"
+        ```
+
+        A passing key returns `capabilities.devices.create.reusable: false`. A failing key returns `capabilities.devices.create.reusable: true` while `invalid` is `false` and `revoked` is unset.
+      remediation:
+        - id: console
+          desc: |
+            To replace a reusable pre-auth key:
+
+            1. Sign in to the [Tailscale admin console](https://login.tailscale.com/admin) and open **Settings** > **Keys**.
+            2. Generate a replacement key with **Reusable** disabled, keeping the **Ephemeral** and **Pre-approved** options matched to the key being replaced. If the consuming workflow truly requires many enrollments, generate the new key per job from the CI pipeline using a short-lived API access token instead of issuing one reusable key.
+            3. Update consumers to fetch a fresh single-use key per enrollment, then revoke the reusable key on the same page.
+        - id: cli
+          desc: |
+            To create a single-use pre-auth key and retire the reusable one via the Tailscale API. Devices enrolled with an ephemeral key are removed automatically when they go offline, so set `ephemeral` to `true` only for short-lived workloads such as CI runners:
+
+            ```bash
+            curl -s -u "$TAILSCALE_API_KEY:" \
+              -H "Content-Type: application/json" \
+              -X POST "https://api.tailscale.com/api/v2/tailnet/<tailnet>/keys" \
+              --data '{
+                "capabilities": {
+                  "devices": { "create": { "reusable": false, "ephemeral": false, "preauthorized": true, "tags": ["tag:ci"] } }
+                },
+                "expirySeconds": 86400
+              }'
+
+            curl -s -u "$TAILSCALE_API_KEY:" \
+              -X DELETE "https://api.tailscale.com/api/v2/tailnet/<tailnet>/keys/<old-reusable-key-id>"
+            ```
+        - id: terraform
+          desc: |
+            To declare single-use pre-auth keys in Terraform, leave `reusable` at its default of `false` or set it explicitly on `tailscale_tailnet_key`. The failure case is `reusable = true`. Set `ephemeral` to `true` only for short-lived workloads whose devices should be removed automatically when offline:
+
+            ```hcl
+            resource "tailscale_tailnet_key" "ci_job" {
+              reusable      = false
+              ephemeral     = true
+              preauthorized = true
+              expiry        = 86400
+              tags          = ["tag:ci"]
+            }
+            ```
+    refs:
+      - url: https://tailscale.com/docs/features/access-control/auth-keys
+        title: Tailscale auth keys
+  - uid: mondoo-tailscale-security-authkeys-not-reusable-tailscale
+    filters: asset.platform == 'tailscale'
+    mql: |
+      tailscale.authKeys.where(invalid == false && isRevoked == false).none(reusable)
+  - uid: mondoo-tailscale-security-authkeys-not-reusable-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "tailscale_tailnet_key")
+    mql: |
+      terraform.resources("tailscale_tailnet_key").all(arguments["reusable"] != true)
+  - uid: mondoo-tailscale-security-authkeys-not-reusable-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "tailscale_tailnet_key")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "tailscale_tailnet_key").all(change.after.reusable != true)
+  - uid: mondoo-tailscale-security-authkeys-not-reusable-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "tailscale_tailnet_key")
+    mql: |
+      terraform.state.resources.where(type == "tailscale_tailnet_key").all(values.reusable != true)
+  # No Terraform variants: this is an org-posture existence check (the tailnet has at least
+  # one logstream of type "configuration"). A per-module variant gated on
+  # tailscale_logstream_configuration being present would vacuously assert its own trigger
+  # and would false-positive on modules that legitimately manage logstreams in a separate
+  # root module. Same rationale as the GCP scc-notification-configs and VPC-SC existence
+  # checks. The terraform remediation below still shows how to declare the resource.
+  - uid: mondoo-tailscale-security-configuration-logstream-configured
+    title: Ensure the tailnet exports the configuration audit log
+    impact: 80
+    filters: asset.platform == 'tailscale'
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-log-04
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-b-audit-controls
+      compliance/iso-27001-2022: iso-27001-2022-a-8-15
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-de-cm-1
+      compliance/nist-csf-2: nist-csf-2-de-cm-09
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-au-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-3-1
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a09
+      compliance/pci-dss-4: pcidss-requirement-10-2-1
+      compliance/soc2-2017: soc2-control-cc7-2-1
+      compliance/vda-isa-5: vda-isa-5-5-3-1
+    mql: |
+      tailscale.logstreams.one(logType == "configuration")
+    docs:
+      desc: |
+        This check verifies that the tailnet exports its administrative audit trail off the platform, by requiring a configured log stream for the configuration log type.
+
+        Tailscale records administrative activity in the configuration audit log: role changes, device and user approvals, ACL policy edits, auth key creation and revocation, and tailnet lock changes. Log streaming is set up on the **Logs** page of the admin console and delivers those events continuously to a destination such as a SIEM or an object store. This check requires that a stream for the configuration log exists.
+
+        **Why this matters**
+
+        Without an export, the record of who changed the tailnet lives only in the system whose administrators are the people the record is about. An attacker who reaches an Owner account can widen the ACL policy, issue a key, and enroll a node, and the evidence of all three stays inside a console they control, under a retention period they did not choose. Shipping audit events elsewhere is what makes the copy survive both the incident and the account that caused it.
+
+        Detection is the second reason, and it needs the events to sit next to other data. A key created minutes after an unfamiliar sign-in, an ACL edit immediately following a role change, a burst of device approvals outside working hours: each is unremarkable alone and obvious in sequence, and the correlation only happens where identity, endpoint, and cloud audit data already live. That is the SIEM, not the Tailscale console.
+
+        Incident reconstruction depends on the same export. Answering how a rogue node got onto the tailnet, when the policy stopped enforcing what people believed it enforced, and which credential was used requires a timeline reaching further back than in-product history, and reaching it from a system the responder trusts.
+
+        A stream that exists but points at a destination nobody watches provides evidence after the fact and no detection before it, so pair this with alerting on the events that matter most: ACL changes, privileged role grants, and auth key creation. Note also that network flow logs are streamed separately, so a tailnet already sending those still needs the configuration stream enabled.
+      audit: |
+        ### Audit via Admin Console
+
+        1. Sign in to the [Tailscale admin console](https://login.tailscale.com/admin).
+        2. Open the [Logs page](https://login.tailscale.com/admin/logs).
+        3. Under **Configuration audit logs**, confirm streaming is enabled with a destination such as Splunk, Elastic, Panther, Cribl, Datadog, Axiom, or S3.
+
+        A passing tailnet shows an enabled configuration logstream with a destination URL or S3 bucket. A failing tailnet shows the section as **Not configured**.
+
+        ### Audit via API
+
+        1. Query the configuration logstream endpoint:
+
+        ```bash
+        curl -s -u "$TAILSCALE_API_KEY:" \
+          "https://api.tailscale.com/api/v2/tailnet/<tailnet>/logging/configuration/stream"
+        ```
+
+        A passing tailnet returns a JSON body describing the destination. A failing tailnet returns HTTP 404 (or an empty object) indicating no logstream is configured for `configuration`.
+      remediation:
+        - id: console
+          desc: |
+            To configure the configuration audit log export from the admin console:
+
+            1. Sign in to the [Tailscale admin console](https://login.tailscale.com/admin) and open the [Logs page](https://login.tailscale.com/admin/logs).
+            2. Under **Configuration audit logs**, start streaming and choose a destination such as Splunk, Elastic, Panther, Cribl, Datadog, Axiom, or S3.
+            3. Provide the destination endpoint plus the auth credential the destination requires, such as a token, basic auth, or an IAM access key or assumed role for S3.
+            4. Save and confirm the test event lands in the receiver.
+        - id: cli
+          desc: |
+            To configure the configuration audit log export via the Tailscale API. The exact body depends on the destination; the example below configures an S3 bucket using an assumed role:
+
+            ```bash
+            curl -s -u "$TAILSCALE_API_KEY:" \
+              -H "Content-Type: application/json" \
+              -X PUT "https://api.tailscale.com/api/v2/tailnet/<tailnet>/logging/configuration/stream" \
+              --data '{
+                "destinationType": "s3",
+                "s3Bucket": "<bucket>",
+                "s3Region": "<region>",
+                "s3KeyPrefix": "tailscale-config/",
+                "s3AuthenticationType": "rolearn",
+                "s3RoleArn": "arn:aws:iam::<account>:role/<tailscale-export-role>",
+                "s3ExternalId": "<external-id>"
+              }'
+            ```
+
+            Verify the configuration with `GET .../logging/configuration/stream` and confirm new events appear in the destination.
+        - id: terraform
+          desc: |
+            To declare the configuration audit log export in Terraform, use the `tailscale_logstream_configuration` resource with `log_type = "configuration"`. The example below sends to S3 using an assumed role; the resource also supports `splunk`, `elastic`, `panther`, `cribl`, `datadog`, and `axiom` destinations:
+
+            ```hcl
+            resource "tailscale_logstream_configuration" "config_audit" {
+              log_type               = "configuration"
+              destination_type       = "s3"
+              s3_bucket              = "tailnet-audit-logs"
+              s3_region              = "us-east-1"
+              s3_key_prefix          = "tailscale-config/"
+              s3_authentication_type = "rolearn"
+              s3_role_arn            = "arn:aws:iam::123456789012:role/tailscale-export"
+              s3_external_id         = var.tailscale_external_id
+            }
+            ```
+    refs:
+      - url: https://tailscale.com/docs/features/logging/log-streaming
+        title: Tailscale log streaming
+      - url: https://tailscale.com/docs/reference/logging-streaming-events
+        title: Logging, streaming, and events
+  - uid: mondoo-tailscale-security-webhooks-use-https
+    title: Ensure tailnet webhook endpoints use HTTPS
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-2-ii-transmission-security-encryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-4-2-1
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    variants:
+      - uid: mondoo-tailscale-security-webhooks-use-https-tailscale
+        tags:
+          mondoo.com/filter-title: Tailscale Tailnet
+          mondoo.com/filter-icon: tailscale
+      - uid: mondoo-tailscale-security-webhooks-use-https-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-tailscale-security-webhooks-use-https-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+          mondoo.com/filter-icon: terraform
+      - uid: mondoo-tailscale-security-webhooks-use-https-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+          mondoo.com/filter-icon: terraform
+    docs:
+      desc: |
+        This check verifies that tailnet event notifications are delivered over an encrypted channel, by requiring every webhook endpoint URL to use the `https://` scheme.
+
+        Webhooks are configured under **Settings > Webhooks** in the admin console, or through the `tailscale_webhook` resource, and Tailscale posts tailnet events to them: device approval requests, user role changes, ACL policy edits, key expiry notices, and node enrollment. This check requires that every endpoint URL begins with `https://`.
+
+        **Why this matters**
+
+        A webhook body is a live feed of who is joining the network, which machines exist, and how the tailnet's access rules are changing. Delivered over plain `http://`, every hop between Tailscale and the receiver can read it, which hands an attacker on the path a continuously updated inventory of user email addresses, device identifiers, operating systems, and administrative activity. That is reconnaissance material of a quality that normally requires an intrusion to obtain, gathered passively instead.
+
+        Signing does not close the gap. Tailscale signs webhook payloads so a receiver can confirm they came from Tailscale, and that authentication is worth having, but a signature does not conceal the body. Confidentiality on the wire comes from the transport, and only `https://` provides it.
+
+        The plaintext channel is an opening for interference as well. An attacker positioned on the path can drop the notification that would have alerted an administrator to an unexpected device approval, buying time on an enrollment they performed themselves.
+
+        An endpoint on an internal network is not an exception worth making. The receiver is usually an internal automation service, and internal networks are exactly where an attacker who already holds one host does their listening. Point every receiver at an `https://` URL and verify the payload signature at the far end, so the events are both private and attributable.
+      audit: |
+        ### Audit via Admin Console
+
+        1. Sign in to the [Tailscale admin console](https://login.tailscale.com/admin).
+        2. Open **Settings** > **Webhooks** and review the **Endpoint URL** column for each subscription.
+
+        A passing tailnet shows `https://` for every endpoint. A failing tailnet shows at least one endpoint with `http://`.
+
+        ### Audit via API
+
+        1. List the webhooks:
+
+        ```bash
+        curl -s -u "$TAILSCALE_API_KEY:" \
+          "https://api.tailscale.com/api/v2/tailnet/<tailnet>/webhooks"
+        ```
+
+        A passing tailnet returns every entry with `endpointUrl` starting with `https://`. A failing tailnet returns at least one entry whose `endpointUrl` starts with `http://`.
+      remediation:
+        - id: console
+          desc: |
+            To switch a plaintext webhook to HTTPS from the admin console:
+
+            1. Provision the receiver behind an HTTPS endpoint; if it lives behind an internal service, front it with a reverse proxy that terminates TLS using a certificate from a publicly trusted CA.
+            2. Sign in to the [Tailscale admin console](https://login.tailscale.com/admin) and open **Settings** > **Webhooks**.
+            3. Create a new webhook with the `https://` endpoint URL and the same event subscriptions as the old one. The endpoint URL of an existing webhook cannot be edited, so replacing the webhook is the supported path.
+            4. Store the new webhook signing secret in the receiver and confirm a test event is accepted.
+            5. Delete the old plaintext webhook.
+        - id: cli
+          desc: |
+            To replace a plaintext webhook via the Tailscale API: a webhook's endpoint URL cannot be changed after creation, so create a replacement webhook that posts to the HTTPS endpoint, then delete the plaintext one.
+
+            ```bash
+            # Look up the plaintext webhook's id and subscriptions
+            curl -s -u "$TAILSCALE_API_KEY:" \
+              "https://api.tailscale.com/api/v2/tailnet/<tailnet>/webhooks"
+
+            # Create the HTTPS replacement with the same subscriptions; the
+            # response contains the new signing secret
+            curl -s -u "$TAILSCALE_API_KEY:" \
+              -H "Content-Type: application/json" \
+              -X POST "https://api.tailscale.com/api/v2/tailnet/<tailnet>/webhooks" \
+              --data '{
+                "endpointUrl": "https://<receiver-host>/<path>",
+                "subscriptions": ["nodeApproved", "nodeNeedsApproval"]
+              }'
+
+            # Store the secret in the receiver and verify delivery, then
+            # delete the old plaintext webhook
+            curl -s -u "$TAILSCALE_API_KEY:" \
+              -X DELETE "https://api.tailscale.com/api/v2/webhooks/<old-endpoint-id>"
+            ```
+        - id: terraform
+          desc: |
+            To require HTTPS webhook endpoints in Terraform, set `endpoint_url` to an `https://` URL on the `tailscale_webhook` resource. Changing the URL forces replacement of the webhook and issues a new signing secret, which must be updated in the receiver:
+
+            ```hcl
+            resource "tailscale_webhook" "approvals" {
+              endpoint_url  = "https://receiver.example.com/tailscale"
+              subscriptions = ["nodeApproved", "nodeNeedsApproval"]
+            }
+            ```
+    refs:
+      - url: https://tailscale.com/docs/features/webhooks
+        title: Tailscale webhooks
+  - uid: mondoo-tailscale-security-webhooks-use-https-tailscale
+    filters: asset.platform == 'tailscale'
+    mql: |
+      tailscale.webhooks.all(endpointUrl == /^https:\/\//)
+  - uid: mondoo-tailscale-security-webhooks-use-https-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "tailscale_webhook")
+    mql: |
+      terraform.resources("tailscale_webhook").all(arguments["endpoint_url"] == /^https:\/\//)
+  - uid: mondoo-tailscale-security-webhooks-use-https-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "tailscale_webhook")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "tailscale_webhook").all(change.after.endpoint_url == /^https:\/\//)
+  - uid: mondoo-tailscale-security-webhooks-use-https-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "tailscale_webhook")
+    mql: |
+      terraform.state.resources.where(type == "tailscale_webhook").all(values.endpoint_url == /^https:\/\//)

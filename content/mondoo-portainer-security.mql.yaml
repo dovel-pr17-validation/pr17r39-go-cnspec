@@ -1,0 +1,1681 @@
+# Copyright Mondoo, Inc. 2024, 2026
+# SPDX-License-Identifier: BUSL-1.1
+policies:
+  - summary: Secure Portainer authentication, RBAC, user privileges, Edge trust, and connection settings
+    uid: mondoo-portainer-security
+    name: Mondoo Portainer Security
+    version: 1.0.2
+    license: BUSL-1.1
+    tags:
+      mondoo.com/category: security
+      mondoo.com/platform: portainer,cloud
+      mondoo.com/icon: portainer
+    require:
+      - provider: portainer
+      - provider: terraform
+    authors:
+      - name: Mondoo, Inc.
+        email: hello@mondoo.com
+    docs:
+      desc: |
+        The Mondoo Portainer Security policy hardens a Portainer instance as a container-management control plane — the security posture that the container runtime itself cannot see. Portainer governs *who* may deploy *what* across the Docker hosts, Swarm and Kubernetes clusters, and Edge agents it manages, so a permissive control-plane setting is a privilege-escalation path that no in-container scan will ever surface.
+
+        This policy provides security checks across key Portainer areas:
+
+        - Regular-user container privileges (privileged mode, bind mounts, device mapping, host namespaces, capabilities, volume browsing)
+        - Authentication hardening (external identity providers, password length, session expiry)
+        - Role-based access control and credential lifecycle
+        - Edge agent trust and identity enforcement
+        - Kubernetes web-console hardening
+        - Connection security for managed environments
+
+        Each check runs against a live Portainer instance and, where the official [Portainer Terraform provider](https://registry.terraform.io/providers/portainer/portainer/latest) declares the underlying resource, against Terraform HCL, plan, and state assets.
+
+        Have suggestions for new checks in this policy? Visit our [cnspec repository](https://github.com/mondoohq/cnspec).
+    groups:
+      - title: Container Privilege Controls
+        checks:
+          - uid: mondoo-portainer-security-settings-no-privileged-containers-for-regular-users
+          - uid: mondoo-portainer-security-settings-no-bind-mounts-for-regular-users
+          - uid: mondoo-portainer-security-settings-no-device-mapping-for-regular-users
+          - uid: mondoo-portainer-security-settings-no-host-namespace-for-regular-users
+          - uid: mondoo-portainer-security-settings-no-container-capabilities-for-regular-users
+          - uid: mondoo-portainer-security-settings-no-volume-browser-for-regular-users
+      - title: Authentication
+        checks:
+          - uid: mondoo-portainer-security-settings-external-authentication
+          - uid: mondoo-portainer-security-settings-minimum-password-length
+          - uid: mondoo-portainer-security-settings-session-timeout-finite
+      - title: Access Control
+        checks:
+          - uid: mondoo-portainer-security-users-limit-administrators
+          - uid: mondoo-portainer-security-users-no-stale-api-tokens
+      - title: Edge Security
+        checks:
+          - uid: mondoo-portainer-security-settings-edge-no-trust-on-first-connect
+          - uid: mondoo-portainer-security-settings-edge-enforce-edge-id
+      - title: Kubernetes Hardening
+        checks:
+          - uid: mondoo-portainer-security-settings-disable-kube-shell
+      - title: Connection Security
+        checks:
+          - uid: mondoo-portainer-security-environments-agent-tls-enabled
+    scoring_system: average
+queries:
+  # ----------------------------------------------------------------------------
+  # Container Privilege Controls
+  # ----------------------------------------------------------------------------
+  - uid: mondoo-portainer-security-settings-no-privileged-containers-for-regular-users
+    title: Ensure regular users cannot deploy privileged containers
+    impact: 90
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a3
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-05
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-2
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-1
+      compliance/soc2-2017: soc2-control-cc6-3-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    variants:
+      - uid: mondoo-portainer-security-settings-no-privileged-containers-for-regular-users-portainer
+        tags:
+          mondoo.com/filter-title: Portainer
+      - uid: mondoo-portainer-security-settings-no-privileged-containers-for-regular-users-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+      - uid: mondoo-portainer-security-settings-no-privileged-containers-for-regular-users-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+      - uid: mondoo-portainer-security-settings-no-privileged-containers-for-regular-users-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+    docs:
+      desc: |
+        This check verifies that users who are not administrators cannot start containers in privileged mode.
+
+        Privileged mode hands a container the full Linux capability set, unrestricted access to every host device, and an unconfined seccomp and AppArmor profile, which together remove the kernel isolation that separates a workload from the machine it runs on. Portainer calls the restriction **Hide privileged mode for non-administrators**, in the **Docker security settings** on an environment's **Setup** page under **Host** or **Swarm**, and this check requires it to be in force on every managed environment as well as in the instance defaults. In Terraform it is `allow_privileged_mode` inside the `security_settings` block of a `portainer_endpoint_settings` resource, which must not be `true`.
+
+        **Why this matters**
+
+        An attacker who phishes any standard Portainer account does not need a container escape. They deploy a container with privileged mode set and a mount of the host root, then read `/etc/shadow`, the kubelet kubeconfig, and whatever cloud credentials the node holds, and write an SSH key into `root/.ssh/authorized_keys` or a job into `/etc/cron.d`. The account is not a container user at that point, it is root on the node.
+
+        From root on the node the rest follows without further exploitation. Every other container on the host is readable, including workloads the account was never granted access to, and the container runtime socket lets the attacker start, stop, and rewrite them. If the node is a Swarm manager or a Kubernetes control plane member, the cluster's own credentials are sitting on the local disk.
+
+        Privileged mode also erases the value of the other privilege controls. Capabilities, device mapping, and host namespaces are each subsets of what it grants, so leaving this one open makes the rest of them decorative.
+
+        Some workloads genuinely require it, such as storage drivers, in-cluster image builders, and container runtimes running inside containers. Deploy those as an administrator, or dedicate a single environment to them, rather than relaxing the restriction for standard users across the whole instance.
+      audit: |
+        ### Audit via Portainer UI
+
+        1. Sign in to Portainer as an administrator and open **Settings**.
+        2. Under the container-security options, confirm **Allow privileged mode for regular users** is disabled.
+        3. Open each environment's **Settings** and confirm no per-environment override re-enables privileged mode.
+
+        A passing result shows privileged mode disabled instance-wide and on every environment; a failing result shows it enabled in either place.
+
+        ### Audit via API
+
+        ```bash
+        curl -s -H "x-api-key: $PORTAINER_ACCESS_TOKEN" \
+          https://portainer.example.com/api/settings
+        ```
+
+        A passing response has no permissive `allowPrivilegedModeForRegularUsers` flag; query `/api/endpoints` and confirm no endpoint's `SecuritySettings` re-enables it.
+      remediation:
+        - id: console
+          desc: |
+            To disable privileged mode for regular users in the Portainer UI:
+
+            1. Sign in as an administrator and open **Settings**.
+            2. Disable **Allow privileged mode for regular users**.
+            3. Open each environment's **Settings** and disable any per-environment override that allows privileged mode.
+            4. Save the changes.
+        - id: terraform
+          desc: |
+            To disable privileged mode on a managed environment with the Portainer Terraform provider:
+
+            ```hcl
+            resource "portainer_endpoint_settings" "example" {
+              endpoint_id = portainer_environment.example.id
+
+              security_settings {
+                allow_privileged_mode = false
+              }
+            }
+            ```
+    refs:
+      - url: https://docs.portainer.io/2.39-lts/advanced/access-control
+        title: Access control
+  - uid: mondoo-portainer-security-settings-no-privileged-containers-for-regular-users-portainer
+    filters: asset.platform == "portainer-server"
+    mql: |
+      portainer.settings.allowPrivilegedModeForRegularUsers == false
+      portainer.environments.all(securitySettings['allowPrivilegedModeForRegularUsers'] != true)
+  - uid: mondoo-portainer-security-settings-no-privileged-containers-for-regular-users-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "portainer_endpoint_settings")
+    mql: |
+      terraform.resources("portainer_endpoint_settings").all(
+        blocks.where(type == "security_settings").all(arguments.allow_privileged_mode != true)
+      )
+  - uid: mondoo-portainer-security-settings-no-privileged-containers-for-regular-users-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "portainer_endpoint_settings")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "portainer_endpoint_settings").all(
+        change.after["security_settings"] == empty ||
+        change.after["security_settings"].all(_["allow_privileged_mode"] != true)
+      )
+  - uid: mondoo-portainer-security-settings-no-privileged-containers-for-regular-users-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "portainer_endpoint_settings")
+    mql: |
+      terraform.state.resources.where(type == "portainer_endpoint_settings").all(
+        values["security_settings"] == empty ||
+        values["security_settings"].all(_["allow_privileged_mode"] != true)
+      )
+
+  - uid: mondoo-portainer-security-settings-no-bind-mounts-for-regular-users
+    title: Ensure regular users cannot bind-mount host paths
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a3
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-05
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-2
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-1
+      compliance/soc2-2017: soc2-control-cc6-3-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    variants:
+      - uid: mondoo-portainer-security-settings-no-bind-mounts-for-regular-users-portainer
+        tags:
+          mondoo.com/filter-title: Portainer
+      - uid: mondoo-portainer-security-settings-no-bind-mounts-for-regular-users-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+      - uid: mondoo-portainer-security-settings-no-bind-mounts-for-regular-users-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+      - uid: mondoo-portainer-security-settings-no-bind-mounts-for-regular-users-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+    docs:
+      desc: |
+        This check verifies that users who are not administrators cannot mount host filesystem paths into the containers they deploy.
+
+        A bind mount attaches a path from the host directly into a container, and unlike a named volume it can point anywhere the container runtime can reach. Portainer calls the restriction **Hide bind mounts for non-administrators**, in the **Docker security settings** on an environment's **Setup** page under **Host** or **Swarm**, and this check requires it to be in force on every managed environment as well as in the instance defaults. In Terraform it is `allow_bind_mounts` inside the `security_settings` block of a `portainer_endpoint_settings` resource, which must not be `true`.
+
+        **Why this matters**
+
+        Mounting the host root read-only is already a full credential harvest: `/etc/shadow` for offline cracking, `/root/.aws/credentials` and cached instance metadata, TLS private keys, the kubelet kubeconfig, and the environment files of every other container on the node. Mounting it writable turns that into code execution, because a file dropped into `/etc/cron.d` or a key appended to `root/.ssh/authorized_keys` runs as root within minutes.
+
+        The sharpest case is a single path. A container that bind-mounts `/var/run/docker.sock` speaks to the container runtime with administrator authority, so it can start a privileged container itself. Leaving bind mounts open therefore reinstates every capability the other restrictions were meant to remove, without the user ever setting a privileged flag.
+
+        Bind mounts break tenant separation quietly as well. `/var/lib/docker/volumes` holds the data of workloads the account has no access to in Portainer, and reading it leaves no trace in the owning application.
+
+        Named volumes cover ordinary persistence without exposing a host path, so most workloads lose nothing. Where a specific host directory really is required, an administrator should deploy that stack, or the capability should be relaxed on one dedicated environment rather than instance-wide.
+      audit: |
+        ### Audit via Portainer UI
+
+        1. Sign in as an administrator and open **Settings**.
+        2. Confirm **Allow bind mounts for regular users** is disabled.
+        3. Open each environment's **Settings** and confirm no override re-enables bind mounts.
+
+        A passing result shows bind mounts disabled instance-wide and on every environment.
+
+        ### Audit via API
+
+        ```bash
+        curl -s -H "x-api-key: $PORTAINER_ACCESS_TOKEN" \
+          https://portainer.example.com/api/settings
+        ```
+
+        A passing response has no permissive `allowBindMountsForRegularUsers` flag; confirm the same for each endpoint's `SecuritySettings` via `/api/endpoints`.
+      remediation:
+        - id: console
+          desc: |
+            To disable host bind mounts for regular users in the Portainer UI:
+
+            1. Sign in as an administrator and open **Settings**.
+            2. Disable **Allow bind mounts for regular users**.
+            3. Disable any per-environment override that allows bind mounts.
+            4. Save the changes.
+        - id: terraform
+          desc: |
+            To disable bind mounts on a managed environment with the Portainer Terraform provider:
+
+            ```hcl
+            resource "portainer_endpoint_settings" "example" {
+              endpoint_id = portainer_environment.example.id
+
+              security_settings {
+                allow_bind_mounts = false
+              }
+            }
+            ```
+    refs:
+      - url: https://docs.portainer.io/2.39-lts/advanced/access-control
+        title: Access control
+  - uid: mondoo-portainer-security-settings-no-bind-mounts-for-regular-users-portainer
+    filters: asset.platform == "portainer-server"
+    mql: |
+      portainer.settings.allowBindMountsForRegularUsers == false
+      portainer.environments.all(securitySettings['allowBindMountsForRegularUsers'] != true)
+  - uid: mondoo-portainer-security-settings-no-bind-mounts-for-regular-users-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "portainer_endpoint_settings")
+    mql: |
+      terraform.resources("portainer_endpoint_settings").all(
+        blocks.where(type == "security_settings").all(arguments.allow_bind_mounts != true)
+      )
+  - uid: mondoo-portainer-security-settings-no-bind-mounts-for-regular-users-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "portainer_endpoint_settings")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "portainer_endpoint_settings").all(
+        change.after["security_settings"] == empty ||
+        change.after["security_settings"].all(_["allow_bind_mounts"] != true)
+      )
+  - uid: mondoo-portainer-security-settings-no-bind-mounts-for-regular-users-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "portainer_endpoint_settings")
+    mql: |
+      terraform.state.resources.where(type == "portainer_endpoint_settings").all(
+        values["security_settings"] == empty ||
+        values["security_settings"].all(_["allow_bind_mounts"] != true)
+      )
+
+  - uid: mondoo-portainer-security-settings-no-device-mapping-for-regular-users
+    title: Ensure regular users cannot map host devices into containers
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a3
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-05
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-2
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-1
+      compliance/soc2-2017: soc2-control-cc6-3-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    variants:
+      - uid: mondoo-portainer-security-settings-no-device-mapping-for-regular-users-portainer
+        tags:
+          mondoo.com/filter-title: Portainer
+      - uid: mondoo-portainer-security-settings-no-device-mapping-for-regular-users-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+      - uid: mondoo-portainer-security-settings-no-device-mapping-for-regular-users-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+      - uid: mondoo-portainer-security-settings-no-device-mapping-for-regular-users-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+    docs:
+      desc: |
+        This check verifies that users who are not administrators cannot expose host devices to the containers they deploy.
+
+        Device mapping passes a node from the host's `/dev` tree into a container along with permission to read it, write it, and create device nodes from it. Portainer calls the restriction **Hide device mappings for non-administrators**, in the **Docker security settings** on an environment's **Setup** page under **Host** or **Swarm**, and this check requires it to be in force on every managed environment as well as in the instance defaults. In Terraform it is `allow_device_mapping` inside the `security_settings` block of a `portainer_endpoint_settings` resource, which must not be `true`.
+
+        **Why this matters**
+
+        Mapping a block device such as `/dev/sda` hands the container the raw disk that holds the host root filesystem and every other container's layers. File ownership and permissions are enforced by the filesystem driver, and reading the block device goes underneath all of it, so an attacker with a standard account dumps the partition, carves out `/etc/shadow` and any secret ever written to disk, and never mounts anything Portainer would display.
+
+        Writing to that device is worse than reading it. A crafted write into the host filesystem persists after the container is deleted, so the mapping becomes a way to install a backdoor that outlives the account being disabled.
+
+        Devices other than disks are just as useful to an attacker. Where they exist, `/dev/mem` and `/dev/kmem` are direct physical memory access, and mapping a hardware token, a TPM device node, or a serial console gives a container control of hardware the operator assumed only the host could touch.
+
+        GPU workloads, USB and serial peripherals, and some storage tooling do need device access. Deploy those as an administrator, or dedicate an environment to them, rather than relaxing the restriction for every standard user on the instance.
+      audit: |
+        ### Audit via Portainer UI
+
+        1. Sign in as an administrator and open **Settings**.
+        2. Confirm **Allow device mapping for regular users** is disabled.
+        3. Open each environment's **Settings** and confirm no override re-enables device mapping.
+
+        A passing result shows device mapping disabled instance-wide and on every environment.
+
+        ### Audit via API
+
+        ```bash
+        curl -s -H "x-api-key: $PORTAINER_ACCESS_TOKEN" \
+          https://portainer.example.com/api/settings
+        ```
+
+        A passing response has no permissive `allowDeviceMappingForRegularUsers` flag; confirm the same for each endpoint's `SecuritySettings`.
+      remediation:
+        - id: console
+          desc: |
+            To disable device mapping for regular users in the Portainer UI:
+
+            1. Sign in as an administrator and open **Settings**.
+            2. Disable **Allow device mapping for regular users**.
+            3. Disable any per-environment override that allows device mapping.
+            4. Save the changes.
+        - id: terraform
+          desc: |
+            To disable device mapping on a managed environment with the Portainer Terraform provider:
+
+            ```hcl
+            resource "portainer_endpoint_settings" "example" {
+              endpoint_id = portainer_environment.example.id
+
+              security_settings {
+                allow_device_mapping = false
+              }
+            }
+            ```
+    refs:
+      - url: https://docs.portainer.io/2.39-lts/advanced/access-control
+        title: Access control
+  - uid: mondoo-portainer-security-settings-no-device-mapping-for-regular-users-portainer
+    filters: asset.platform == "portainer-server"
+    mql: |
+      portainer.settings.allowDeviceMappingForRegularUsers == false
+      portainer.environments.all(securitySettings['allowDeviceMappingForRegularUsers'] != true)
+  - uid: mondoo-portainer-security-settings-no-device-mapping-for-regular-users-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "portainer_endpoint_settings")
+    mql: |
+      terraform.resources("portainer_endpoint_settings").all(
+        blocks.where(type == "security_settings").all(arguments.allow_device_mapping != true)
+      )
+  - uid: mondoo-portainer-security-settings-no-device-mapping-for-regular-users-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "portainer_endpoint_settings")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "portainer_endpoint_settings").all(
+        change.after["security_settings"] == empty ||
+        change.after["security_settings"].all(_["allow_device_mapping"] != true)
+      )
+  - uid: mondoo-portainer-security-settings-no-device-mapping-for-regular-users-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "portainer_endpoint_settings")
+    mql: |
+      terraform.state.resources.where(type == "portainer_endpoint_settings").all(
+        values["security_settings"] == empty ||
+        values["security_settings"].all(_["allow_device_mapping"] != true)
+      )
+
+  - uid: mondoo-portainer-security-settings-no-host-namespace-for-regular-users
+    title: Ensure regular users cannot share host namespaces
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a3
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-05
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-2
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-1
+      compliance/soc2-2017: soc2-control-cc6-3-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    variants:
+      - uid: mondoo-portainer-security-settings-no-host-namespace-for-regular-users-portainer
+        tags:
+          mondoo.com/filter-title: Portainer
+      - uid: mondoo-portainer-security-settings-no-host-namespace-for-regular-users-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+      - uid: mondoo-portainer-security-settings-no-host-namespace-for-regular-users-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+      - uid: mondoo-portainer-security-settings-no-host-namespace-for-regular-users-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+    docs:
+      desc: |
+        This check verifies that users who are not administrators cannot run their containers inside the host's own process namespace.
+
+        A container normally receives a private PID namespace, so its main process is PID 1 and it sees nothing else running on the machine. Joining the host namespace removes that boundary and drops the container into the node's process tree. Portainer calls the restriction **Hide the use of host PID 1 for non-administrators**, in the **Docker security settings** on an environment's **Setup** page under **Host** or **Swarm**, and this check requires it to be in force on every managed environment as well as in the instance defaults. In Terraform it is `allow_host_namespace` inside the `security_settings` block of a `portainer_endpoint_settings` resource, which must not be `true`.
+
+        **Why this matters**
+
+        Every process on the node becomes visible, and processes leak secrets by existing. Command lines and `/proc/<pid>/environ` routinely carry database passwords, API keys, and connection strings that were handed to unrelated workloads, and an attacker with a standard Portainer account reads them by listing a directory.
+
+        The host process tree is also a filesystem. With the host namespace joined, `/proc/1/root` resolves to the root filesystem of the init process, which is the host, so an attacker reaches host files without ever declaring a mount that an operator would notice in the container definition.
+
+        It is a prerequisite for the next step as well. Signaling and tracing other processes only become possible once they are visible, so host PID is the enabling half of attacks that finish with a capability such as `CAP_SYS_PTRACE`, injecting into a privileged host process rather than escaping from the container.
+
+        Monitoring agents, profilers, and node-level exporters do legitimately need the host process namespace. Those belong to administrators or to a dedicated environment, not to the standard-user default across the instance.
+      audit: |
+        ### Audit via Portainer UI
+
+        1. Sign in as an administrator and open **Settings**.
+        2. Confirm **Allow host namespace for regular users** is disabled.
+        3. Open each environment's **Settings** and confirm no override re-enables host namespaces.
+
+        A passing result shows host namespace sharing disabled instance-wide and on every environment.
+
+        ### Audit via API
+
+        ```bash
+        curl -s -H "x-api-key: $PORTAINER_ACCESS_TOKEN" \
+          https://portainer.example.com/api/settings
+        ```
+
+        A passing response has no permissive `allowHostNamespaceForRegularUsers` flag; confirm the same for each endpoint's `SecuritySettings`.
+      remediation:
+        - id: console
+          desc: |
+            To disable host namespace sharing for regular users in the Portainer UI:
+
+            1. Sign in as an administrator and open **Settings**.
+            2. Disable **Allow host namespace for regular users**.
+            3. Disable any per-environment override that allows host namespaces.
+            4. Save the changes.
+        - id: terraform
+          desc: |
+            To disable host namespace sharing on a managed environment with the Portainer Terraform provider:
+
+            ```hcl
+            resource "portainer_endpoint_settings" "example" {
+              endpoint_id = portainer_environment.example.id
+
+              security_settings {
+                allow_host_namespace = false
+              }
+            }
+            ```
+    refs:
+      - url: https://docs.portainer.io/2.39-lts/advanced/access-control
+        title: Access control
+  - uid: mondoo-portainer-security-settings-no-host-namespace-for-regular-users-portainer
+    filters: asset.platform == "portainer-server"
+    mql: |
+      portainer.settings.allowHostNamespaceForRegularUsers == false
+      portainer.environments.all(securitySettings['allowHostNamespaceForRegularUsers'] != true)
+  - uid: mondoo-portainer-security-settings-no-host-namespace-for-regular-users-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "portainer_endpoint_settings")
+    mql: |
+      terraform.resources("portainer_endpoint_settings").all(
+        blocks.where(type == "security_settings").all(arguments.allow_host_namespace != true)
+      )
+  - uid: mondoo-portainer-security-settings-no-host-namespace-for-regular-users-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "portainer_endpoint_settings")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "portainer_endpoint_settings").all(
+        change.after["security_settings"] == empty ||
+        change.after["security_settings"].all(_["allow_host_namespace"] != true)
+      )
+  - uid: mondoo-portainer-security-settings-no-host-namespace-for-regular-users-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "portainer_endpoint_settings")
+    mql: |
+      terraform.state.resources.where(type == "portainer_endpoint_settings").all(
+        values["security_settings"] == empty ||
+        values["security_settings"].all(_["allow_host_namespace"] != true)
+      )
+
+  - uid: mondoo-portainer-security-settings-no-container-capabilities-for-regular-users
+    title: Ensure regular users cannot add Linux capabilities to containers
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a3
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-05
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-2
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-1
+      compliance/soc2-2017: soc2-control-cc6-3-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    variants:
+      - uid: mondoo-portainer-security-settings-no-container-capabilities-for-regular-users-portainer
+        tags:
+          mondoo.com/filter-title: Portainer
+      - uid: mondoo-portainer-security-settings-no-container-capabilities-for-regular-users-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+      - uid: mondoo-portainer-security-settings-no-container-capabilities-for-regular-users-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+      - uid: mondoo-portainer-security-settings-no-container-capabilities-for-regular-users-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+    docs:
+      desc: |
+        This check verifies that users who are not administrators cannot add Linux kernel capabilities to the containers they deploy.
+
+        The container runtime starts a workload with a deliberately reduced capability set, and adding a capability puts one of the removed root privileges back. Portainer calls the restriction **Hide container capabilities for non-administrators**, in the **Docker security settings** on an environment's **Setup** page under **Host** or **Swarm**, and this check requires it to be in force on every managed environment as well as in the instance defaults. In Terraform it is `allow_container_capabilities` inside the `security_settings` block of a `portainer_endpoint_settings` resource, which must not be `true`.
+
+        **Why this matters**
+
+        Individual capabilities are not small increments. `CAP_SYS_ADMIN` permits mounting, which an attacker uses to mount the host filesystem from inside the container or to write a `release_agent` into the cgroup hierarchy so the kernel runs a chosen binary on the host. `CAP_SYS_MODULE` loads a kernel module outright, which ends any discussion of isolation. `CAP_SYS_PTRACE` reads and rewrites the memory of other processes the container can see.
+
+        Networking capabilities move the attacker onto the node's network stack. `CAP_NET_ADMIN` rewrites firewall and routing rules on the host, and `CAP_NET_RAW` allows crafting and capturing raw frames, which is enough to redirect and intercept traffic belonging to other workloads.
+
+        Adding every capability is functionally privileged mode without the device access, so leaving this open is a route around the privileged-mode restriction rather than a milder version of it.
+
+        An image that genuinely needs one capability, such as a VPN client that needs `CAP_NET_ADMIN`, should be deployed by an administrator who can confirm both the image and the request. Relaxing the restriction for everyone is not a way to satisfy one image.
+      audit: |
+        ### Audit via Portainer UI
+
+        1. Sign in as an administrator and open **Settings**.
+        2. Confirm **Allow container capabilities for regular users** is disabled.
+        3. Open each environment's **Settings** and confirm no override re-enables added capabilities.
+
+        A passing result shows added capabilities disabled instance-wide and on every environment.
+
+        ### Audit via API
+
+        ```bash
+        curl -s -H "x-api-key: $PORTAINER_ACCESS_TOKEN" \
+          https://portainer.example.com/api/settings
+        ```
+
+        A passing response has no permissive `allowContainerCapabilitiesForRegularUsers` flag; confirm the same for each endpoint's `SecuritySettings`.
+      remediation:
+        - id: console
+          desc: |
+            To disable added container capabilities for regular users in the Portainer UI:
+
+            1. Sign in as an administrator and open **Settings**.
+            2. Disable **Allow container capabilities for regular users**.
+            3. Disable any per-environment override that allows added capabilities.
+            4. Save the changes.
+        - id: terraform
+          desc: |
+            To disable added container capabilities on a managed environment with the Portainer Terraform provider:
+
+            ```hcl
+            resource "portainer_endpoint_settings" "example" {
+              endpoint_id = portainer_environment.example.id
+
+              security_settings {
+                allow_container_capabilities = false
+              }
+            }
+            ```
+    refs:
+      - url: https://docs.portainer.io/2.39-lts/advanced/access-control
+        title: Access control
+  - uid: mondoo-portainer-security-settings-no-container-capabilities-for-regular-users-portainer
+    filters: asset.platform == "portainer-server"
+    mql: |
+      portainer.settings.allowContainerCapabilitiesForRegularUsers == false
+      portainer.environments.all(securitySettings['allowContainerCapabilitiesForRegularUsers'] != true)
+  - uid: mondoo-portainer-security-settings-no-container-capabilities-for-regular-users-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "portainer_endpoint_settings")
+    mql: |
+      terraform.resources("portainer_endpoint_settings").all(
+        blocks.where(type == "security_settings").all(arguments.allow_container_capabilities != true)
+      )
+  - uid: mondoo-portainer-security-settings-no-container-capabilities-for-regular-users-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "portainer_endpoint_settings")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "portainer_endpoint_settings").all(
+        change.after["security_settings"] == empty ||
+        change.after["security_settings"].all(_["allow_container_capabilities"] != true)
+      )
+  - uid: mondoo-portainer-security-settings-no-container-capabilities-for-regular-users-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "portainer_endpoint_settings")
+    mql: |
+      terraform.state.resources.where(type == "portainer_endpoint_settings").all(
+        values["security_settings"] == empty ||
+        values["security_settings"].all(_["allow_container_capabilities"] != true)
+      )
+
+  - uid: mondoo-portainer-security-settings-no-volume-browser-for-regular-users
+    title: Ensure regular users cannot browse volume contents
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a12
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-05
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-a-1-access-control
+      compliance/iso-27001-2022: iso-27001-2022-a-8-2
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-1
+      compliance/soc2-2017: soc2-control-cc6-3-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    variants:
+      - uid: mondoo-portainer-security-settings-no-volume-browser-for-regular-users-portainer
+        tags:
+          mondoo.com/filter-title: Portainer
+      - uid: mondoo-portainer-security-settings-no-volume-browser-for-regular-users-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+      - uid: mondoo-portainer-security-settings-no-volume-browser-for-regular-users-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+      - uid: mondoo-portainer-security-settings-no-volume-browser-for-regular-users-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+    docs:
+      desc: |
+        This check verifies that users who are not administrators cannot read and download the contents of Docker volumes from the Portainer interface.
+
+        The volume browser opens a file manager over any volume on a managed environment, listing directories, downloading files, and uploading replacements, regardless of which container owns the volume or whether the user has access to that container. Portainer calls this **Enable volume management for non-administrators**, in the **Host and filesystem** section of an environment's **Setup** page under **Host** or **Swarm**, and this check requires it to be off on every managed environment as well as in the instance defaults. In Terraform it is `allow_volume_browser` inside the `security_settings` block of a `portainer_endpoint_settings` resource, which must not be `true`.
+
+        **Why this matters**
+
+        Volumes are where the data actually is. Database files, TLS private keys, application configuration holding API keys, and environment files sit in them precisely because the container filesystem is ephemeral and the volume is not. A standard account with the browser copies them out through the web interface, without deploying anything and without ever running a container the operator would notice.
+
+        The browser writes as well as reads, which turns it into code execution. Replacing a configuration file, a startup script, or a job definition inside a volume means the owning workload runs the attacker's content the next time it starts or reloads, in a workload the attacker had no permission to touch.
+
+        Both directions go through Portainer's own connection to the environment, so the application whose data is being read or rewritten observes nothing. There is no failed authentication, no unfamiliar client, and no entry in its log.
+
+        Where a team genuinely needs file-level access to data it owns, relax the restriction on an environment dedicated to that team rather than instance-wide, so the reach of the capability matches the reach of the team. Note that the toggle is only available on environments running the Portainer Agent, so an environment connected directly to a container runtime socket has nothing to loosen here.
+      audit: |
+        ### Audit via Portainer UI
+
+        1. Sign in as an administrator and open **Settings**.
+        2. Confirm **Allow volume browser for regular users** is disabled.
+        3. Open each environment's **Settings** and confirm no override re-enables the volume browser.
+
+        A passing result shows the volume browser disabled instance-wide and on every environment.
+
+        ### Audit via API
+
+        ```bash
+        curl -s -H "x-api-key: $PORTAINER_ACCESS_TOKEN" \
+          https://portainer.example.com/api/settings
+        ```
+
+        A passing response has no permissive `allowVolumeBrowserForRegularUsers` flag; confirm the same for each endpoint's `SecuritySettings`.
+      remediation:
+        - id: console
+          desc: |
+            To disable the volume browser for regular users in the Portainer UI:
+
+            1. Sign in as an administrator and open **Settings**.
+            2. Disable **Allow volume browser for regular users**.
+            3. Disable any per-environment override that allows the volume browser.
+            4. Save the changes.
+        - id: terraform
+          desc: |
+            To disable the volume browser on a managed environment with the Portainer Terraform provider:
+
+            ```hcl
+            resource "portainer_endpoint_settings" "example" {
+              endpoint_id = portainer_environment.example.id
+
+              security_settings {
+                allow_volume_browser = false
+              }
+            }
+            ```
+    refs:
+      - url: https://docs.portainer.io/2.39-lts/advanced/access-control
+        title: Access control
+  - uid: mondoo-portainer-security-settings-no-volume-browser-for-regular-users-portainer
+    filters: asset.platform == "portainer-server"
+    mql: |
+      portainer.settings.allowVolumeBrowserForRegularUsers == false
+      portainer.environments.all(securitySettings['allowVolumeBrowserForRegularUsers'] != true)
+  - uid: mondoo-portainer-security-settings-no-volume-browser-for-regular-users-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "portainer_endpoint_settings")
+    mql: |
+      terraform.resources("portainer_endpoint_settings").all(
+        blocks.where(type == "security_settings").all(arguments.allow_volume_browser != true)
+      )
+  - uid: mondoo-portainer-security-settings-no-volume-browser-for-regular-users-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "portainer_endpoint_settings")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "portainer_endpoint_settings").all(
+        change.after["security_settings"] == empty ||
+        change.after["security_settings"].all(_["allow_volume_browser"] != true)
+      )
+  - uid: mondoo-portainer-security-settings-no-volume-browser-for-regular-users-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "portainer_endpoint_settings")
+    mql: |
+      terraform.state.resources.where(type == "portainer_endpoint_settings").all(
+        values["security_settings"] == empty ||
+        values["security_settings"].all(_["allow_volume_browser"] != true)
+      )
+
+  # ----------------------------------------------------------------------------
+  # Authentication
+  # ----------------------------------------------------------------------------
+  - uid: mondoo-portainer-security-settings-external-authentication
+    title: Ensure authentication is delegated to an external identity provider
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a12
+      compliance/csa-cloud-controls-matrix-4: false
+      compliance/dora: false
+      compliance/hipaa: false
+      compliance/iso-27001-2022: false
+      compliance/nis-2: nis-2-21-2-j
+      compliance/nist-csf-1: nist-csf-1-pr-ac-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-53-rev5: false
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: false
+    variants:
+      - uid: mondoo-portainer-security-settings-external-authentication-portainer
+        tags:
+          mondoo.com/filter-title: Portainer
+      - uid: mondoo-portainer-security-settings-external-authentication-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+      - uid: mondoo-portainer-security-settings-external-authentication-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+      - uid: mondoo-portainer-security-settings-external-authentication-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+    docs:
+      desc: |
+        This check verifies that user identity is established by an external identity provider rather than by Portainer's own account database.
+
+        Portainer can authenticate users against its internal database, against LDAP or Active Directory, or against an OAuth provider. Portainer calls this **Authentication method**, under **Settings**, **Authentication**, and this check requires any option other than **Internal**. In Terraform it is `authentication_method` on a `portainer_settings` resource, where `1` selects internal authentication, `2` LDAP, and `3` OAuth.
+
+        **Why this matters**
+
+        Internal accounts exist only inside Portainer, so none of the controls the organization already runs on identity apply to them. There is no second factor available, which means a password taken by a phishing page, an infostealer on a laptop, or a credential-stuffing list is by itself enough to sign in to a console that can deploy a container on every managed node.
+
+        Deprovisioning is the failure that surfaces later. When someone leaves, the directory account is disabled and the Portainer account is not, because it is on nobody's list. The credential keeps working, and it keeps working with whatever role it had, which for an operations tool is frequently administrator.
+
+        Detection disappears in the same way. Impossible-travel alerts, risky sign-in scoring, device compliance, and the ability to revoke every session for a person at once all live in the identity provider and never observe an internal login.
+
+        Delegating authentication is not the same as adding a second factor. LDAP centralizes the account but inherits only what the directory itself enforces, so pair it with a provider that actually requires multi-factor authentication. Keeping one internal administrator as a break-glass account for when the provider is unreachable is reasonable, provided its credential is stored properly and its use raises an alert.
+      audit: |
+        ### Audit via Portainer UI
+
+        1. Sign in as an administrator and open **Settings > Authentication**.
+        2. Confirm the active authentication method is **LDAP** or **OAuth**, not **Internal**.
+
+        A passing result shows an external authentication method selected; a failing result shows internal authentication.
+
+        ### Audit via API
+
+        ```bash
+        curl -s -H "x-api-key: $PORTAINER_ACCESS_TOKEN" \
+          https://portainer.example.com/api/settings
+        ```
+
+        A passing response shows `AuthenticationMethod` of `2` (LDAP) or `3` (OAuth); a failing response shows `1` (internal).
+      remediation:
+        - id: console
+          desc: |
+            To delegate authentication to an external identity provider in the Portainer UI:
+
+            1. Sign in as an administrator and open **Settings > Authentication**.
+            2. Select **LDAP** or **OAuth** and complete the provider configuration.
+            3. Save the changes and verify that an existing account can sign in through the provider before removing internal accounts.
+        - id: terraform
+          desc: |
+            To configure an external authentication method with the Portainer Terraform provider (`2` = LDAP, `3` = OAuth):
+
+            ```hcl
+            resource "portainer_settings" "example" {
+              authentication_method = 3
+            }
+            ```
+    refs:
+      - url: https://docs.portainer.io/admin/settings/authentication
+        title: Portainer Authentication Settings
+  - uid: mondoo-portainer-security-settings-external-authentication-portainer
+    filters: asset.platform == "portainer-server"
+    mql: |
+      portainer.settings.authenticationMethod != "internal"
+  - uid: mondoo-portainer-security-settings-external-authentication-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "portainer_settings")
+    mql: |
+      terraform.resources("portainer_settings").all(arguments.authentication_method != 1)
+  - uid: mondoo-portainer-security-settings-external-authentication-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "portainer_settings")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "portainer_settings").all(change.after.authentication_method != 1)
+  - uid: mondoo-portainer-security-settings-external-authentication-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "portainer_settings")
+    mql: |
+      terraform.state.resources.where(type == "portainer_settings").all(values.authentication_method != 1)
+
+  - uid: mondoo-portainer-security-settings-minimum-password-length
+    title: Ensure internal authentication enforces a minimum password length
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-02
+      compliance/dora: false
+      compliance/hipaa: hipaa-security-ss164-308-a-5-ii-d-security-awareness-training-and-tools-password-management
+      compliance/iso-27001-2022: iso-27001-2022-a-5-17
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-7
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-3-6
+      compliance/soc2-2017: soc2-control-cc6-1-8
+      compliance/vda-isa-5: vda-isa-5-4-1-3
+    props:
+      - uid: mondooPortainerSecurityMinPasswordLength
+        title: Minimum password length enforced for internal authentication
+        mql: "12"
+    variants:
+      - uid: mondoo-portainer-security-settings-minimum-password-length-portainer
+        tags:
+          mondoo.com/filter-title: Portainer
+      - uid: mondoo-portainer-security-settings-minimum-password-length-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+      - uid: mondoo-portainer-security-settings-minimum-password-length-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+      - uid: mondoo-portainer-security-settings-minimum-password-length-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+    docs:
+      desc: |
+        This check verifies that accounts held in Portainer's own user database must use a password of at least a set minimum length.
+
+        When internal authentication is in use, length is effectively the only password rule Portainer applies: there is no complexity requirement, no history, no reuse check, and no comparison against known-breached passwords. The value is a slider under **Settings**, **Authentication**, in the **Password rules** section, described there as the minimum length for user-generated passwords. This check requires at least 12 characters by default and the threshold is adjustable through the check's property. In Terraform it is `required_password_length` inside the `internal_auth_settings` block of a `portainer_settings` resource.
+
+        **Why this matters**
+
+        A Portainer account is not an ordinary application login. It can deploy a workload onto the hosts and clusters it has access to, which on a permissively configured instance is equivalent to a shell on those nodes. That makes the sign-in page worth attacking with password spraying, where one common password is tried against every username rather than many passwords against one.
+
+        Length is what decides whether that works. Eight-character passwords drawn from ordinary human patterns fall to a wordlist on commodity hardware if the stored hashes are ever obtained, and they fall to spraying with no hashes at all. Twelve characters moves a password out of reach of the untargeted attacks that make up almost all of the volume.
+
+        It also matters that this is a floor rather than advice. Users who are told to pick something longer largely will not, and users who cannot save a shorter one have no choice in the matter.
+
+        Where an identity provider is available, moving off internal authentication entirely is a stronger control than tuning this number, because it brings multi-factor authentication and central deprovisioning with it. A Terraform configuration that never declares the value is not failed here, because there is nothing to read and the instance keeps whatever it already had.
+      audit: |
+        ### Audit via Portainer UI
+
+        1. Sign in as an administrator and open **Settings > Authentication**.
+        2. With internal authentication selected, confirm the minimum password length is set to 12 or greater.
+
+        A passing result shows a required length of at least 12; a failing result shows a smaller value.
+
+        ### Audit via API
+
+        ```bash
+        curl -s -H "x-api-key: $PORTAINER_ACCESS_TOKEN" \
+          https://portainer.example.com/api/settings
+        ```
+
+        A passing response shows `InternalAuthSettings.RequiredPasswordLength` of 12 or greater.
+      remediation:
+        - id: console
+          desc: |
+            To raise the minimum password length in the Portainer UI:
+
+            1. Sign in as an administrator and open **Settings > Authentication**.
+            2. With internal authentication selected, set the minimum password length to 12 or greater.
+            3. Save the changes.
+        - id: terraform
+          desc: |
+            To enforce a minimum password length for internally managed accounts with the Portainer Terraform provider:
+
+            ```hcl
+            resource "portainer_settings" "example" {
+              internal_auth_settings {
+                required_password_length = 12
+              }
+            }
+            ```
+    refs:
+      - url: https://docs.portainer.io/admin/settings/authentication
+        title: Portainer Authentication Settings
+  - uid: mondoo-portainer-security-settings-minimum-password-length-portainer
+    filters: asset.platform == "portainer-server"
+    props:
+      - uid: mondooPortainerSecurityMinPasswordLength
+        mql: "12"
+    mql: |
+      portainer.settings.requiredPasswordLength >= props.mondooPortainerSecurityMinPasswordLength
+  - uid: mondoo-portainer-security-settings-minimum-password-length-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "portainer_settings")
+    props:
+      - uid: mondooPortainerSecurityMinPasswordLength
+        mql: "12"
+    mql: |
+      terraform.resources("portainer_settings").all(
+        blocks.where(type == "internal_auth_settings").all(
+          arguments.required_password_length == empty || arguments.required_password_length >= props.mondooPortainerSecurityMinPasswordLength
+        )
+      )
+  - uid: mondoo-portainer-security-settings-minimum-password-length-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "portainer_settings")
+    props:
+      - uid: mondooPortainerSecurityMinPasswordLength
+        mql: "12"
+    mql: |
+      terraform.plan.resourceChanges.where(type == "portainer_settings").all(
+        change.after["internal_auth_settings"] == empty ||
+        change.after["internal_auth_settings"].all(
+          _["required_password_length"] == empty || _["required_password_length"] >= props.mondooPortainerSecurityMinPasswordLength
+        )
+      )
+  - uid: mondoo-portainer-security-settings-minimum-password-length-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "portainer_settings")
+    props:
+      - uid: mondooPortainerSecurityMinPasswordLength
+        mql: "12"
+    mql: |
+      terraform.state.resources.where(type == "portainer_settings").all(
+        values["internal_auth_settings"] == empty ||
+        values["internal_auth_settings"].all(
+          _["required_password_length"] == empty || _["required_password_length"] >= props.mondooPortainerSecurityMinPasswordLength
+        )
+      )
+
+  - uid: mondoo-portainer-security-settings-session-timeout-finite
+    title: Ensure user sessions expire after a finite period
+    impact: 50
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: false
+      compliance/dora: false
+      compliance/hipaa: hipaa-security-ss164-312-a-2-iii-access-control-automatic-logoff
+      compliance/iso-27001-2022: iso-27001-2022-a-8-5
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: false
+      compliance/nist-csf-2: false
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-12
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-11
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-2-8
+      compliance/soc2-2017: false
+      compliance/vda-isa-5: vda-isa-5-4-1-2
+    variants:
+      - uid: mondoo-portainer-security-settings-session-timeout-finite-portainer
+        tags:
+          mondoo.com/filter-title: Portainer
+      - uid: mondoo-portainer-security-settings-session-timeout-finite-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+      - uid: mondoo-portainer-security-settings-session-timeout-finite-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+      - uid: mondoo-portainer-security-settings-session-timeout-finite-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+    docs:
+      desc: |
+        This check verifies that a signed-in session eventually expires instead of staying valid indefinitely.
+
+        Portainer issues a bearer token when a user signs in, and the session lifetime decides how long that token stays acceptable. Portainer calls this **Session lifetime**, under **Settings**, **Authentication**, where it defaults to 8 hours, and a value of `0` disables expiry so the token remains usable until an administrator intervenes. This check requires anything other than `0`. In Terraform it is `user_session_timeout` on a `portainer_settings` resource, written as a duration such as `"8h"`.
+
+        **Why this matters**
+
+        The token is the whole credential. Whoever holds a copy is the user, with no password and no second factor asked for again, so the only question is how long a stolen copy keeps working. With expiry disabled the answer is until someone notices.
+
+        Copies are easier to obtain than passwords. The token sits in browser storage, where a cross-site scripting flaw in any page the browser can reach, a malicious or compromised browser extension, or an infostealer sweeping browser profiles will find it. None of those attacks touch the sign-in page, so none of them appear as a failed login.
+
+        Expiry is also what makes the rest of identity management take effect. Changing a role, disabling an account, or forcing a password reset only bites when the user has to present credentials again, and a session that never expires never does.
+
+        Choose a lifetime that matches how the instance is used rather than the longest value that avoids complaints. Automation needing a durable credential should hold an API token, which can be revoked on its own, instead of leaning on a browser session that never ends.
+      audit: |
+        ### Audit via Portainer UI
+
+        1. Sign in as an administrator and open **Settings**.
+        2. Confirm the user session timeout is set to a finite value (for example `8h`) and not `0`.
+
+        A passing result shows a finite timeout; a failing result shows `0`.
+
+        ### Audit via API
+
+        ```bash
+        curl -s -H "x-api-key: $PORTAINER_ACCESS_TOKEN" \
+          https://portainer.example.com/api/settings
+        ```
+
+        A passing response shows a `UserSessionTimeout` other than `0`.
+      remediation:
+        - id: console
+          desc: |
+            To set a finite session timeout in the Portainer UI:
+
+            1. Sign in as an administrator and open **Settings**.
+            2. Set the user session timeout to a finite value such as `8h`.
+            3. Save the changes.
+        - id: terraform
+          desc: |
+            To set a finite session timeout with the Portainer Terraform provider:
+
+            ```hcl
+            resource "portainer_settings" "example" {
+              user_session_timeout = "8h"
+            }
+            ```
+    refs:
+      - url: https://docs.portainer.io/admin/settings
+        title: Portainer Settings
+  - uid: mondoo-portainer-security-settings-session-timeout-finite-portainer
+    filters: asset.platform == "portainer-server"
+    mql: |
+      portainer.settings.userSessionTimeout != "0"
+  - uid: mondoo-portainer-security-settings-session-timeout-finite-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "portainer_settings")
+    mql: |
+      terraform.resources("portainer_settings").all(arguments.user_session_timeout != "0")
+  - uid: mondoo-portainer-security-settings-session-timeout-finite-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "portainer_settings")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "portainer_settings").all(change.after.user_session_timeout != "0")
+  - uid: mondoo-portainer-security-settings-session-timeout-finite-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "portainer_settings")
+    mql: |
+      terraform.state.resources.where(type == "portainer_settings").all(values.user_session_timeout != "0")
+
+  # ----------------------------------------------------------------------------
+  # Access Control
+  # ----------------------------------------------------------------------------
+  - uid: mondoo-portainer-security-users-limit-administrators
+    title: Ensure the number of administrator accounts is limited
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a2
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-iam-10
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-308-a-4-i-information-access-management
+      compliance/iso-27001-2022: iso-27001-2022-a-8-2
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-4
+      compliance/nist-csf-2: nist-csf-2-pr-aa-05
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ac-6
+      compliance/nist-sp-800-171: nist-sp-800-171--3-1-5
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a01
+      compliance/pci-dss-4: pcidss-requirement-7-2-2
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-4-2-1
+    props:
+      - uid: mondooPortainerSecurityMaxAdministrators
+        title: Maximum number of administrator accounts permitted on the instance
+        mql: "5"
+    variants:
+      - uid: mondoo-portainer-security-users-limit-administrators-portainer
+        tags:
+          mondoo.com/filter-title: Portainer
+      - uid: mondoo-portainer-security-users-limit-administrators-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+      - uid: mondoo-portainer-security-users-limit-administrators-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+      - uid: mondoo-portainer-security-users-limit-administrators-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+    docs:
+      desc: |
+        This check verifies that full administrative control of the instance is held by no more than a set number of accounts.
+
+        The administrator role in Portainer is not scoped: it reaches every managed environment, changes every security setting, and creates and promotes other users. The role is shown in the **Role** column of the **Users** screen and granted by the **Administrator** switch on a user's own page. This check counts the accounts holding it against a configurable maximum, five by default. In Terraform it is the `role` argument of a `portainer_user` resource, where `1` is administrator and `2` is a standard user.
+
+        **Why this matters**
+
+        Every administrator account is a complete compromise of the container control plane if it is taken, and taking one is a numbers problem. Phishing succeeds against a population rather than an individual, so ten administrators is closer to a guarantee than three.
+
+        An administrator can also switch off the controls that would otherwise contain them. The privileged-mode, bind-mount, device-mapping, and host-namespace restrictions are all administrator-editable, so a compromised administrator relaxes them and then deploys, using nothing but supported interface actions that look exactly like maintenance.
+
+        Administrator is also the role that gets handed out to unblock someone. It solves the permission problem in a minute, it is never revisited, and the count drifts upward until nobody can say why any particular person still holds it.
+
+        Most day-to-day work fits a standard user granted access to specific environments or teams, so the reduction is usually available. Where the count is genuinely driven by on-call coverage, solve it with an identity-provider group and time-bound elevation rather than by raising the threshold. Note that a Terraform configuration reveals only the users it declares, so an instance where accounts are also created by hand is fully assessed only against the running instance.
+      audit: |
+        ### Audit via Portainer UI
+
+        1. Sign in as an administrator and open **Users**.
+        2. Count the accounts whose role is **Administrator**.
+
+        A passing result shows the administrator count at or below your configured maximum (default 5); a failing result shows more.
+
+        ### Audit via API
+
+        ```bash
+        curl -s -H "x-api-key: $PORTAINER_ACCESS_TOKEN" \
+          https://portainer.example.com/api/users
+        ```
+
+        A passing response has at most the configured number of users with `Role` of `1` (administrator).
+      remediation:
+        - id: console
+          desc: |
+            To reduce the number of administrator accounts in the Portainer UI:
+
+            1. Sign in as an administrator and open **Users**.
+            2. For each administrator that does not require full control, edit the account and change its role to a standard user.
+            3. Grant the standard user access to specific environments or teams as needed.
+        - id: terraform
+          desc: |
+            To define a user as a standard (non-administrator) account with the Portainer Terraform provider (`1` = administrator, `2` = standard user):
+
+            ```hcl
+            resource "portainer_user" "example" {
+              username = "operator"
+              role     = 2
+            }
+            ```
+    refs:
+      - url: https://docs.portainer.io/2.39-lts/admin/user
+        title: Portainer user management
+  - uid: mondoo-portainer-security-users-limit-administrators-portainer
+    filters: asset.platform == "portainer-server"
+    props:
+      - uid: mondooPortainerSecurityMaxAdministrators
+        mql: "5"
+    mql: |
+      portainer.users.where(role == "administrator").length <= props.mondooPortainerSecurityMaxAdministrators
+  - uid: mondoo-portainer-security-users-limit-administrators-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "portainer_user")
+    props:
+      - uid: mondooPortainerSecurityMaxAdministrators
+        mql: "5"
+    mql: |
+      terraform.resources("portainer_user").where(arguments.role == 1).length <= props.mondooPortainerSecurityMaxAdministrators
+  - uid: mondoo-portainer-security-users-limit-administrators-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "portainer_user")
+    props:
+      - uid: mondooPortainerSecurityMaxAdministrators
+        mql: "5"
+    mql: |
+      terraform.plan.resourceChanges.where(type == "portainer_user" && change.after.role == 1).length <= props.mondooPortainerSecurityMaxAdministrators
+  - uid: mondoo-portainer-security-users-limit-administrators-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "portainer_user")
+    props:
+      - uid: mondooPortainerSecurityMaxAdministrators
+        mql: "5"
+    mql: |
+      terraform.state.resources.where(type == "portainer_user" && values.role == 1).length <= props.mondooPortainerSecurityMaxAdministrators
+
+  # No Terraform variants: token issuance time is runtime credential-lifecycle state, not a declarative configuration any Terraform resource records.
+  - uid: mondoo-portainer-security-users-no-stale-api-tokens
+    title: Ensure user API tokens are not older than the maximum allowed age
+    impact: 60
+    tags:
+      compliance/bsi-sys-1-5: false
+      compliance/csa-cloud-controls-matrix-4: false
+      compliance/dora: false
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-5-17
+      compliance/nis-2: nis-2-21-2-i
+      compliance/nist-csf-1: nist-csf-1-pr-ac-1
+      compliance/nist-csf-2: nist-csf-2-pr-aa-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-5
+      compliance/nist-sp-800-171: false
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: pcidss-requirement-8-6-3
+      compliance/soc2-2017: soc2-control-cc6-1-8
+      compliance/vda-isa-5: vda-isa-5-4-1-1
+    props:
+      - uid: mondooPortainerSecurityMaxApiTokenAge
+        title: Maximum age in days for a user API token before it should be rotated
+        mql: "90"
+    filters: asset.platform == "portainer-server"
+    mql: |
+      portainer.users.all(tokenIssueAt == null || tokenIssueAt > time.now - props.mondooPortainerSecurityMaxApiTokenAge * time.day)
+    docs:
+      desc: |
+        This check verifies that user API tokens are rotated rather than left in service indefinitely.
+
+        A Portainer access token is a long-lived bearer credential sent in the `x-api-key` header, and it carries the full privileges of the user who created it with no expiry of its own. Tokens are created and revoked under **My account**, **Access tokens**, or from a user's entry on the **Users** screen. This check compares each user's token issue time against a maximum age, 90 days by default and adjustable through the check's property.
+
+        **Why this matters**
+
+        Because the token never lapses on its own, the interval between a leak and a rotation is unbounded. A token that escaped years ago is still a working key to the control plane today unless somebody happened to revoke it.
+
+        Tokens leak in ordinary ways rather than dramatic ones. They end up in CI variables printed by a debug run, in an environment file committed by accident, in shell history, in a terminal recording attached to a support ticket, and baked into container images. Rotation is what makes those copies worthless without anyone having to discover them first.
+
+        An attacker who finds one skips the sign-in entirely. The identity provider, the multi-factor prompt, and the session lifetime all sit on the interactive path, and a token presented as a header goes nowhere near it, so every control on how humans authenticate is bypassed at once.
+
+        Treat rotation as a real reissue and revoke rather than a renewal on paper, and where the automation a token was minted for no longer exists, leave it revoked instead of replacing it. A user who has never created a token is not failed by this check.
+      audit: |
+        ### Audit via Portainer UI
+
+        1. Sign in as an administrator and open **Users**.
+        2. For each account, review **Access tokens** and note the issue date of any active token.
+
+        A passing result shows every active token issued within the configured maximum age (default 90 days).
+
+        ### Audit via API
+
+        ```bash
+        curl -s -H "x-api-key: $PORTAINER_ACCESS_TOKEN" \
+          https://portainer.example.com/api/users
+        ```
+
+        A passing response shows each user's most recent token issue time within the configured window.
+      remediation: |
+        Rotate or revoke aged API tokens:
+
+        1. Sign in to Portainer, open **My account > Access tokens** (or the relevant user under **Users**), and review token issue dates.
+        2. Revoke any token older than your rotation window.
+        3. Issue a replacement token only where automation still needs one, and update the consuming system.
+        4. Where a token is no longer needed, leave it revoked rather than reissuing.
+    refs:
+      - url: https://docs.portainer.io/api/access
+        title: Portainer API Access Tokens
+
+  # ----------------------------------------------------------------------------
+  # Edge Security
+  # ----------------------------------------------------------------------------
+  - uid: mondoo-portainer-security-settings-edge-no-trust-on-first-connect
+    title: Ensure Edge agents are not trusted automatically on first connect
+    impact: 80
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a26
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-dcs-08
+      compliance/dora: false
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-5-16
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-1-9
+      compliance/vda-isa-5: vda-isa-5-5-2-7
+    variants:
+      - uid: mondoo-portainer-security-settings-edge-no-trust-on-first-connect-portainer
+        tags:
+          mondoo.com/filter-title: Portainer
+      - uid: mondoo-portainer-security-settings-edge-no-trust-on-first-connect-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+      - uid: mondoo-portainer-security-settings-edge-no-trust-on-first-connect-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+      - uid: mondoo-portainer-security-settings-edge-no-trust-on-first-connect-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+    docs:
+      desc: |
+        This check verifies that a new Edge agent is not adopted as a managed environment without an administrator approving it.
+
+        Edge agents connect outward to Portainer rather than being connected to, so enrollment is initiated by the agent and not by the operator. Portainer presents the control as **Enable Edge Environment Waiting Room**, under **Settings**, **Edge Compute**: with the waiting room on, a connecting agent lands in a queue an administrator has to associate, and with it off Portainer trusts the agent the moment it first appears. This check requires the waiting room to be in use, and it also passes when Edge Compute is switched off entirely. In Terraform these are `enable_edge_compute_features` and `trust_on_first_connect` on a `portainer_settings` resource.
+
+        **Why this matters**
+
+        The Edge key is a static string that travels inside the agent's deployment command, so it spreads to every place that command lives: provisioning scripts, configuration management repositories, runbooks, ticket attachments, and the shell history of everyone who has ever installed an agent. It is also recoverable from any Edge host an attacker already holds, including one that was decommissioned or resold.
+
+        With automatic trust in place, holding that string is sufficient. An attacker points an agent they control at the Portainer URL and an environment appears in the administrator's inventory, created by nobody and reviewed by nobody. That environment then behaves like any other, so an operator deploying an Edge stack to a group or to all edge environments ships the workload to the attacker's machine along with its environment variables, registry credentials, and configuration.
+
+        The rogue environment also corrupts the operator's own view of the fleet. Named to resemble a real site, it absorbs deployments intended for that site while reporting itself healthy, so the substitution is not obvious from the environment list.
+
+        Manual association is impractical for very large fleets that provision continuously. Where automatic trust has to stay on, pair it with Edge ID enforcement and per-device keys, and review new environments as they appear rather than treating the list as trusted.
+      audit: |
+        ### Audit via Portainer UI
+
+        1. Sign in as an administrator and open **Settings > Edge Compute**.
+        2. Confirm **Automatic environment creation** / trust-on-first-connect is disabled.
+
+        A passing result shows automatic trust disabled (or Edge Compute disabled entirely).
+
+        ### Audit via API
+
+        ```bash
+        curl -s -H "x-api-key: $PORTAINER_ACCESS_TOKEN" \
+          https://portainer.example.com/api/settings
+        ```
+
+        A passing response shows `TrustOnFirstConnect` of `false`, or Edge Compute features disabled.
+      remediation:
+        - id: console
+          desc: |
+            To disable trust-on-first-connect in the Portainer UI:
+
+            1. Sign in as an administrator and open **Settings > Edge Compute**.
+            2. Disable automatic trust for new Edge environments.
+            3. Save the changes and trust new Edge environments manually as they connect.
+        - id: terraform
+          desc: |
+            To disable trust-on-first-connect with the Portainer Terraform provider:
+
+            ```hcl
+            resource "portainer_settings" "example" {
+              trust_on_first_connect = false
+            }
+            ```
+    refs:
+      - url: https://docs.portainer.io/admin/settings/edge
+        title: Portainer Edge Compute Settings
+  - uid: mondoo-portainer-security-settings-edge-no-trust-on-first-connect-portainer
+    filters: asset.platform == "portainer-server"
+    mql: |
+      portainer.settings.enableEdgeComputeFeatures == false || portainer.settings.trustOnFirstConnect == false
+  - uid: mondoo-portainer-security-settings-edge-no-trust-on-first-connect-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "portainer_settings")
+    mql: |
+      terraform.resources("portainer_settings").all(arguments.enable_edge_compute_features != true || arguments.trust_on_first_connect != true)
+  - uid: mondoo-portainer-security-settings-edge-no-trust-on-first-connect-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "portainer_settings")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "portainer_settings").all(change.after.enable_edge_compute_features != true || change.after.trust_on_first_connect != true)
+  - uid: mondoo-portainer-security-settings-edge-no-trust-on-first-connect-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "portainer_settings")
+    mql: |
+      terraform.state.resources.where(type == "portainer_settings").all(values.enable_edge_compute_features != true || values.trust_on_first_connect != true)
+
+  - uid: mondoo-portainer-security-settings-edge-enforce-edge-id
+    title: Ensure Edge agents present a matching Edge ID
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a26
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-dcs-08
+      compliance/dora: false
+      compliance/hipaa: hipaa-security-ss164-312-d-person-or-entity-authentication
+      compliance/iso-27001-2022: iso-27001-2022-a-5-16
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-ac-7
+      compliance/nist-csf-2: nist-csf-2-pr-aa-03
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-ia-3
+      compliance/nist-sp-800-171: nist-sp-800-171--3-5-2
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a07
+      compliance/pci-dss-4: false
+      compliance/soc2-2017: soc2-control-cc6-1-9
+      compliance/vda-isa-5: vda-isa-5-5-2-7
+    variants:
+      - uid: mondoo-portainer-security-settings-edge-enforce-edge-id-portainer
+        tags:
+          mondoo.com/filter-title: Portainer
+      - uid: mondoo-portainer-security-settings-edge-enforce-edge-id-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+      - uid: mondoo-portainer-security-settings-edge-enforce-edge-id-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+      - uid: mondoo-portainer-security-settings-edge-enforce-edge-id-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+    docs:
+      desc: |
+        This check verifies that an Edge agent can only connect as an environment Portainer already knows about, rather than announcing an identity of its own.
+
+        Each Edge environment carries an Edge ID, and the agent presents it alongside the Edge key on every poll. Portainer calls the control **Enforce use of Portainer generated Edge ID**, under **Settings**, **Edge Compute**, and turning it on requires the Edge ID an agent supplies to already exist in Portainer's database before the connection is accepted. This check requires it to be on, and it also passes when Edge Compute is switched off entirely. In Terraform these are `enable_edge_compute_features` and `enforce_edge_id` on a `portainer_settings` resource.
+
+        **Why this matters**
+
+        Without enforcement the Edge key is the entire credential, and it is a shared one. The same string is embedded in the enrollment command handed to every device in a rollout, so recovering it from one host, one script, or one backup is enough to speak for the whole fleet.
+
+        An attacker holding it then supplies whatever Edge ID they like and Portainer accepts the agent. That is how a machine the operator has never seen ends up receiving Edge stacks and Edge jobs, including their environment variables and registry credentials, while reporting back a healthy status that keeps the console quiet.
+
+        Requiring an identifier that Portainer generated breaks the pattern. The attacker now has to know a value tied to a specific environment record rather than reusing a key that was written into a deployment script, and an agent that invents its own identity is refused instead of onboarded.
+
+        Enforcement rejects agents that were deployed with an identifier they chose themselves, so plan the change alongside re-enrollment for any such hosts. It applies to manually created environments and complements the waiting room rather than replacing it, so use both.
+      audit: |
+        ### Audit via Portainer UI
+
+        1. Sign in as an administrator and open **Settings > Edge Compute**.
+        2. Confirm **Enforce use of Portainer Edge ID** is enabled.
+
+        A passing result shows Edge ID enforcement enabled (or Edge Compute disabled entirely).
+
+        ### Audit via API
+
+        ```bash
+        curl -s -H "x-api-key: $PORTAINER_ACCESS_TOKEN" \
+          https://portainer.example.com/api/settings
+        ```
+
+        A passing response shows `EnforceEdgeID` of `true`, or Edge Compute features disabled.
+      remediation:
+        - id: console
+          desc: |
+            To enforce the Edge ID in the Portainer UI:
+
+            1. Sign in as an administrator and open **Settings > Edge Compute**.
+            2. Enable **Enforce use of Portainer Edge ID**.
+            3. Save the changes.
+        - id: terraform
+          desc: |
+            To enforce the Edge ID with the Portainer Terraform provider:
+
+            ```hcl
+            resource "portainer_settings" "example" {
+              enable_edge_compute_features = true
+              enforce_edge_id              = true
+            }
+            ```
+    refs:
+      - url: https://docs.portainer.io/admin/settings/edge
+        title: Portainer Edge Compute Settings
+  - uid: mondoo-portainer-security-settings-edge-enforce-edge-id-portainer
+    filters: asset.platform == "portainer-server"
+    mql: |
+      portainer.settings.enableEdgeComputeFeatures == false || portainer.settings.enforceEdgeId == true
+  - uid: mondoo-portainer-security-settings-edge-enforce-edge-id-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "portainer_settings")
+    mql: |
+      terraform.resources("portainer_settings").all(arguments.enable_edge_compute_features != true || arguments.enforce_edge_id == true)
+  - uid: mondoo-portainer-security-settings-edge-enforce-edge-id-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "portainer_settings")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "portainer_settings").all(change.after.enable_edge_compute_features != true || change.after.enforce_edge_id == true)
+  - uid: mondoo-portainer-security-settings-edge-enforce-edge-id-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "portainer_settings")
+    mql: |
+      terraform.state.resources.where(type == "portainer_settings").all(values.enable_edge_compute_features != true || values.enforce_edge_id == true)
+
+  # ----------------------------------------------------------------------------
+  # Kubernetes Hardening
+  # ----------------------------------------------------------------------------
+  - uid: mondoo-portainer-security-settings-disable-kube-shell
+    title: Ensure the Kubernetes web shell is disabled
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a5
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-ivs-04
+      compliance/dora: false
+      compliance/hipaa: false
+      compliance/iso-27001-2022: iso-27001-2022-a-8-18
+      compliance/nis-2: nis-2-21-2-e
+      compliance/nist-csf-1: nist-csf-1-pr-pt-3
+      compliance/nist-csf-2: nist-csf-2-pr-ps-01
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-cm-7
+      compliance/nist-sp-800-171: nist-sp-800-171--3-4-6
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a02
+      compliance/pci-dss-4: pcidss-requirement-2-2-4
+      compliance/soc2-2017: soc2-control-cc6-1-3
+      compliance/vda-isa-5: vda-isa-5-5-2-7
+    variants:
+      - uid: mondoo-portainer-security-settings-disable-kube-shell-portainer
+        tags:
+          mondoo.com/filter-title: Portainer
+      - uid: mondoo-portainer-security-settings-disable-kube-shell-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+      - uid: mondoo-portainer-security-settings-disable-kube-shell-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+      - uid: mondoo-portainer-security-settings-disable-kube-shell-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+    docs:
+      desc: |
+        This check verifies that the in-browser terminal into managed Kubernetes clusters is not available to users who are not administrators.
+
+        The kubectl shell opens a terminal inside the Portainer interface and runs commands against the selected cluster through the connection Portainer already holds to it. Portainer calls the section **KubeShell**, in the **Kubernetes settings** under **Settings**, **General**, where it can be turned off for non-administrator users. This check requires it to be disabled. In Terraform it is `disable_kube_shell` on a `portainer_settings` resource, which must be `true`.
+
+        **Why this matters**
+
+        It converts a browser session into interactive cluster access. Someone with a stolen Portainer token, or sitting at an unlocked workstation, needs no kubeconfig, no client certificate, and no network route to the API server, because the terminal is served from the Portainer instance they can already reach. Everything an operator would do with `kubectl` is available immediately, starting with reading Secrets and executing into running pods.
+
+        It is also a general-purpose path around whatever review the cluster's normal change process enforces. A change typed into the terminal is not in Git, does not pass through a pipeline, and leaves no merge history, so the cluster drifts from its declared state in ways that surface much later as an unexplained outage.
+
+        Attribution suffers in the same way. Commands arrive at the cluster through Portainer, so reconstructing who ran a destructive one means correlating Portainer's records against the cluster audit log rather than reading the audit log on its own.
+
+        Teams that rely on a shell for daily work should move to per-user kubeconfig access, which authenticates as the individual and lands in the cluster audit log under their name. Disabling the in-browser terminal takes away no capability those users cannot obtain in a more accountable form.
+      audit: |
+        ### Audit via Portainer UI
+
+        1. Sign in as an administrator and open **Settings > Kubernetes** (or the cluster setup screen).
+        2. Confirm the **kubectl shell** / web console feature is disabled.
+
+        A passing result shows the Kubernetes web shell disabled.
+
+        ### Audit via API
+
+        ```bash
+        curl -s -H "x-api-key: $PORTAINER_ACCESS_TOKEN" \
+          https://portainer.example.com/api/settings
+        ```
+
+        A passing response shows `KubectlShell` disabled (`DisableKubectlShell` / equivalent set to `true`).
+      remediation:
+        - id: console
+          desc: |
+            To disable the Kubernetes web shell in the Portainer UI:
+
+            1. Sign in as an administrator and open **Settings > Kubernetes**.
+            2. Disable the kubectl shell / web console feature.
+            3. Save the changes.
+        - id: terraform
+          desc: |
+            To disable the Kubernetes web shell with the Portainer Terraform provider:
+
+            ```hcl
+            resource "portainer_settings" "example" {
+              disable_kube_shell = true
+            }
+            ```
+    refs:
+      - url: https://docs.portainer.io/2.39-lts/admin/environments/policies/kubernetes-policies
+        title: Kubernetes Policies
+  - uid: mondoo-portainer-security-settings-disable-kube-shell-portainer
+    filters: asset.platform == "portainer-server"
+    mql: |
+      portainer.settings.disableKubeShell == true
+  - uid: mondoo-portainer-security-settings-disable-kube-shell-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "portainer_settings")
+    mql: |
+      terraform.resources("portainer_settings").all(arguments.disable_kube_shell == true)
+  - uid: mondoo-portainer-security-settings-disable-kube-shell-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "portainer_settings")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "portainer_settings").all(change.after.disable_kube_shell == true)
+  - uid: mondoo-portainer-security-settings-disable-kube-shell-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "portainer_settings")
+    mql: |
+      terraform.state.resources.where(type == "portainer_settings").all(values.disable_kube_shell == true)
+
+  # ----------------------------------------------------------------------------
+  # Connection Security
+  # ----------------------------------------------------------------------------
+  - uid: mondoo-portainer-security-environments-agent-tls-enabled
+    title: Ensure agent-based environments connect over TLS
+    impact: 70
+    tags:
+      compliance/bsi-sys-1-5: bsi-sys-1-5-a11
+      compliance/csa-cloud-controls-matrix-4: cloud-controls-matrix-4-cek-03
+      compliance/dora: dora-art-9
+      compliance/hipaa: hipaa-security-ss164-312-e-2-ii-transmission-security-encryption
+      compliance/iso-27001-2022: iso-27001-2022-a-8-24
+      compliance/nis-2: nis-2-21-2-h
+      compliance/nist-csf-1: nist-csf-1-pr-ds-2
+      compliance/nist-csf-2: nist-csf-2-pr-ds-02
+      compliance/nist-sp-800-53-rev5: nist-sp-800-53-rev5-sc-8
+      compliance/nist-sp-800-171: nist-sp-800-171--3-13-8
+      compliance/owasp-top-10-2025: owasp-top-10-2025-a04
+      compliance/pci-dss-4: pcidss-requirement-2-2-7
+      compliance/soc2-2017: soc2-control-cc6-7-2
+      compliance/vda-isa-5: vda-isa-5-5-1-2
+    variants:
+      - uid: mondoo-portainer-security-environments-agent-tls-enabled-portainer
+        tags:
+          mondoo.com/filter-title: Portainer
+      - uid: mondoo-portainer-security-environments-agent-tls-enabled-terraform-hcl
+        tags:
+          mondoo.com/filter-title: Terraform HCL
+      - uid: mondoo-portainer-security-environments-agent-tls-enabled-terraform-plan
+        tags:
+          mondoo.com/filter-title: Terraform Plan
+      - uid: mondoo-portainer-security-environments-agent-tls-enabled-terraform-state
+        tags:
+          mondoo.com/filter-title: Terraform State
+    docs:
+      desc: |
+        This check verifies that the connection from Portainer to each agent-based environment is protected by TLS.
+
+        Docker Agent and Kubernetes Agent environments are ones Portainer reaches over the network to an agent listening on the node, and TLS is what protects that channel. Portainer sets it when it registers an agent environment and exposes the **TLS** switch, alongside **Skip Certification Verification** and the certificate uploads, in the **Configuration** section of an environment's page under **Environments**. In Terraform it is `tls_enabled` on a `portainer_environment` resource whose `type` is `2` for a Docker agent or `6` for a Kubernetes agent.
+
+        **Why this matters**
+
+        That channel carries the management API for the node, so its contents are worth reading. Deployment definitions cross it with their environment variables intact, which is where database passwords and API keys live, and so do registry credentials, container logs, and the files the volume browser fetches. Without TLS all of it is plaintext to anyone on the path, which includes a compromised switch, a neighboring tenant on a shared network, and every transit provider between two sites.
+
+        Reading it is the smaller problem. The same position permits modification, and an attacker who rewrites a deployment in flight to add a mount of the host root or set privileged mode gets root on that node without ever authenticating to Portainer or to the agent.
+
+        Absent TLS there is also no way to establish that the agent is the agent. Anyone who can answer for the address, through ARP or DNS manipulation or by claiming the port after a restart, receives the deployments and their secrets and returns whatever status keeps the console quiet.
+
+        Encryption alone is a floor rather than a finished job. Portainer and the Terraform provider both default certificate verification off for agent connections, so an environment that passes this check may still be encrypting to whoever answers. Pair it with the agent's CA certificate and `tls_skip_verify` set to `false`. Environments that talk to a container runtime socket directly over `tcp://` are configured through the same fields but fall outside this check, and Edge environments use an outbound tunnel instead of this connection.
+      audit: |
+        ### Audit via Portainer UI
+
+        1. Sign in as an administrator and open **Environments**.
+        2. For each agent-based environment (Docker Agent, Kubernetes Agent), confirm the connection uses TLS.
+
+        A passing result shows every agent-based environment connecting over TLS.
+
+        ### Audit via API
+
+        ```bash
+        curl -s -H "x-api-key: $PORTAINER_ACCESS_TOKEN" \
+          https://portainer.example.com/api/endpoints
+        ```
+
+        A passing response shows TLS enabled for every endpoint whose type is an agent connection.
+      remediation:
+        - id: console
+          desc: |
+            To enable TLS for an agent-based environment in the Portainer UI:
+
+            1. Sign in as an administrator and open **Environments**.
+            2. Edit each agent-based environment and enable TLS, supplying the agent's certificates.
+            3. Save the changes and confirm the environment reconnects successfully.
+        - id: terraform
+          desc: |
+            To register an agent-based environment with TLS enabled using the Portainer Terraform provider (`type` `2` = Agent, `6` = Kubernetes via Agent):
+
+            ```hcl
+            resource "portainer_environment" "example" {
+              name                 = "production-agent"
+              environment_address  = "tcp://agent.example.com:9001"
+              type                 = 2
+              tls_enabled          = true
+            }
+            ```
+    refs:
+      - url: https://docs.portainer.io/admin/environments/add/docker/agent
+        title: Portainer Docker Agent Environments
+  - uid: mondoo-portainer-security-environments-agent-tls-enabled-portainer
+    filters: asset.platform == "portainer-server"
+    mql: |
+      portainer.environments.where(type == "agent-docker" || type == "agent-kubernetes").all(tlsEnabled == true)
+  # The Terraform variants assert `tls_enabled != false` rather than `== true`: the provider
+  # defaults `tls_enabled` to `true`, so an omitted attribute is TLS-on (secure) and must pass.
+  # `== true` would false-positive on environments relying on the secure default.
+  - uid: mondoo-portainer-security-environments-agent-tls-enabled-terraform-hcl
+    filters: asset.platform == "terraform-hcl" && terraform.resources.contains(nameLabel == "portainer_environment")
+    mql: |
+      terraform.resources("portainer_environment").where(arguments.type == 2 || arguments.type == 6).all(arguments.tls_enabled != false)
+  - uid: mondoo-portainer-security-environments-agent-tls-enabled-terraform-plan
+    filters: asset.platform == "terraform-plan" && terraform.plan.resourceChanges.contains(type == "portainer_environment")
+    mql: |
+      terraform.plan.resourceChanges.where(type == "portainer_environment").where(change.after.type == 2 || change.after.type == 6).all(change.after.tls_enabled != false)
+  - uid: mondoo-portainer-security-environments-agent-tls-enabled-terraform-state
+    filters: asset.platform == "terraform-state" && terraform.state.resources.contains(type == "portainer_environment")
+    mql: |
+      terraform.state.resources.where(type == "portainer_environment").where(values.type == 2 || values.type == 6).all(values.tls_enabled != false)
